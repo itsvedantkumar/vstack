@@ -1,0 +1,5 @@
+.context/
+*.log
+.DS_Store
+secrets.env
+.gh-token.cache

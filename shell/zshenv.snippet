@@ -1,0 +1,17 @@
+# >>> claude-parity env >>>
+# NOT in Claude Code's settings.json `env` allowlist — must be real environment vars.
+# (Putting these in settings.json is silently ignored; that is how the old
+#  DISABLE_NON_ESSENTIAL_MODEL_CALLS sat dead in the config for months.)
+# NOT SET — CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC. Verified via `claude doctor`: it gates
+# feature-flag evaluation wholesale, which Remote Control requires ("Remote Control rollout
+# could not be verified for this account"). It also overrode autoUpdatesChannel. Phone
+# dispatch is worth far more than the handful of background calls it would have saved.
+export ENABLE_PROMPT_CACHING_1H=1                   # 1h prompt cache TTL instead of 5m
+export CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=20      # default 10
+export CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1
+export CLAUDE_ENABLE_STREAM_WATCHDOG=1
+export MCP_CONNECTION_NONBLOCKING=1
+export CLAUDE_CODE_ENABLE_TASKS=true
+# Deliberately NOT set: DISABLE_GROWTHBOOK — phone dispatch is gated by server-pushed
+# flags (tengu_ccr_bridge, tengu_kairos_push_notifications); freezing them breaks it.
+# <<< claude-parity env <<<
