@@ -11,6 +11,7 @@
 # What each tier is for:
 #   core      git, jq, ripgrep, fd, gh, node, bun, uv   — the agent tooling and this installer
 #   claude    the Claude Code CLI itself
+#   conductor the Conductor Mac app, several agents in parallel (macOS only)
 #   deploy    vercel, wrangler                          — the autonomous deploy chain
 #   security  trivy, gitleaks, nmap, nuclei             — the /security command
 #
@@ -144,6 +145,31 @@ else
   else
     note "!! claude install failed — see https://claude.ai/install"; mark fail claude
   fi
+fi
+
+note ""
+note "== conductor"
+# Conductor runs several Claude Code agents in parallel, each in its own git worktree. It is a
+# Mac app, so a cask install is the only sane route and Linux skips it. Detection looks for the
+# app bundle rather than asking brew: it is commonly installed by download, and brew would
+# then report it missing and try to install it again.
+if [ "$OS" != "Darwin" ]; then
+  note "-- conductor: skipped (macOS only)"
+elif [ -d "/Applications/Conductor.app" ]; then
+  note "-- conductor: present (/Applications/Conductor.app)"; mark have conductor
+elif [ "$CHECK" = 1 ]; then
+  note "-- conductor: MISSING"; mark fail conductor
+elif [ "$DRY" = 1 ]; then
+  note "would install conductor (brew cask)"; mark ok conductor
+elif [ "$PM" = brew ]; then
+  note ">> installing conductor"
+  if brew install --cask conductor >/dev/null 2>&1 && [ -d "/Applications/Conductor.app" ]; then
+    mark ok conductor
+  else
+    note "!! conductor failed to install; download it from https://conductor.build"; mark fail conductor
+  fi
+else
+  note "!! conductor needs homebrew; download it from https://conductor.build"; mark fail conductor
 fi
 
 note ""

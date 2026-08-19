@@ -16,20 +16,30 @@ of that needs a command, and the repo ships a test that proves it still happens.
 curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
 ```
 
-That takes a machine with nothing on it to a working setup: Homebrew, the CLI tools, Claude
-Code itself, then this config.
+That takes a machine with nothing on it to a working setup: Homebrew, the CLI tools,
+Conductor, the Claude Code CLI, then this config.
 
 ## Install
 
 Three ways in, depending on how much you want.
 
-| You want | Run this | You get |
-|---|---|---|
-| Everything, new machine | `curl -fsSL .../bootstrap.sh \| bash` | tools, Claude Code, and all config |
-| Everything, tools already there | `git clone` then `./install.sh` | all config |
-| Just the skills | `claude plugin install vstack@vstack` | skills, subagents, commands, routing |
+**A machine with nothing on it.** Installs Homebrew, the CLI tools, Conductor, the Claude Code
+CLI, and then this config.
 
-For the plugin route, add the marketplace first:
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
+```
+
+**The tools are already there.** Installs the config alone.
+
+```bash
+git clone https://github.com/itsvedantkumar/vstack.git
+cd vstack
+./install.sh
+```
+
+**Only the skills.** Adds the skills, subagents, commands, and the routing hook, and touches
+nothing else on the machine.
 
 ```bash
 claude plugin marketplace add itsvedantkumar/vstack
