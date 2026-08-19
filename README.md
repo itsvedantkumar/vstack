@@ -57,7 +57,7 @@ costs seconds. Run `./setup-machine.sh --check` to audit a machine without chang
 | bundled | `npm`, `npx`, `pnpm`, `yarn`, `python3` | verified rather than installed: they arrive with node or the Xcode tools |
 | claude | Claude Code CLI | the agent itself |
 | conductor | Conductor Mac app | running several agents in parallel, macOS only |
-| plugins | claude-mem, frontend-design, typescript-lsp | memory layer and language tooling |
+| plugins | claude-mem, typescript-lsp | memory layer and language tooling |
 | deploy | `vercel`, `wrangler` | the autonomous deploy chain |
 | security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
 
