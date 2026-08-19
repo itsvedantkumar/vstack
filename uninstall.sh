@@ -2,9 +2,10 @@
 # uninstall.sh — restore ~/.claude and ~/.config/agents from an install.sh backup.
 #
 # install.sh copies every file it overwrites into
-# ~/.config/agents/backups/install-<timestamp>/ using flat filenames (/ became _, e.g.
-# `.claude_settings.json`, `skills_<name>/`, `claude.json`). Nothing restores those backups
-# automatically — this does.
+# ~/.config/agents/backups/install-<timestamp>/ — real paths under files/, plus legacy
+# top-level entries from older installs (flat `tr / _` names, `skills_<name>/`,
+# `claude.json`). Nothing restores those backups automatically — this does. It also removes
+# the ~/.config/agents/vstack-repo pointer install.sh writes.
 #
 # Usage:
 #   ./uninstall.sh --list                 show available backup timestamps, newest first
@@ -86,16 +87,30 @@ map_target() {
   esac
 }
 
+# --- enumerate restore pairs (src|target), covering both backup formats --------------------
+restore_pairs() {
+  if [ -d "$BK/files" ]; then
+    find "$BK/files" -type f | while IFS= read -r f; do
+      printf '%s|%s\n' "$f" "$HOME/${f#$BK/files/}"
+    done
+  fi
+  for e in "$BK"/*; do
+    [ -e "$e" ] || continue
+    n=$(basename "$e")
+    [ "$n" = "files" ] && continue
+    printf '%s|%s\n' "$e" "$(map_target "$n")"
+  done
+}
+
 # --- build the restore plan -----------------------------------------------------------------
 PLAN_EMPTY=1
-for e in "$BK"/*; do
-  [ -e "$e" ] || continue
-  n=$(basename "$e")
-  tgt=$(map_target "$n")
+while IFS='|' read -r src tgt; do
+  [ -n "$src" ] || continue
   [ "$tgt" = "$SECRETS" ] && continue   # never touch secrets.env, even hypothetically
-  echo "restore  $tgt  (from $n)"
+  echo "restore  $tgt  (from ${src#$BK/})"
   PLAN_EMPTY=0
-done
+done < <(restore_pairs)
+[ -f "$HOME/.config/agents/vstack-repo" ] && echo "remove   $HOME/.config/agents/vstack-repo  (install.sh pointer)"
 
 # skills this repo installs that the backup does not contain existed before install → vstack
 # added them, so an uninstall should remove them. Never touch a symlink (builtin/plugin skill).
@@ -128,19 +143,18 @@ if [ "$YES" != 1 ]; then
 fi
 
 # --- execute ---------------------------------------------------------------------------------
-for e in "$BK"/*; do
-  [ -e "$e" ] || continue
-  n=$(basename "$e")
-  tgt=$(map_target "$n")
+while IFS='|' read -r src tgt; do
+  [ -n "$src" ] || continue
   [ "$tgt" = "$SECRETS" ] && continue
   mkdir -p "$(dirname "$tgt")"
-  if [ -d "$e" ]; then
+  if [ -d "$src" ]; then
     rm -rf "$tgt"
-    cp -R "$e" "$tgt"
+    cp -R "$src" "$tgt"
   else
-    cp -p "$e" "$tgt" 2>/dev/null || cp "$e" "$tgt"
+    cp -p "$src" "$tgt" 2>/dev/null || cp "$src" "$tgt"
   fi
-done
+done < <(restore_pairs)
+rm -f "$HOME/.config/agents/vstack-repo"
 
 # install.sh chmods hooks/bin/skill-scripts 755 after copying; match that here so restored
 # files stay executable.

@@ -18,12 +18,19 @@ DEST="${1:-$PWD}"
 mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
 # settings.json: merge, don't clobber — a repo may already have project settings.
+# skillOverrides is replaced wholesale (same reason as install.sh: dead overrides for
+# removed skills must not linger), and hook events both sides define are won by vstack —
+# say so instead of doing it silently.
 if [ -f "$DEST/.claude/settings.json" ] && command -v jq >/dev/null; then
+  clobbered=$(jq -rs '((.[0].hooks // {} | keys) - ((.[0].hooks // {} | keys) - (.[1].hooks // {} | keys))) | join(", ")' \
+    "$DEST/.claude/settings.json" "$SRC/claude/settings.json")
   tmp=$(mktemp)
-  jq -s '.[0] * .[1]' "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
+  jq -s '(.[0] * .[1]) | .skillOverrides = (.[1].skillOverrides // {})' \
+    "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"
   rm -f "$tmp"
   echo "merged  .claude/settings.json"
+  [ -n "$clobbered" ] && echo "        note: vstack's hook config replaced this repo's for: $clobbered"
 else
   cp "$SRC/claude/settings.json" "$DEST/.claude/settings.json"
   echo "wrote   .claude/settings.json"

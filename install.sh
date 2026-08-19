@@ -57,7 +57,14 @@ if [ "$DRY" = 0 ]; then
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
   chmod 700 "$HOME/.config/agents/backups"
 fi
-back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOME/}" | tr / _)"; return 0; }
+# Backups preserve the real path under files/ — the old flat `tr / _` names were a lossy
+# encoding that misparsed any future filename containing an underscore on restore.
+back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] || return 0
+  rel="${1#$HOME/}"
+  mkdir -p "$BK/files/$(dirname "$rel")"
+  cp "$1" "$BK/files/$rel"
+  return 0
+}
 
 # Record where this install came from so doctor --drift and `vstack` can find the repo even
 # when it is cloned somewhere other than ~/.vstack and $VSTACK_DIR is unset.
