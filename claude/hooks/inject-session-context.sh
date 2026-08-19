@@ -17,6 +17,23 @@ synthesis on the main thread. Subagents return tight summaries, never file dumps
 edits to shared files. Skip delegation only for a truly trivial one-step ask.
 AUTONOMY: act without asking; assume + document + proceed. Still confirm irreversible
 destructive ops.
+SKILLS: these fire on the SITUATION, not on a slash command. When one matches, call the Skill
+tool and follow it — do not reconstruct its method from memory, and do not wait to be asked.
+- any prose you write (docs, README, PR body, commit msg) -> unslop; docs/RFC/README ->
+  technical-writing. Reading/writing/reviewing .ts/.tsx -> typescript-best-practices.
+- work splits into independent parts, or "in parallel"/"at once"/"try N ways" -> swarm.
+- shipping a risky change or a diff you do not trust -> blast-radius. Merging auth, payments,
+  or agent-written code with no second reviewer -> interrogate.
+- repo has no scripted proof it works -> create-verification-skill (it writes the
+  .claude/verify.sh the Stop hook runs). That gate stale -> maintain-verification-skill.
+- unattended/overnight/multi-phase work a human reviews later -> show-me-your-work.
+- you were corrected, or found a workflow worth keeping -> reflect.
+- PRINCIPLES (load the one that matches, then apply it): before claiming done ->
+  prove-it-works. Debugging or adding a try/except guard -> fix-root-causes. Same correction
+  twice -> encode-lessons-in-structure. Designing types/signatures -> type-system-discipline.
+  Validation/error handling/auth/MCP adapters -> boundary-discipline. Cron, launchd, retry
+  loops -> make-operations-idempotent. Sweeps, migrations, stacked commits ->
+  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever.
 EOF
 )
 

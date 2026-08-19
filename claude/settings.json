@@ -2,8 +2,8 @@
   "model": "claude-opus-5[1m]",
   "effortLevel": "high",
   "fastMode": true,
-  "skillListingMaxDescChars": 160,
-  "skillListingBudgetFraction": 0.0025,
+  "skillListingMaxDescChars": 200,
+  "skillListingBudgetFraction": 0.012,
   "skillOverrides": {
     "xlsx": "off",
     "docx": "off",
@@ -26,8 +26,8 @@
     "simplify": "name-only",
     "security-review": "name-only",
     "security-threat-model": "name-only",
-    "systematic-debugging": "name-only",
-    "requesting-code-review": "name-only",
+    "systematic-debugging": "off",
+    "requesting-code-review": "off",
     "frontend-design:frontend-design": "name-only",
     "claude-mem:babysit": "off",
     "claude-mem:cloud-sync": "off",
@@ -47,7 +47,8 @@
     "claude-mem:what-the": "off",
     "claude-mem:wowerpoint": "off",
     "claude-mem:mem-search": "name-only",
-    "claude-mem:smart-explore": "name-only"
+    "claude-mem:smart-explore": "name-only",
+    "verification-before-completion": "off"
   },
   "precomputeCompactionEnabled": true,
   "promptSuggestionEnabled": false,
