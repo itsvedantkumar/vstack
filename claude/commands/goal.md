@@ -18,4 +18,4 @@ Use when you have a multi-step task that needs rigorous verification.
 - Max 1 file per step
 - Never skip verification
 - Never report without evidence
-- If stuck >3 min, report and ask
+- Stuck after 3 attempts → document the blocker, continue with the next verifiable step, flag it in the final report

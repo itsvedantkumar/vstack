@@ -128,6 +128,10 @@ printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1 \
 [ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
 jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true' "$S" >/dev/null 2>&1 \
   && ok "Conductor parity keys" || bad "Conductor parity keys" "drifted"
+# A second global CLAUDE.md in $HOME shadows nothing but loads alongside ~/.claude/CLAUDE.md
+# in every session — two always-on rule files drift into contradiction. One home: the vendored
+# claude/CLAUDE.md in vstack.
+[ ! -f "$HOME/CLAUDE.md" ] && ok "single global CLAUDE.md" || bad "stray ~/CLAUDE.md" "merge into vstack claude/CLAUDE.md, then delete"
 jq -e '.skillListingMaxDescChars and .skillListingBudgetFraction and (.skillOverrides|length>0)' "$S" >/dev/null 2>&1 \
   && ok "context caps (skill listing)" || bad "context caps" "drifted"
 # claude-mem auto-updates and will silently revert this async flag.
