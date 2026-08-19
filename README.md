@@ -75,6 +75,27 @@ routing block alone. The token, delegation, and autonomy rules are one person's 
 policy, so a marketplace install does not get them. `install.sh` applies the full block,
 because there you asked for it.
 
+## Three lanes, and which one reaches where
+
+Config reaches a session by one of three routes. Most confusion about this setup is really
+confusion about which lane something is in.
+
+| Lane | Command | Lands in | Reaches |
+|---|---|---|---|
+| global | `./install.sh` | `~/.claude`, `~/.config/agents` | every local session on this machine |
+| per-repo overlay | `./overlay.sh <repo>` | committed `.claude/` + `.conductor/` in that repo | Conductor workspaces and cloud sandboxes, which have no `~/.claude` |
+| plugin marketplace | `claude plugin install vstack@vstack` | Claude Code's plugin cache | anyone, on any machine, without cloning |
+
+The overlay lane is the one people miss. A cloud sandbox clones your repo and starts from
+nothing — no home directory config of any kind. If the skills are not committed in that repo,
+that session does not have them. `bin/doctor` fails when an active repo has no overlay, and it
+finds those repos through their Conductor workspaces rather than a hardcoded list of paths.
+
+The plugin lane is deliberately the narrowest. It ships the skills, subagents, commands and the
+routing hook, and stops there. The token, delegation and autonomy rules in the other two lanes
+are one person's operating policy and have no business arriving with a skill pack a stranger
+installed.
+
 ## What you get
 
 | Component | Count | Installs to |
@@ -240,12 +261,49 @@ setup-machine.sh installs the tools a fresh machine lacks
 bootstrap.sh     clone, setup-machine, and install in one line
 ```
 
+## What this does not do
+
+**Skill dispatch is a model decision, not a branch.** Routing raises the odds; it does not
+guarantee them. `tests/auto-trigger.sh` allows three attempts per case for exactly this reason,
+and `feature-chain` lands on the first attempt only about half the time. The suite prints which
+attempt each case landed on, so erosion shows up before a case goes fully red. Treat a skill
+firing as likely, not certain.
+
+**`skillOverrides` cannot suppress a skill that comes from a plugin.** Claude Code resolves the
+listing mode before it reads the setting for plugin-supplied skills. All 17 bundled overrides
+here work; the plugin ones did not, which is why 38 of them were deleted. With `claude-mem`
+enabled that costs about 992 tokens of listing every session, and there is no setting that
+recovers it. [docs/how-skills-fire.md](docs/how-skills-fire.md) has the measurement.
+
+**The Stop-hook gate is opt-in per repo, by content hash.** A freshly cloned repo's
+`.claude/verify.sh` never runs until you run `vstack trust` there. That is deliberate — an
+executable in someone else's repo running automatically on every Stop is a handout of code
+execution — but it does mean the gate is inert until you arm it, and needs re-arming after you
+edit it.
+
+**`vstack update` re-trusts what it pulls.** It is `git pull && install.sh`, and the install
+records the new hashes without showing you a diff first. Trust covers the scripts the gate
+executes, so a swapped `install.sh` is caught between updates, but the update path itself is
+still trust-on-pull.
+
+**macOS first.** CI installs and exercises the hooks on Linux every push, so Linux works and
+stays working. But Conductor is macOS only, `setup-machine.sh` assumes Homebrew, and the
+launchd pieces have no systemd equivalent here.
+
+**The counts in this README are enforced, the prose is not.** `.claude/verify.sh` check 12
+reads every number back and fails on a mismatch. Nothing checks whether a sentence is still
+true.
+
 ## Docs
 
 - [How skills fire](docs/how-skills-fire.md), and the measurements behind the routing block
 - [Skill attribution](claude/skills/ATTRIBUTION.md), per-skill source and license
 - [MCP servers](mcp/README.md), what ships globally and how to scope one to a project
-- [The auto-trigger test](tests/README.md), how to run and extend it
+- [The auto-trigger test](tests/README.md), how to run and extend it, and how the gate proves
+  each of its own checks can fail
+- [Why these skills](docs/skill-selection.md), the fit-and-benefit audit of all 44 pstack
+  skills that decided which 18 were worth porting
+- [Changelog](CHANGELOG.md), with the measurements behind each release
 
 ## Credits
 
