@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstra
 
 | Component | Count | Installs to |
 |---|---|---|
-| Skills | 18 | `~/.claude/skills/` |
+| Skills | 29 (24 active, 5 off) | `~/.claude/skills/` |
 | Subagents | 7 | `~/.claude/agents/` |
 | Slash commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
@@ -144,6 +144,11 @@ directory, so a committed `.claude/` directory is the only config it can read. R
 
 ## Credits
 
-The 18 skills are ported from [pstack](https://github.com/cursor/plugins) and rewritten for
-Claude Code: Cursor model names mapped to Anthropic ones, `Task` calls to the `Agent` tool,
-and cloud-only parameters to local execution. See `claude/skills/LICENSE.pstack`.
+The 29 skills come from four places: 18 ported from [pstack](https://github.com/cursor/plugins),
+7 from [Superpowers](https://github.com/obra/superpowers), 2 third-party (Apache 2.0 and MIT),
+and 2 written for this setup. Per-skill sources, licenses, and the reason each disabled skill
+is disabled are in `claude/skills/ATTRIBUTION.md`.
+
+Five skills ship disabled through `skillOverrides` in `claude/settings.json`. They are kept
+rather than deleted because the originals live nowhere else, and a disabled skill costs no
+context. That file is the one place that decides what is active.

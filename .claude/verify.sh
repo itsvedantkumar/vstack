@@ -61,8 +61,17 @@ for s in claude/skills/*/SKILL.md; do
   [ -n "$name" ] || errs="$errs\n$dir: no name in frontmatter"
   [ "$name" = "$dir" ] || errs="$errs\n$dir: name ($name) does not match directory"
   [ -n "$desc" ] || errs="$errs\n$dir: no description"
-  [ "${#desc}" -le "$CAP" ] || errs="$errs\n$dir: description ${#desc} chars > cap $CAP"
   grep -q 'disable-model-invocation' "$s" && errs="$errs\n$dir: disable-model-invocation blocks auto-trigger"
+  # The length cap only bites skills whose description actually reaches the listing.
+  # skillOverrides "off" hides the skill and "name-only" drops its description, so a long
+  # description on those costs nothing and is not a defect.
+  mode=on
+  if command -v jq >/dev/null; then
+    mode=$(jq -r --arg s "$dir" '.skillOverrides[$s] // "on"' claude/settings.json 2>/dev/null || echo on)
+  fi
+  if [ "$mode" = "on" ] && [ "${#desc}" -gt "$CAP" ]; then
+    errs="$errs\n$dir: description ${#desc} chars > cap $CAP (listed, so it gets truncated)"
+  fi
 done
 [ "$n" -gt 0 ] || errs="$errs\nno skills found"
 [ -z "$errs" ] && ok "skills ($n) loadable" || bad "skills loadable" "$(printf '%b' "$errs")"
