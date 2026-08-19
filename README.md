@@ -1,6 +1,6 @@
 # vstack
 
-**A Claude Code setup where the skills fire on their own.** 25 skills, 8 agents, 15
+**A Claude Code setup where the skills fire on their own.** 25 skills, 8 agents, 14
 commands, and the session hook that routes a situation to the right skill without you typing a
 slash command.
 
@@ -81,7 +81,7 @@ because there you asked for it.
 |---|---|---|
 | Skills | 25 | `~/.claude/skills/` |
 | Subagents | 8 | `~/.claude/agents/` |
-| Commands | 15 | `~/.claude/commands/` |
+| Commands | 14 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
 | CLI wrappers | 7 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |

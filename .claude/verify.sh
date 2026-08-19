@@ -295,17 +295,102 @@ else
 fi
 
 # --- 12. documented counts match the tree ------------------------------------------------------
-# README and the marketplace manifest state skill/agent counts in prose; nothing else stops
-# them drifting when a skill or agent is added. This check exists because exactly that shipped.
+# Derive every count from the tree, then read the docs back and fail on any claim that
+# disagrees.
+#
+# The old form asserted only that the *right* number appeared somewhere in README and the
+# marketplace manifest, and only for skills and agents. That is a one-directional test: it
+# cannot see a wrong number sitting next to a right one. "15 commands" therefore shipped green
+# for as long as "25 skills" was also true, which is what happened when the orchestrate command
+# was deleted. Reading the claims out and comparing each one is what closes that.
+#
+# Two forms are scanned, because README states its counts both ways: "14 commands" in prose and
+# "| Commands | 14 |" in the component table, where the number follows the noun. The text is
+# whitespace-normalised first — the headline wraps mid-count ("15\ncommands"), so no
+# line-oriented grep could ever have seen it.
 nsk=$(find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
-nag=$(ls claude/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
+nag=$(ls claude/agents/*.md   2>/dev/null | wc -l | tr -d ' ')
+ncm=$(ls claude/commands/*.md 2>/dev/null | wc -l | tr -d ' ')
+nhk=$(ls claude/hooks/*.sh    2>/dev/null | wc -l | tr -d ' ')
+nwr=$(ls bin/*                2>/dev/null | wc -l | tr -d ' ')
+ncs=$(grep -cE '^run_case ' tests/auto-trigger.sh 2>/dev/null || echo 0)
+nmc=0
+command -v jq >/dev/null && nmc=$(jq 'keys|length' mcp/servers.json 2>/dev/null || echo 0)
+
+want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
+  case "$1" in
+    skill|skills)                                   printf '%s' "$nsk" ;;
+    agent|agents|subagent|subagents|sub-agent|sub-agents) printf '%s' "$nag" ;;
+    command|commands)                               printf '%s' "$ncm" ;;
+    hook|hooks)                                     printf '%s' "$nhk" ;;
+    "cli wrapper"|"cli wrappers")                   printf '%s' "$nwr" ;;
+    case|cases)                                     printf '%s' "$ncs" ;;
+    "mcp server"|"mcp servers")                     printf '%s' "$nmc" ;;
+  esac
+}
+
+# Claims that are deliberately not repo-wide totals: one provenance subset and two historical
+# measurements. Each is exempted by its own phrase rather than by line number, so editing the
+# sentence away takes the exemption with it instead of leaving a dangling rule behind.
+exempt_phrases(){
+  case "$1" in
+    README.md)               printf '%s\n' '18 skills are ported' ;;
+    docs/how-skills-fire.md) printf '%s\n' 'installed 18 skills correctly' '44 skills' ;;
+  esac
+}
+
 errs=""
-grep -qE "\b$nsk skills\b" README.md || errs="$errs\nREADME.md: does not state '$nsk skills'"
-grep -qE "\b$nag (sub)?agents\b" README.md || errs="$errs\nREADME.md: does not state '$nag agents'"
-if [ -f .claude-plugin/marketplace.json ]; then
-  grep -qE "\b$nsk skills\b" .claude-plugin/marketplace.json || errs="$errs\nmarketplace.json: does not state '$nsk skills'"
+for f in README.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
+         claude/skills/ATTRIBUTION.md claude/CLAUDE.md docs/how-skills-fire.md tests/README.md; do
+  [ -f "$f" ] || continue
+  norm=$(tr '\n' ' ' < "$f" | tr -s '[:space:]' ' ')
+  while IFS= read -r ph; do
+    [ -n "$ph" ] && norm=${norm//"$ph"/}
+  done <<EOF
+$(exempt_phrases "$f")
+EOF
+
+  # prose form: "14 commands"
+  while IFS= read -r claim; do
+    [ -n "$claim" ] || continue
+    num=${claim%% *}
+    noun=$(printf '%s' "${claim#* }" | tr '[:upper:]' '[:lower:]')
+    want=$(want_for "$noun")
+    [ -n "$want" ] && [ "$num" != "$want" ] \
+      && errs="$errs\n$f: claims '$claim', tree has $want"
+  done <<EOF
+$(printf '%s' "$norm" | grep -oE '[0-9]+ ((sub-?)?agents?|skills?|commands?|hooks?|cases?|MCP servers?|CLI wrappers?)' | sort -u)
+EOF
+
+  # table form: "| Commands | 14 |"
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    noun=$(printf '%s' "$row" | sed -E 's/^\| *//; s/ *\|.*//' | tr '[:upper:]' '[:lower:]')
+    num=$(printf '%s' "$row" | sed -E 's/.*\| *([0-9]+).*/\1/')
+    want=$(want_for "$noun")
+    [ -n "$want" ] && [ "$num" != "$want" ] \
+      && errs="$errs\n$f: table row '$noun' says $num, tree has $want"
+  done <<EOF
+$(printf '%s' "$norm" | grep -oE '\| *[A-Za-z][A-Za-z ]*\| *[0-9]+ *\|' | sort -u)
+EOF
+done
+
+[ -z "$errs" ] \
+  && ok "doc counts match tree ($nsk skills, $nag agents, $ncm commands, $nhk hooks, $ncs test cases)" \
+  || bad "doc counts match tree" "$(printf '%b' "$errs")"
+
+# --- 13. the two plugin manifests agree on a version -------------------------------------------
+# marketplace.json and plugin.json each carry their own version string and nothing has ever
+# compared them. A release that bumps one and forgets the other publishes a marketplace entry
+# pointing at a differently-numbered plugin.
+if command -v jq >/dev/null; then
+  mv_=$(jq -r '.plugins[0].version // "missing"' .claude-plugin/marketplace.json 2>/dev/null)
+  pv_=$(jq -r '.version // "missing"' claude/.claude-plugin/plugin.json 2>/dev/null)
+  [ "$mv_" = "$pv_" ] && ok "plugin manifests agree (v$mv_)" \
+    || bad "plugin manifest versions" "marketplace.json says $mv_, plugin.json says $pv_"
+else
+  skip "plugin manifest versions" "jq not installed"
 fi
-[ -z "$errs" ] && ok "doc counts match tree ($nsk skills, $nag agents)" || bad "doc counts match tree" "$(printf '%b' "$errs")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check

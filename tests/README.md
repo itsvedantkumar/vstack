@@ -38,7 +38,7 @@ ui-iterate-styles, technical-writing, and idempotent-cron.
    never report `loggedIn: true` there. The script detects this and skips
    rather than failing the build.
 2. **It would bill tokens.** Every case makes real API calls, up to 3 turns
-   each across 4 cases. Running this on every push or pull request in CI
+   each across 9 cases. Running this on every push or pull request in CI
    would spend real money on a check that mostly guards against
    skill-routing regressions. Those regressions are infrequent. Run the
    script by hand instead, or schedule it on a machine that already has an
