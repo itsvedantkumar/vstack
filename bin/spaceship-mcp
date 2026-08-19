@@ -1,9 +1,0 @@
-#!/bin/sh
-set -eu
-if [ -f "$HOME/.config/agents/secrets.env" ]; then
-  . "$HOME/.config/agents/secrets.env"
-else
-  echo "spaceship-mcp: missing $HOME/.config/agents/secrets.env" >&2
-  exit 1
-fi
-exec npx -y spaceship-mcp

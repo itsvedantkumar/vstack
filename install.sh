@@ -5,25 +5,23 @@
 # timestamped backup dir first, and it never touches secrets you already have.
 #
 # Lanes it materialises:
-#   ~/.claude/                 hooks, agents, commands, skills, scheduled-tasks, settings
+#   ~/.claude/                 hooks, agents, commands, skills, settings
 #   ~/.config/agents/bin/      CLI wrappers (deploy, headless runner, MCP shims, doctor)
 #   ~/.config/agents/shell/    zsh parity wrapper + env snippet, wired into .zshrc/.zshenv
 #   ~/.claude.json             MCP server entries (merged, never clobbered)
 #
 # Usage:
-#   ./install.sh                  full install, no OS-level schedulers
-#   ./install.sh --with-launchd   also load the launchd timers for scheduled routines
+#   ./install.sh                  install the config
+#   ./install.sh --with-deps      install the tools first (fresh machine)
 #   ./install.sh --dry-run        print what would change, touch nothing
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
-WITH_LAUNCHD=0
 DRY=0
 WITH_DEPS=0
 for a in "$@"; do
   case "$a" in
-    --with-launchd) WITH_LAUNCHD=1 ;;
     --with-deps)    WITH_DEPS=1 ;;
     --dry-run)      DRY=1 ;;
     -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
@@ -50,7 +48,7 @@ command -v jq >/dev/null || { HAVE_JQ=0; echo "warn: jq not found — settings a
 
 if [ "$DRY" = 0 ]; then
   mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
-           "$HOME/.claude/skills" "$HOME/.claude/scheduled-tasks" \
+           "$HOME/.claude/skills" \
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
   chmod 700 "$HOME/.config/agents/backups"
 fi
@@ -79,16 +77,6 @@ done
 [ -f "$SRC/claude/skills/LICENSE.pstack" ] && run cp "$SRC/claude/skills/LICENSE.pstack" "$HOME/.claude/skills/"
 [ "$DRY" = 0 ] && find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
 say "installed  skills ($(find "$SRC"/claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' '))"
-
-# --- scheduled routines (prompts only; scheduling is separate) ----------------------------
-for d in "$SRC"/claude/scheduled-tasks/*/; do
-  s=$(basename "$d")
-  [ "$DRY" = 1 ] && { say "would: install routine $s"; continue; }
-  mkdir -p "$HOME/.claude/scheduled-tasks/$s"
-  back "$HOME/.claude/scheduled-tasks/$s/SKILL.md"
-  cp "$d/SKILL.md" "$HOME/.claude/scheduled-tasks/$s/SKILL.md"
-done
-say "installed  scheduled-task prompts"
 
 # --- agent bin ----------------------------------------------------------------------------
 for f in "$SRC"/bin/*; do
@@ -185,27 +173,6 @@ if [ "$DRY" = 0 ] && ! grep -q 'agents/secrets.env' "$HOME/.zshenv" 2>/dev/null;
   printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/.zshenv"
 fi
 say "installed  shell lane (.zshrc, .zshenv)"
-
-# --- launchd (opt-in) -----------------------------------------------------------------------
-# Off by default: cloud routines on claude.ai are the primary scheduling lane, and running
-# both would double every job. Use these when the machine is the only runner.
-if [ "$WITH_LAUNCHD" = 1 ]; then
-  uid=$(id -u)
-  for t in "$SRC"/launchd/*.plist.tmpl; do
-    [ -e "$t" ] || continue
-    lbl=$(basename "$t" .plist.tmpl)
-    out="$HOME/Library/LaunchAgents/$lbl.plist"
-    [ "$DRY" = 1 ] && { say "would: load $lbl"; continue; }
-    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.claude/scheduled-tasks/.logs"
-    sed "s|__HOME__|$HOME|g" "$t" > "$out"
-    plutil -lint "$out" >/dev/null || { echo "error: $lbl produced invalid plist" >&2; exit 1; }
-    launchctl bootout "gui/$uid/$lbl" 2>/dev/null || true
-    launchctl bootstrap "gui/$uid" "$out"
-    say "loaded     $lbl"
-  done
-else
-  say "skipped    launchd timers (pass --with-launchd to enable)"
-fi
 
 # --- verify ----------------------------------------------------------------------------------
 say ""

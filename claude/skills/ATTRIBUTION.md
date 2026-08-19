@@ -1,7 +1,11 @@
 # Skill attribution
 
-vstack ships 29 skills from four sources. Nothing here is original to vstack except the
-porting work described below.
+vstack ships 22 skills from two sources. Nothing here is original to vstack except the porting
+work described below.
+
+Every skill in this repo is one the setup actually uses. Skills that turned out to be
+redundant were deleted, not shipped disabled: a skill not worth loading is not worth carrying,
+and a disabled skill is one more thing to read past.
 
 ## Ported from pstack (18)
 
@@ -18,32 +22,25 @@ and `.cursor/` paths to `.claude/`. Where a skill assumed reviewers from differe
 the Claude Code version says plainly that every reviewer is an Anthropic model and uses
 different review lenses instead of pretending the reviewers are independent.
 
-## From Superpowers (7)
+## From Superpowers (4)
 
-`brainstorming`, `writing-plans`, `executing-plans`, `test-driven-development`,
-`systematic-debugging`, `requesting-code-review`, `verification-before-completion`.
+`brainstorming`, `writing-plans`, `executing-plans`, `test-driven-development` — the planning
+and implementation chain.
 
 Source: [obra/superpowers](https://github.com/obra/superpowers), MIT.
 
-`verification-before-completion`, `systematic-debugging`, and `requesting-code-review` are
-disabled in `claude/settings.json`. Their methods are covered by `principle-prove-it-works`,
-`principle-fix-root-causes`, and `interrogate` plus the `code-reviewer` subagent. They stay
-in the repo so the originals are not lost, and cost nothing while disabled.
+## What was removed, and why
 
-## Third-party (2)
-
-- `security-threat-model` — Apache 2.0, license in the skill directory.
-- `vercel-deploy` — MIT, Copyright (c) 2026 Vercel, license in the skill directory. Disabled:
-  the `vercel` CLI covers it with fewer tokens.
-
-## Written for this setup (2)
-
-- `spaceship` — drives the Spaceship registrar REST API, paired with the `spaceship-mcp` wrapper in `bin/`.
-- `tokenmaxxing` — disabled. The SessionStart hook in `claude/hooks/` now carries these rules,
-  so loading them as a skill would say the same thing twice.
+| Skill | Removed because |
+|---|---|
+| `verification-before-completion` | `principle-prove-it-works` carries the same gate and is wired to the `verify.sh` Stop hook. Its Iron Law and rationalization table were merged in. |
+| `systematic-debugging` | `principle-fix-root-causes` carries the method; the `debugger` subagent handles dispatch. |
+| `requesting-code-review` | Covered by `interrogate`, `blast-radius`, and the `code-reviewer` subagent. |
+| `tokenmaxxing` | The SessionStart hook states these rules on every session. Loading them again said the same thing twice. |
+| `vercel-deploy` | The `vercel` CLI does the same work with fewer tokens. |
+| `spaceship`, `security-threat-model` | Not used. |
 
 ## Which skills are active
 
-`claude/settings.json` holds the single source of truth in `skillOverrides`. A skill set to
-`off` never loads. A skill set to `name-only` loads without its description, which keeps a
-long description from spending listing budget. Everything else is active and can auto-trigger.
+All 22. `skillOverrides` in `claude/settings.json` still exists, but only to quiet skills that
+Claude Code and its plugins install on their own, never to park a skill from this repo.

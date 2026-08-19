@@ -32,18 +32,6 @@ else
   skip "json valid" "jq not installed"
 fi
 
-# --- 3. launchd templates are valid plists --------------------------------------------------
-if command -v plutil >/dev/null; then
-  errs=""
-  for t in launchd/*.plist.tmpl; do
-    [ -e "$t" ] || continue
-    plutil -lint "$t" >/dev/null 2>&1 || errs="$errs\n$t"
-  done
-  [ -z "$errs" ] && ok "launchd templates" || bad "launchd templates" "$(printf '%b' "$errs")"
-else
-  skip "launchd templates" "plutil not available (not macOS)"
-fi
-
 # --- 4. skills are loadable ------------------------------------------------------------------
 # A skill with no description, or one longer than the configured listing cap, gets truncated
 # out of the listing and silently stops auto-triggering. That is the failure this catches.
@@ -90,10 +78,6 @@ hits=$(grep -rIn --exclude-dir=.git -E \
   '(sk-ant-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|(KEY|TOKEN|SECRET|PASSWORD)[A-Z_]*=[A-Za-z0-9_/+-]{20,})' \
   . 2>/dev/null | head -5)
 [ -z "$hits" ] && ok "no committed secrets" || bad "no committed secrets" "$hits"
-
-# --- 7. routines use gh, never scraped tokens or absent tools ----------------------------------
-hits=$(grep -rIln -e 'github_pat_' -e 'Vercel MCP' -e 'remote get-url.*sed' claude/scheduled-tasks 2>/dev/null)
-[ -z "$hits" ] && ok "routines use gh auth" || bad "routines use gh auth" "$hits"
 
 # --- 8. no infrastructure identifiers ---------------------------------------------------------
 # This repo is public and its routines are templates. Real Vercel project or team IDs, Claude

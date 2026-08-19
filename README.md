@@ -1,11 +1,11 @@
 # vstack
 
 One repo that installs a complete Claude Code setup on a Mac: skills that fire on their own,
-subagents, hooks, MCP servers, deploy scripts, and scheduled routines.
+subagents, hooks, MCP servers, and deploy scripts.
 
-Everything here used to live in four places at once. Some of it sat in `~/.claude`, some in
-`~/.config/agents`, some only in a cloud routine, and the parts that mattered most were the
-parts nothing tracked. Reinstalling meant remembering. Now it is one clone and one command.
+Everything here used to live in three places at once: some in `~/.claude`, some in
+`~/.config/agents`, and the parts that mattered most in nothing at all. Reinstalling meant
+remembering. Now it is one clone and one command.
 
 ```bash
 git clone https://github.com/itsvedantkumar/vstack.git
@@ -55,13 +55,11 @@ Check a machine without changing it:
 
 | Component | Count | Installs to |
 |---|---|---|
-| Skills | 29 (24 active, 5 off) | `~/.claude/skills/` |
+| Skills | 22 | `~/.claude/skills/` |
 | Subagents | 7 | `~/.claude/agents/` |
 | Slash commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
 | CLI wrappers | 8 | `~/.config/agents/bin/` |
-| Scheduled routines | 3 | `~/.claude/scheduled-tasks/` |
-| launchd timers | 3 | `~/Library/LaunchAgents/` (only with `--with-launchd`) |
 | MCP servers | 2 | merged into `~/.claude.json` |
 
 Regenerate these counts with `find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l` and
@@ -92,8 +90,8 @@ back as the reason. Three blocks per session, then it stops, so an overnight run
 forever.
 
 This repo gates itself with the same mechanism. Run `./.claude/verify.sh` and it checks shell
-syntax, JSON validity, plist validity, skill frontmatter and description lengths, hardcoded
-home paths, committed credentials, and a full `install.sh --dry-run`. To add the same gate to
+syntax, JSON validity, skill frontmatter and description lengths, hardcoded home paths,
+committed credentials, infrastructure identifiers, and a full `install.sh --dry-run`. To add the same gate to
 another repo, ask Claude for verification in that repo and the `create-verification-skill`
 skill writes one that fits its stack.
 
@@ -107,20 +105,6 @@ The example deliberately names the Anthropic key `ANTHROPIC_SDK_API_KEY`. Claude
 `ANTHROPIC_API_KEY` and bills API credits against it instead of your subscription, so the
 shell wrapper strips that name from the environment and `doctor` fails if it is set.
 
-## Scheduling
-
-The three routines under `claude/scheduled-tasks/` are prompts. Scheduling them is a separate
-choice, and there are two lanes:
-
-- **Cloud routines** at [claude.ai/code/routines](https://claude.ai/code/routines) run whether
-  or not the Mac is awake. This is the better default.
-- **launchd timers** run locally. Install them with `./install.sh --with-launchd`.
-
-Pick one lane. Running both doubles every job.
-
-The three routines are templates, not live jobs. They carry `<owner>/<repo>` and
-`prj_YOUR_PROJECT_ID` placeholders, and each file opens with the list of values to replace.
-`./.claude/verify.sh` fails if a real Vercel, environment, or trigger ID lands in the repo.
 
 ## Health check
 
@@ -135,11 +119,10 @@ Claude Code update: plugin updates have reverted config here before.
 ## Layout
 
 ```
-claude/          settings, hooks, agents, commands, skills, scheduled-tasks
+claude/          settings, hooks, agents, commands, skills
 bin/             CLI wrappers installed to ~/.config/agents/bin
 shell/           zsh wrapper and env snippet
 mcp/             MCP server definitions merged into ~/.claude.json
-launchd/         plist templates, __HOME__ substituted at install time
 install.sh       user-scope install, idempotent
 overlay.sh       copies the config into a repo so cloud sessions get it
 ```
@@ -171,11 +154,9 @@ directory, so a committed `.claude/` directory is the only config it can read. R
 
 ## Credits
 
-The 29 skills come from four places: 18 ported from [pstack](https://github.com/cursor/plugins),
-7 from [Superpowers](https://github.com/obra/superpowers), 2 third-party (Apache 2.0 and MIT),
-and 2 written for this setup. Per-skill sources, licenses, and the reason each disabled skill
-is disabled are in `claude/skills/ATTRIBUTION.md`.
+The 22 skills come from two places: 18 ported from [pstack](https://github.com/cursor/plugins)
+and 4 from [Superpowers](https://github.com/obra/superpowers). Sources and licenses are
+recorded in `claude/skills/ATTRIBUTION.md`.
 
-Five skills ship disabled through `skillOverrides` in `claude/settings.json`. They are kept
-rather than deleted because the originals live nowhere else, and a disabled skill costs no
-context. That file is the one place that decides what is active.
+Every skill here is one this setup actually uses. A skill that turned out to be redundant was
+deleted rather than shipped disabled: if it is not worth loading, it is not worth carrying.
