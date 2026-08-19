@@ -13,7 +13,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${1:-$PWD}"
 
 [ -d "$DEST/.git" ] || { echo "error: $DEST is not a git repo" >&2; exit 1; }
-[ -f "$SRC/claude/settings.json" ] || { echo "error: run from the conductor-setup repo" >&2; exit 1; }
+[ -f "$SRC/claude/settings.json" ] || { echo "error: run from the vstack repo" >&2; exit 1; }
 
 mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
@@ -32,6 +32,18 @@ fi
 cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.claude/hooks/*.sh
 cp "$SRC"/claude/agents/*.md   "$DEST/.claude/agents/"
 cp "$SRC"/claude/commands/*.md "$DEST/.claude/commands/"
+
+# Global directives + statusline: a cloud sandbox has no ~/.claude, so the project copy is
+# the only lane these reach it by. .claude/CLAUDE.md is a recognized project-memory path.
+cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"
+cp "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh" && chmod 755 "$DEST/.claude/statusline.sh"
+echo "wrote   .claude/CLAUDE.md + .claude/statusline.sh"
+if command -v jq >/dev/null; then
+  tmp=$(mktemp)
+  jq '.statusLine = {type:"command", command:"\"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\"", padding:0, refreshInterval:3}' \
+    "$DEST/.claude/settings.json" > "$tmp" && jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"
+  rm -f "$tmp"
+fi
 
 # skills carry references/ and scripts/ subtrees — replace each whole, don't merge.
 for d in "$SRC"/claude/skills/*/; do
