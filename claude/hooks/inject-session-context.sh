@@ -8,7 +8,35 @@
 # build sets it: routing is what makes skills fire, but the token, delegation and autonomy
 # rules are one person's operating policy and have no business being forced on someone who
 # installed a skill pack from a marketplace.
-event=$(/usr/bin/jq -r '.hook_event_name // "SessionStart"' 2>/dev/null </dev/stdin)
+#
+# jq is resolved rather than hardcoded to /usr/bin/jq. That path is macOS-only, and without it
+# the event lookup below failed and defaulted to SessionStart — which meant every prompt got
+# the full baseline block instead of the two-line digest, several kilobytes a turn, silently.
+JQ=""
+if [ -x /usr/bin/jq ]; then JQ=/usr/bin/jq
+elif command -v jq >/dev/null 2>&1; then JQ=$(command -v jq); fi
+
+esc(){ printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' \
+       | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+       | awk 'BEGIN{ORS=""}{print (NR>1?"\\n":"") $0}'; }
+
+emit(){ # event, optional context
+  if [ -n "$JQ" ]; then
+    if [ -z "${2:-}" ]; then "$JQ" -cn --arg e "$1" '{hookSpecificOutput:{hookEventName:$e}}'
+    else "$JQ" -cn --arg e "$1" --arg c "$2" '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'; fi
+  elif [ -z "${2:-}" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"%s"}}\n' "$(esc "$1")"
+  else
+    printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$(esc "$1")" "$(esc "$2")"
+  fi
+}
+
+in=$(cat 2>/dev/null || true)
+if [ -n "$JQ" ]; then
+  event=$(printf '%s' "$in" | "$JQ" -r '.hook_event_name // "SessionStart"' 2>/dev/null)
+else
+  event=$(printf '%s' "$in" | sed -n 's/.*"hook_event_name" *: *"\([^"]*\)".*/\1/p' | head -1)
+fi
 [ -z "$event" ] || [ "$event" = "null" ] && event="SessionStart"
 
 # Per-prompt digest: must stay tiny and fast (no git work) — it runs on every prompt.
@@ -16,13 +44,11 @@ event=$(/usr/bin/jq -r '.hook_event_name // "SessionStart"' 2>/dev/null </dev/st
 # least a skill pack can inject and still work.
 if [ "$event" = "UserPromptSubmit" ]; then
   if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
-    /usr/bin/jq -cn --arg e "$event" '{hookSpecificOutput:{hookEventName:$e}}'
+    emit "$event"
     exit 0
   fi
-  /usr/bin/jq -cn --arg e "$event" --arg c \
-'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
-DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.' \
-    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
+  emit "$event" 'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
+DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'
   exit 0
 fi
 
@@ -65,8 +91,7 @@ EOF
 # Skills profile: keep only the SKILLS block. Everything above it is operating policy.
 if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
   MSG=$(printf '%s\n' "$MSG" | sed -n '/^SKILLS:/,$p')
-  /usr/bin/jq -cn --arg e "$event" --arg c "$MSG" \
-    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
+  emit "$event" "$MSG"
   exit 0
 fi
 
@@ -104,6 +129,5 @@ WORKSPACE CONVENTIONS.
   fi
 fi
 
-/usr/bin/jq -cn --arg e "$event" --arg c "$MSG" \
-  '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
+emit "$event" "$MSG"
 exit 0

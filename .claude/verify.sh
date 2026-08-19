@@ -399,7 +399,10 @@ fi
 # installed. Drive it end to end against a seeded failing verify.sh, in both jq conditions.
 if command -v jq >/dev/null && command -v git >/dev/null; then
   gd=$(mktemp -d)
-  mkdir -p "$gd/repo/.claude" "$gd/home/.config/agents" "$gd/bin"
+  # TMPDIR is redirected into the scratch dir because the gate keeps a per-session block
+  # counter there and latches open at three. With a shared TMPDIR and a fixed session id this
+  # check would pass twice and then fail forever on the same tree.
+  mkdir -p "$gd/repo/.claude" "$gd/home/.config/agents" "$gd/bin" "$gd/tmp"
   printf '#!/usr/bin/env bash\necho "seeded failure"\nexit 1\n' > "$gd/repo/.claude/verify.sh"
   chmod +x "$gd/repo/.claude/verify.sh"
   gv="$gd/repo/.claude/verify.sh"
@@ -409,7 +412,7 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
 
   errs=""
   o=$(printf '{"session_id":"vs-gate"}' \
-      | env HOME="$gd/home" CLAUDE_PROJECT_DIR="$gd/repo" bash claude/hooks/verify-gate.sh 2>/dev/null)
+      | env HOME="$gd/home" TMPDIR="$gd/tmp" CLAUDE_PROJECT_DIR="$gd/repo" bash claude/hooks/verify-gate.sh 2>/dev/null)
   printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
     || errs="$errs\nwith jq: a failing verify.sh did not produce decision:block"
 
@@ -420,11 +423,18 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     p=$(command -v "$t" 2>/dev/null) && ln -sf "$p" "$gd/bin/$t"
   done
   o=$(printf '{"session_id":"vs-gate-nojq"}' \
-      | env PATH="$gd/bin" HOME="$gd/home" CLAUDE_PROJECT_DIR="$gd/repo" bash "$gd/nojq.sh" 2>/dev/null)
+      | env PATH="$gd/bin" HOME="$gd/home" TMPDIR="$gd/tmp" CLAUDE_PROJECT_DIR="$gd/repo" bash "$gd/nojq.sh" 2>/dev/null)
   printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
     || errs="$errs\nwithout jq: a failing verify.sh did not produce a parseable decision:block"
 
   rm -rf "$gd"
+
+  # And no hook may reach for jq by absolute path again. /usr/bin/jq is fine as a preference
+  # inside the resolver, but calling it directly is what made these hooks inert off macOS —
+  # the gate stopped blocking and the session hook stopped injecting the routing block at all.
+  hp=$(grep -n '/usr/bin/jq' claude/hooks/*.sh 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' | grep -vF '[ -x /usr/bin/jq ]')
+  [ -n "$hp" ] && errs="$errs\nhooks calling jq by absolute path instead of resolving it:\n$hp"
+
   [ -z "$errs" ] && ok "stop-hook gate blocks (jq present and absent)" \
     || bad "stop-hook gate blocks" "$(printf '%b' "$errs")"
 else
