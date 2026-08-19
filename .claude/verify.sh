@@ -234,20 +234,62 @@ done
 [ "$nc" -gt 0 ] || errs="$errs\nno commands found"
 [ -z "$errs" ] && ok "agents ($na) + commands ($nc) loadable" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
 
-# --- 11. hook wiring is complete in both lanes -------------------------------------------------
-# A hook event dropped from claude/settings.json (project/overlay lane) or from install.sh's
-# rebuild program (user lane) ships green through every other check — this is the check that
-# would have caught a missing UserPromptSubmit.
+# --- 11. hook wiring is complete in all three lanes --------------------------------------------
+# There are three wiring surfaces, and this check used to read two of them while its own label
+# claimed otherwise: claude/hooks/hooks.json was never opened at all, so the plugin lane could
+# lose a hook without anything noticing.
+#
+# Each lane is asserted against its own contract, not a single blanket list, because the lanes
+# genuinely differ — see the plugin-lane note below.
 if command -v jq >/dev/null; then
   errs=""
+
+  # Lane 1 — project/overlay. claude/settings.json carries the full five.
   for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure; do
-    jq -e --arg e "$ev" '.hooks[$e]' claude/settings.json >/dev/null 2>&1 || errs="$errs\n$ev: missing from claude/settings.json hooks"
-    grep -q "$ev" install.sh || errs="$errs\n$ev: missing from install.sh hook rebuild"
+    jq -e --arg e "$ev" '.hooks[$e]' claude/settings.json >/dev/null 2>&1 \
+      || errs="$errs\n$ev: missing from claude/settings.json"
   done
-  for h in $(jq -r '.hooks[][]?.hooks[]?.command' claude/settings.json 2>/dev/null | grep -o 'hooks/[a-z-]*\.sh' | sort -u); do
-    [ -f "claude/$h" ] || errs="$errs\n$h: referenced in settings but not in claude/hooks/"
+
+  # Lane 2 — user scope. install.sh rebuilds the hooks with absolute paths, so the assertion
+  # has to read that jq program rather than the file at large. `grep -q "$ev" install.sh`
+  # proved nothing: every event name also appears in this file's prose, and "PostToolUse"
+  # matches the "PostToolUseFailure" line, so either key could be deleted and the check would
+  # still pass off the other. Anchoring on the object key is what makes it bite.
+  prog=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh)
+  if [ -z "$prog" ]; then
+    errs="$errs\ncould not extract the hook rebuild program from install.sh"
+  else
+    for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure SessionEnd PermissionRequest; do
+      printf '%s' "$prog" | grep -qE "^ *$ev: *\[" || errs="$errs\n$ev: missing from install.sh hook rebuild"
+    done
+    # The notify hook is what reaches the phone. It is wired to five of the seven events.
+    nn=$(printf '%s' "$prog" | grep -cF 'command:$n')
+    [ "$nn" -eq 5 ] || errs="$errs\nnotify wired to $nn sites in install.sh, expected 5"
+  fi
+
+  # Lane 3 — plugin marketplace. Deliberately narrow, and asserted as an exact set rather than
+  # a minimum. The manifest promises routing plus the verify gate and nothing more, because
+  # inject-session-context.sh drops the token/delegation/autonomy policy under
+  # VSTACK_PROFILE=skills: those rules are one person's operating preference and have no
+  # business riding along with a skill pack a stranger installed. Asserting the exact set means
+  # widening this lane has to be a deliberate edit here, not a quiet drift.
+  got=$(jq -r '.hooks | keys_unsorted[]' claude/hooks/hooks.json 2>/dev/null | sort | tr '\n' ' ' | sed 's/ *$//')
+  [ "$got" = "SessionStart Stop" ] \
+    || errs="$errs\nplugin lane wires [$got], expected exactly [SessionStart Stop]"
+
+  # Every script named by any lane exists. The old character class [a-z-]* silently exempted
+  # any hook filename containing a digit or a capital, and an empty extraction made the whole
+  # loop a no-op, so the count is asserted too.
+  refs=$( { jq -r '.hooks[][]?.hooks[]?.command' claude/settings.json 2>/dev/null
+            jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null
+          } | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh' | sort -u)
+  nref=$(printf '%s\n' "$refs" | grep -c . )
+  [ "$nref" -ge 4 ] || errs="$errs\nhook command extraction found $nref scripts, expected 4+ (the settings schema or jq filter changed)"
+  for h in $refs; do
+    [ -f "claude/$h" ] || errs="$errs\n$h: referenced in hook wiring but not in claude/hooks/"
   done
-  [ -z "$errs" ] && ok "hook wiring (both lanes)" || bad "hook wiring" "$(printf '%b' "$errs")"
+
+  [ -z "$errs" ] && ok "hook wiring (3 lanes, $nref scripts)" || bad "hook wiring" "$(printf '%b' "$errs")"
 else
   skip "hook wiring" "jq not installed"
 fi
