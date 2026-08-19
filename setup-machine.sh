@@ -10,6 +10,8 @@
 #
 # What each tier is for:
 #   core      git, jq, ripgrep, fd, gh, node, bun, uv   — the agent tooling and this installer
+#   bundled   npm, npx, pnpm, yarn, python3              — verified, not installed: they come
+#                                                          with node or the Xcode tools
 #   claude    the Claude Code CLI itself
 #   conductor the Conductor Mac app, several agents in parallel (macOS only)
 #   deploy    vercel, wrangler                          — the autonomous deploy chain
@@ -128,6 +130,43 @@ ensure gh       gh
 ensure node     node
 ensure bun      oven-sh/bun/bun bun
 ensure uv       uv
+
+note ""
+note "== bundled with node"
+# npm, npx and corepack arrive with node. Installing them separately fights the node install,
+# so this section verifies rather than installs. It exists because ensure_npm below needs npm,
+# and "vercel needs npm, which is missing" is a confusing way to learn that node is broken.
+for c in npm npx; do
+  if command -v "$c" >/dev/null 2>&1; then
+    note "-- $c: present ($(command -v "$c"))"; mark have "$c"
+  else
+    note "!! $c: missing, which means the node install is incomplete"; mark fail "$c"
+  fi
+done
+
+# corepack turns on pnpm and yarn without downloading either. Plenty of repos assume one of
+# them and fail their install step without it.
+if ! command -v corepack >/dev/null 2>&1; then
+  note "-- corepack: not available, skipping pnpm and yarn"
+elif [ "$CHECK" = 1 ]; then
+  command -v pnpm >/dev/null 2>&1 && note "-- pnpm: present" || note "-- pnpm: MISSING (corepack enable pnpm)"
+elif [ "$DRY" = 1 ]; then
+  note "would enable pnpm and yarn through corepack"
+else
+  if corepack enable pnpm yarn >/dev/null 2>&1; then
+    note ">> enabled pnpm and yarn (corepack)"; mark ok "pnpm/yarn"
+  else
+    note "!! corepack enable failed; run it yourself if a repo needs pnpm or yarn"
+  fi
+fi
+
+# python3 ships with the Xcode command line tools on macOS, and uv manages versions and venvs
+# from there. Checked, not installed.
+if command -v python3 >/dev/null 2>&1; then
+  note "-- python3: present ($(command -v python3))"; mark have python3
+else
+  note "!! python3: missing, install the Xcode command line tools"; mark fail python3
+fi
 
 note ""
 note "== claude code"

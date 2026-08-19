@@ -46,6 +46,27 @@ claude plugin marketplace add itsvedantkumar/vstack
 claude plugin install vstack@vstack
 ```
 
+### What the bootstrap installs
+
+`setup-machine.sh` works in tiers and checks each tool before installing it, so a second run
+costs seconds. Run `./setup-machine.sh --check` to audit a machine without changing it.
+
+| Tier | Tools | For |
+|---|---|---|
+| core | `git`, `jq`, `ripgrep`, `fd`, `gh`, `node`, `bun`, `uv` | agent tooling and this installer |
+| bundled | `npm`, `npx`, `pnpm`, `yarn`, `python3` | verified rather than installed: they arrive with node or the Xcode tools |
+| claude | Claude Code CLI | the agent itself |
+| conductor | Conductor Mac app | running several agents in parallel, macOS only |
+| plugins | claude-mem, frontend-design, typescript-lsp | memory layer and language tooling |
+| deploy | `vercel`, `wrangler` | the autonomous deploy chain |
+| security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
+
+Only `git` and `jq` decide the exit code. A missing `nuclei` is not a broken machine.
+
+Two things it cannot do for you. The Xcode command line tools need a GUI prompt, so it tells
+you to run `xcode-select --install` and carries on. OWASP ZAP is a large Java app and is left
+to you.
+
 Preview any install with `./install.sh --dry-run`. It backs up every file it overwrites to
 `~/.config/agents/backups/install-<timestamp>/`, and it never overwrites `secrets.env`.
 
