@@ -141,6 +141,28 @@ else
   skip "install.sh --dry-run" "jq not installed"
 fi
 
+# --- 9b. overlay works against a repo that already has settings -------------------------------
+# The overlay's merge branch only runs when the target has a .claude/settings.json — a fresh
+# scratch repo never exercises it, which is exactly how a broken merge shipped once. Overlay
+# into a temp repo seeded with existing settings and hooks, and require the merge to survive.
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  od=$(mktemp -d)
+  git -C "$od" init -q 2>/dev/null
+  mkdir -p "$od/.claude"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo repo-own"}]}]},"skillOverrides":{"ghost-skill":"off"},"permissions":{"allow":["Bash(ls)"]}}\n' > "$od/.claude/settings.json"
+  if out=$(./overlay.sh "$od" 2>&1); then
+    if jq -e '.permissions.allow[0] == "Bash(ls)" and (.skillOverrides["ghost-skill"] // null) == null' \
+         "$od/.claude/settings.json" >/dev/null 2>&1; then
+      ok "overlay merge path"
+    else
+      bad "overlay merge path" "merged settings lost user keys or kept dead skillOverrides"
+    fi
+  else
+    bad "overlay merge path" "$out"
+  fi
+  rm -rf "$od"
+fi
+
 # --- 10. agents and commands are loadable ------------------------------------------------------
 # Same failure class as check 3: frontmatter drift silently breaks discovery.
 errs=""

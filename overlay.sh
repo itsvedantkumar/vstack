@@ -25,7 +25,7 @@ if [ -f "$DEST/.claude/settings.json" ] && command -v jq >/dev/null; then
   clobbered=$(jq -rs '((.[0].hooks // {} | keys) - ((.[0].hooks // {} | keys) - (.[1].hooks // {} | keys))) | join(", ")' \
     "$DEST/.claude/settings.json" "$SRC/claude/settings.json")
   tmp=$(mktemp)
-  jq -s '(.[0] * .[1]) | .skillOverrides = (.[1].skillOverrides // {})' \
+  jq -s '. as [$dest, $src] | ($dest * $src) | .skillOverrides = ($src.skillOverrides // {})' \
     "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"
   rm -f "$tmp"
