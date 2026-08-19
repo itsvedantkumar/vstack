@@ -1,59 +1,123 @@
-# conductor-setup
+# vstack
 
-Single source of truth for the Claude Code setup — local terminal, Conductor, Remote Control,
-and cloud/phone dispatch.
+One repo that installs a complete Claude Code setup on a Mac: skills that fire on their own,
+subagents, hooks, MCP servers, deploy scripts, and scheduled routines.
 
-## The three config lanes
-
-Claude Code loads settings from `policy > flag > local > project > user`. Those sources do
-**not** reach the same places, which is the whole reason this repo exists:
-
-| Lane | Local terminal | Conductor | Remote Control | Cloud session / routine (phone) |
-|---|:--:|:--:|:--:|:--:|
-| `~/.claude/**` (user scope) | ✅ | ✅ | ✅ *(runs on your Mac)* | ❌ sandbox has no `~/.claude` |
-| `~/.zshenv` exports | ✅ | ✅ | ✅ | ❌ |
-| `shell/claude-parity.zsh` wrapper | ✅ | n/a | ❌ never goes through your zsh | ❌ |
-| **committed `.claude/` overlay** | ✅ | ✅ | ✅ | ✅ **only lane that reaches cloud** |
-
-So: `install.sh` for your machine, `overlay.sh` for every repo you dispatch work to.
-
-## Usage
+Everything here used to live in four places at once. Some of it sat in `~/.claude`, some in
+`~/.config/agents`, some only in a cloud routine, and the parts that mattered most were the
+parts nothing tracked. Reinstalling meant remembering. Now it is one clone and one command.
 
 ```bash
-./install.sh                 # materialise user scope (~/.claude, ~/.config/agents, shell)
-./overlay.sh ~/path/to/repo  # commit-able .claude/ overlay so cloud/phone runs match local
-~/.config/agents/bin/doctor  # drift check (also runs nightly via doctor-cron.sh)
+git clone https://github.com/itsvedantkumar/vstack.git
+cd vstack
+./install.sh
 ```
 
-## What lives where, and why
+Run `./install.sh --dry-run` first if you want to see what it touches. It backs up every file
+it overwrites to `~/.config/agents/backups/install-<timestamp>/`, and it never overwrites
+`secrets.env`.
 
-**`claude/settings.json` — portable subset.** Model/effort/fastMode, the skill-listing caps,
-`skillOverrides`, latency flags, and the allowlisted `env` block. Hook commands use
-`$CLAUDE_PROJECT_DIR`-relative paths so they resolve inside a cloud sandbox; an absolute
-`/Users/...` path there fails with exit 127 on every hook event.
+## What lands where
 
-**Deliberately NOT in the committed overlay** (user scope only): `forceLoginMethod`,
-`remote.defaultEnvironmentId`, `remoteControlAtStartup`, `preferredNotifChannel`,
-`statusLine` (no TTY in a sandbox), `enabledPlugins` (points at local marketplace caches),
-and `permissions.defaultMode` (never put `bypassPermissions` in a repo others can clone).
+| Component | Count | Installs to |
+|---|---|---|
+| Skills | 18 | `~/.claude/skills/` |
+| Subagents | 7 | `~/.claude/agents/` |
+| Slash commands | 15 | `~/.claude/commands/` |
+| Hooks | 4 | `~/.claude/hooks/` |
+| CLI wrappers | 8 | `~/.config/agents/bin/` |
+| Scheduled routines | 3 | `~/.claude/scheduled-tasks/` |
+| launchd timers | 3 | `~/Library/LaunchAgents/` (only with `--with-launchd`) |
+| MCP servers | 2 | merged into `~/.claude.json` |
 
-**`shell/zshenv.snippet`** — env vars that are *not* in Claude Code's `settings.json` `env`
-allowlist and therefore only work as real environment variables. Putting them in
-`settings.json` is silently ignored.
+Regenerate these counts with `find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l` and
+the matching `ls` for each directory.
 
-> ⚠️ Do not set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK`. Both gate
-> feature-flag evaluation, which **Remote Control requires** — `claude doctor` reports
-> "Remote Control rollout could not be verified" and phone dispatch stops working.
+## The part that took the longest to get right
 
-**`shell/claude-parity.zsh`** — only the launch flags with no settings key (`--chrome`,
-`--plugin-dir <conductor-skill>`, `--exclude-dynamic-system-prompt-sections`) plus stripping
-`ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` so auth always resolves to the Max subscription.
-Passthrough for `-p`, subcommands, and `--remote-control|--cloud|--bg`.
+Installing a skill does not make it fire. That distinction cost a week of thinking the setup
+worked when it did not.
 
-## Secrets
+A skill needs three things to trigger on its own. It must not carry
+`disable-model-invocation`. Its description must describe a situation, not a capability,
+because the model matches situations. And the description has to survive the skill listing:
+if `skillListingBudgetFraction` is too small for the number of installed skills, Claude Code
+truncates descriptions, and it truncates exactly the trigger phrases that make matching work.
+That last one is invisible. Nothing errors. The skills just quietly stop firing.
 
-Never in this repo, never in `~/.zshrc`. They live in `~/.config/agents/secrets.env`
-(mode 600, sourced from `~/.zshenv`). The key named `ANTHROPIC_API_KEY` must **not** exist in
-any sourced file — `claude`, `codex`, and OpenCode all auto-consume that name and would bill
-pay-per-token API credits instead of the subscription. Store it as `ANTHROPIC_SDK_API_KEY`
-and opt in per-command.
+Even with all three right, nothing connects a situation to a skill unless something says so.
+`claude/hooks/inject-session-context.sh` carries a routing block that maps situations to
+skills, and it runs on every session start. That block is the reason the skills in this repo
+fire without being asked for.
+
+## Verification is a script, not a promise
+
+`.claude/verify.sh` in a repo is run by the `verify-gate.sh` Stop hook. When it exits
+non-zero, the agent is blocked from claiming the work is done, and the failure output comes
+back as the reason. Three blocks per session, then it stops, so an overnight run cannot loop
+forever.
+
+This repo gates itself with the same mechanism. Run `./.claude/verify.sh` and it checks shell
+syntax, JSON validity, plist validity, skill frontmatter and description lengths, hardcoded
+home paths, committed credentials, and a full `install.sh --dry-run`. To add the same gate to
+another repo, ask Claude for verification in that repo and the `create-verification-skill`
+skill writes one that fits its stack.
+
+## Credentials
+
+`install.sh` copies `secrets.env.example` to `~/.config/agents/secrets.env` with mode 600 when
+that file does not exist, and leaves it alone when it does. Fill in the variables you use. The
+MCP wrappers in `bin/` source it before they exec, and `.zshenv` sources it for your shell.
+
+The example deliberately names the Anthropic key `ANTHROPIC_SDK_API_KEY`. Claude Code reads
+`ANTHROPIC_API_KEY` and bills API credits against it instead of your subscription, so the
+shell wrapper strips that name from the environment and `doctor` fails if it is set.
+
+## Scheduling
+
+The three routines under `claude/scheduled-tasks/` are prompts. Scheduling them is a separate
+choice, and there are two lanes:
+
+- **Cloud routines** at [claude.ai/code/routines](https://claude.ai/code/routines) run whether
+  or not the Mac is awake. This is the better default.
+- **launchd timers** run locally. Install them with `./install.sh --with-launchd`.
+
+Pick one lane. Running both doubles every job. The routines target one specific site as
+examples, and each file names the values to change to retarget it.
+
+## Health check
+
+```bash
+~/.config/agents/bin/doctor
+```
+
+`doctor` checks hooks, subagents, secrets file permissions, auth method, Conductor parity
+keys, context caps, and Remote Control settings. It exits non-zero on drift. Run it after any
+Claude Code update: plugin updates have reverted config here before.
+
+## Layout
+
+```
+claude/          settings, hooks, agents, commands, skills, scheduled-tasks
+bin/             CLI wrappers installed to ~/.config/agents/bin
+shell/           zsh wrapper and env snippet
+mcp/             MCP server definitions merged into ~/.claude.json
+launchd/         plist templates, __HOME__ substituted at install time
+install.sh       user-scope install, idempotent
+overlay.sh       copies the config into a repo so cloud sessions get it
+```
+
+## Two lanes, and why both exist
+
+`install.sh` writes to `~/.claude`. That covers the local terminal, Conductor, and Remote
+Control sessions from your phone.
+
+A cloud session is different. It clones the repo into a sandbox with no access to your home
+directory, so a committed `.claude/` directory is the only config it can read. Run
+`./overlay.sh /path/to/repo` in any repo you dispatch cloud work to.
+
+## Credits
+
+The 18 skills are ported from [pstack](https://github.com/cursor/plugins) and rewritten for
+Claude Code: Cursor model names mapped to Anthropic ones, `Task` calls to the `Agent` tool,
+and cloud-only parameters to local execution. See `claude/skills/LICENSE.pstack`.
