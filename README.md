@@ -171,6 +171,25 @@ Cloud sandboxes often ship without `jq`. The installer no longer treats that as 
 installs skills, hooks, agents, and commands, then skips only the two merge steps that need
 `jq` and says so.
 
+## Install as a plugin
+
+vstack is also a Claude Code marketplace, which is the fastest way to get the skills without
+touching your machine config:
+
+```bash
+claude plugin marketplace add itsvedantkumar/vstack
+claude plugin install vstack@vstack
+```
+
+That delivers the 22 skills, 7 subagents, 15 commands, and the session hook that routes
+situations to skills. It does not deliver the rest: user settings such as
+`skillListingBudgetFraction`, the `bin/` wrappers, the shell lane, MCP servers, or
+`secrets.env`. A plugin cannot write those. Use `install.sh` for the whole setup and the
+plugin when you only want the skills.
+
+Pick one or the other. Installing both runs the session hook twice and injects the operating
+mode into every session two times over.
+
 ## Two lanes, and why both exist
 
 `install.sh` writes to `~/.claude`. That covers the local terminal, Conductor, and Remote

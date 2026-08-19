@@ -1,0 +1,19 @@
+{
+  "name": "vstack",
+  "owner": {
+    "name": "Vedant Kumar",
+    "url": "https://github.com/itsvedantkumar"
+  },
+  "metadata": {
+    "description": "Claude Code skills and subagents that trigger on the situation, with the session hook that routes them."
+  },
+  "plugins": [
+    {
+      "name": "vstack",
+      "version": "1.0.0",
+      "source": "./claude",
+      "description": "22 skills that fire without a slash command, 7 subagents, 15 commands, and the SessionStart hook that routes situations to skills. Includes verification gates, swarm fan-out, adversarial review, and writing discipline.",
+      "category": "workflow"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "description": "Routes situations to skills at session start, and re-pins the essentials on every prompt so the discipline survives a long session.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-session-context.sh\"",
+            "statusMessage": "context"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-session-context.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
