@@ -1,6 +1,6 @@
 # Skill attribution
 
-vstack ships 24 skills from four sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, and 1 original to this repo.
+vstack ships 25 skills from five sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 1 from Vercel Labs, and 1 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 
@@ -41,6 +41,21 @@ commands, subagents, or helper scripts. The frontmatter is trimmed to vstack's
 `scripts/*.mjs` helpers and `impeccable-*` subagents refer to pieces that are not vendored —
 the `reference/degraded/` playbooks cover the subagent roles inline.
 
+## From Vercel Labs (1)
+
+`agent-browser` — headless per-workspace browser automation: open, viewport, screenshot,
+accessibility-tree snapshots with `@eN` refs, click/fill by ref. Backs the ui-iterate loop
+when the shared Chrome is unavailable or contended (parallel Conductor workspaces).
+
+Source: [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser),
+Apache 2.0. Author: Vercel Labs. Vendored from v0.34.0.
+
+Upstream's skill is a discovery stub that defers all usage to `agent-browser skills get core`
+at runtime. The vendored version instead inlines the command sequences verified against
+upstream's README (Quick Start, Commands, Sessions), trims the frontmatter to vstack's
+`name` + quoted situation description, and drops upstream's `allowed-tools` and
+`hidden: true` keys. Only SKILL.md is vendored — no upstream code ships in this repo.
+
 ## What was removed, and why
 
 | Skill | Removed because |
@@ -60,5 +75,5 @@ Source: this repo, MIT.
 
 ## Which skills are active
 
-All 24. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
+All 25. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.

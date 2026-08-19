@@ -154,6 +154,22 @@ if [ -n "$CM" ]; then
   jq -e '[.hooks.UserPromptSubmit[].hooks[].async] | all' "$CM" >/dev/null 2>&1 \
     && ok "claude-mem UserPromptSubmit async" || bad "claude-mem UserPromptSubmit" "sync again (plugin updated) — re-apply"
 fi
+echo "── project coverage ──"
+# Every ACTIVE repo should carry the overlay lanes (.conductor run scripts + committed
+# .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo
+# with a commit in the last 45 days and no .conductor/settings.toml is an uncovered project.
+cutoff=$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d 2>/dev/null)
+uncovered=""
+for base in "$HOME/Projects" "$HOME/conductor/repos"; do
+  [ -d "$base" ] || continue
+  for r in "$base"/*/; do
+    [ -d "$r/.git" ] || continue
+    last=$(git -C "$r" log -1 --format=%cs 2>/dev/null) || continue
+    [ -n "$last" ] && [ -n "$cutoff" ] && [ "$last" \> "$cutoff" ] || continue
+    [ -f "$r/.conductor/settings.toml" ] || uncovered="$uncovered $(basename "$r")"
+  done
+done
+[ -z "$uncovered" ] && ok "active repos overlaid" || bad "active repos overlaid" "missing overlay:$uncovered — run 'vstack overlay <repo>'"
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
 jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
