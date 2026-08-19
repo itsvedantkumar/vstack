@@ -84,7 +84,12 @@ TOML
 fi
 
 # .context/ is agent scratch space; keep it out of the repo without touching .gitignore.
-ex="$(git -C "$DEST" rev-parse --git-common-dir)/info/exclude"
+# --git-common-dir can answer with a path relative to DEST — anchor it, or the exclude
+# lands in whatever repo the CALLER happens to be standing in.
+common=$(git -C "$DEST" rev-parse --git-common-dir)
+case "$common" in /*) ;; *) common="$DEST/$common" ;; esac
+ex="$common/info/exclude"
+mkdir -p "${ex%/*}"
 grep -qxF '.context/' "$ex" 2>/dev/null || { echo '.context/' >> "$ex"; echo "excluded .context/"; }
 
 echo
