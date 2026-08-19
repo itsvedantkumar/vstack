@@ -79,6 +79,15 @@ run_mode = "concurrent"
 [scripts.run.verify]
 command = "./.claude/verify.sh"
 icon = "shield-check"
+
+# Live preview for the ui-iterate / design-review loop. Each local workspace gets ten ports
+# starting at $CONDUCTOR_PORT. Adjust the command to the repo's dev runner (vite needs
+# `npm run dev -- --port $CONDUCTOR_PORT`); delete this block for repos with no frontend.
+[scripts.run.dev]
+available_in = [ "local" ]
+command = "PORT=$CONDUCTOR_PORT npm run dev"
+default = true
+icon = "play"
 TOML
   echo "wrote   .conductor/settings.toml"
 fi

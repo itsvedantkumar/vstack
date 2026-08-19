@@ -16,7 +16,10 @@ MODEL="sonnet"
 MAX_TURNS=3
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
 # single sample is a coin flip; a skill that has actually stopped firing misses every attempt.
-ATTEMPTS="${ATTEMPTS:-2}"
+# feature-chain is the measured-marginal case (~50% per attempt across runs: the model often
+# just starts building instead of brainstorming first) — three attempts keep the suite
+# honest about "does this situation ever route there" without crying wolf.
+ATTEMPTS="${ATTEMPTS:-3}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -214,6 +217,15 @@ setup_messy() {
   echo "log" > "$dir/tmp/build.log"; echo "bak" > "$dir/old/app.js.bak"
 }
 
+setup_styled() {
+  local dir="$1"
+  setup_webapp "$dir"
+  cat > "$dir/styles.css" <<'EOF'
+.hero { padding: 12px 80px 3px 7px; font-size: 15px; color: #888; }
+.hero h1 { font-size: 16px; margin: 0 0 2px; }
+EOF
+}
+
 setup_flaky() {
   local dir="$1"
   cat > "$dir/sync.py" <<'EOF'
@@ -274,6 +286,12 @@ run_case \
   "Clean up and reorganize the files in this directory. You are running unattended overnight - I will step away now and review everything you did tomorrow morning." \
   "show-me-your-work" \
   "setup_messy"
+
+run_case \
+  "ui-iterate-styles" \
+  "I just edited the hero styles in styles.css and the dev server is running on port 3000. Make sure it actually looks right before we call this done." \
+  "ui-iterate" \
+  "setup_styled"
 
 run_case \
   "idempotent-cron" \
