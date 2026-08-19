@@ -1,1 +1,0 @@
-../../../claude/hooks/verify-gate.sh

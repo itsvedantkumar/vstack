@@ -13,6 +13,9 @@
 # Usage:
 #   ./install.sh                  install the config
 #   ./install.sh --with-deps      install the tools first (fresh machine)
+#   ./install.sh --bypass-permissions
+#                                 stop asking before every tool call. Deliberately opt-in:
+#                                 this repo is public, and nobody should get it by default.
 #   ./install.sh --dry-run        print what would change, touch nothing
 set -euo pipefail
 
@@ -20,8 +23,10 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
 DRY=0
 WITH_DEPS=0
+BYPASS=0
 for a in "$@"; do
   case "$a" in
+    --bypass-permissions) BYPASS=1 ;;
     --with-deps)    WITH_DEPS=1 ;;
     --dry-run)      DRY=1 ;;
     -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
@@ -165,7 +170,14 @@ elif [ "$DRY" = 0 ]; then
     | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3}
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
-  say "merged     ~/.claude/settings.json"
+  if [ "$BYPASS" = 1 ]; then
+    tmp=$(mktemp)
+    jq '.permissions.defaultMode = "bypassPermissions" | .skipDangerousModePermissionPrompt = true' "$US" > "$tmp"
+    jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
+    say "merged     ~/.claude/settings.json (+ bypassPermissions)"
+  else
+    say "merged     ~/.claude/settings.json"
+  fi
 fi
 
 # --- MCP servers ---------------------------------------------------------------------------

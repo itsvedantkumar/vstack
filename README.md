@@ -178,13 +178,8 @@ touching your machine config:
 
 ```bash
 claude plugin marketplace add itsvedantkumar/vstack
-claude plugin install vstack@vstack        # skills, subagents, commands, routing hook
-claude plugin install vstack-core@vstack   # subagents, commands, verify gate — no third-party skills
+claude plugin install vstack@vstack
 ```
-
-`vstack-core` exists because most of the skills in `vstack` are ports of other people's work.
-If you want the delegation and verification machinery without redistributing a skill pack,
-install that one.
 
 As a plugin the session hook runs in `VSTACK_PROFILE=skills` mode: it injects the skill
 routing block and nothing else. The token, delegation, and autonomy rules are one person's

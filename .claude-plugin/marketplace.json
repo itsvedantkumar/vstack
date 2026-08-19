@@ -14,13 +14,6 @@
       "source": "./claude",
       "description": "22 skills that fire without a slash command, 7 subagents, 15 commands, and the session hook that routes situations to skills. Most skills are ported from pstack and Superpowers \u2014 see claude/skills/ATTRIBUTION.md for per-skill source and license.",
       "category": "workflow"
-    },
-    {
-      "name": "vstack-core",
-      "version": "1.0.0",
-      "source": "./plugins/vstack-core",
-      "description": "Subagents, workflow commands, and the verification Stop hook, with no third-party skills. Install this if you want the delegation and verification machinery without a skill pack.",
-      "category": "workflow"
     }
   ]
 }

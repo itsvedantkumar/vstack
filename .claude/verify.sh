@@ -24,8 +24,7 @@ done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*
 if command -v jq >/dev/null; then
   errs=""
   for f in claude/settings.json mcp/servers.json claude/hooks/hooks.json \
-           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
-           plugins/vstack-core/.claude-plugin/plugin.json plugins/vstack-core/hooks/hooks.json; do
+           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json; do
     [ -f "$f" ] || { errs="$errs\n$f: missing"; continue; }
     jq -e . "$f" >/dev/null 2>&1 || errs="$errs\n$f: invalid JSON"
   done
