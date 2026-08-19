@@ -313,7 +313,7 @@ nag=$(ls claude/agents/*.md   2>/dev/null | wc -l | tr -d ' ')
 ncm=$(ls claude/commands/*.md 2>/dev/null | wc -l | tr -d ' ')
 nhk=$(ls claude/hooks/*.sh    2>/dev/null | wc -l | tr -d ' ')
 nwr=$(ls bin/*                2>/dev/null | wc -l | tr -d ' ')
-ncs=$(grep -cE '^run_case ' tests/auto-trigger.sh 2>/dev/null || echo 0)
+ncs=$(grep -cE '^run_(negative_)?case ' tests/auto-trigger.sh 2>/dev/null || echo 0)
 nmc=0
 command -v jq >/dev/null && nmc=$(jq 'keys|length' mcp/servers.json 2>/dev/null || echo 0)
 
@@ -335,7 +335,8 @@ want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty 
 exempt_phrases(){
   case "$1" in
     README.md)               printf '%s\n' '18 skills are ported' ;;
-    docs/how-skills-fire.md) printf '%s\n' 'installed 18 skills correctly' '44 skills' ;;
+    docs/how-skills-fire.md) printf '%s\n' 'installed 18 skills correctly' '44 skills' \
+                                           '9 of 9 cases fire the expected skill' ;;
   esac
 }
 

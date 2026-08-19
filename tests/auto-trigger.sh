@@ -24,27 +24,36 @@ ATTEMPTS="${ATTEMPTS:-3}"
 PASS_COUNT=0
 FAIL_COUNT=0
 declare -a RESULT_LINES=()
+# Which attempt each case landed on. Pass/fail alone hides erosion: a skill that has slipped
+# from firing every time to firing on the third try still reads PASS, and stays a pass right up
+# until it reaches zero. The attempt number is the early warning.
+declare -a HIT_LINES=()
 
 # ---------------------------------------------------------------------------
-# Preflight: skip (exit 0) rather than fail if claude isn't usable here.
-# CI cannot authenticate headlessly, so absence of `claude` or a session is
-# an expected, non-failing condition -- not a broken test.
+# Preflight. In CI this skips with exit 0: GitHub Actions cannot authenticate
+# headlessly, so an absent session is expected rather than broken.
+#
+# Everywhere else it exits 2. A local run that quietly returned 0 without having
+# tested anything read exactly like a pass, which is the failure mode this whole
+# suite exists to catch in the config it tests.
 # ---------------------------------------------------------------------------
-if ! command -v claude >/dev/null 2>&1; then
-  echo "SKIP: 'claude' CLI not found on PATH. Cannot run auto-trigger regression test."
-  exit 0
-fi
+skip_or_fail() {
+  echo "SKIP: $1"
+  if [[ "${CI:-}" == "true" ]]; then exit 0; fi
+  echo "      (exit 2: nothing was tested. Set CI=true to make this a pass.)"
+  exit 2
+}
+
+command -v claude >/dev/null 2>&1 || \
+  skip_or_fail "'claude' CLI not found on PATH."
 
 AUTH_JSON="$(claude auth status 2>/dev/null)"
 if [[ -z "$AUTH_JSON" ]] || ! echo "$AUTH_JSON" | grep -q '"loggedIn": *true'; then
-  echo "SKIP: 'claude' CLI is not authenticated (claude auth status did not report loggedIn: true)."
-  exit 0
+  skip_or_fail "'claude' CLI is not authenticated (claude auth status did not report loggedIn: true)."
 fi
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "SKIP: 'jq' not found on PATH; required to parse stream-json output."
-  exit 0
-fi
+command -v jq >/dev/null 2>&1 || \
+  skip_or_fail "'jq' not found on PATH; required to parse stream-json output."
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +142,7 @@ run_case() {
         echo "PASS $name -> $matched"
         RESULT_LINES+=("PASS $name -> $matched")
       fi
+      HIT_LINES+=("$(printf '%-22s attempt %s/%s  -> %s' "$name" "$attempt" "$ATTEMPTS" "$matched")")
       PASS_COUNT=$((PASS_COUNT + 1))
       return
     fi
@@ -142,7 +152,53 @@ run_case() {
 
   echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts (last: [$fired_csv])"
   RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts")
+  HIT_LINES+=("$(printf '%-22s never in %s   -> (none)' "$name" "$ATTEMPTS")")
   FAIL_COUNT=$((FAIL_COUNT + 1))
+}
+
+# Negative control. Every other case asks "did the right skill fire", which cannot see a skill
+# that fires on everything — and an over-eager skill actively helps the positive cases pass. One
+# sample, no retries: the question is whether it fires at all on a prompt that is plainly not
+# its situation.
+run_negative_case() {
+  local name="$1" prompt="$2" forbidden_regex="$3"
+  local workdir out_jsonl err_log runner_pid waited fired fired_csv
+
+  workdir="$(mktemp -d "/tmp/auto-trigger-neg.XXXXXX")"
+  out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
+  (
+    cd "$workdir" || exit 1
+    exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+      claude -p "$prompt" \
+        --output-format stream-json --verbose \
+        --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash" \
+        --model "$MODEL" --max-turns "$MAX_TURNS" \
+        < /dev/null > "$out_jsonl" 2> "$err_log"
+  ) &
+  runner_pid=$!
+  waited=0
+  while kill -0 "$runner_pid" 2>/dev/null; do
+    sleep 1; waited=$((waited + 1))
+    if (( waited >= PER_CASE_TIMEOUT )); then kill -9 "$runner_pid" 2>/dev/null; break; fi
+  done
+  wait "$runner_pid" 2>/dev/null
+
+  fired=""
+  [[ -s "$out_jsonl" ]] && fired="$(extract_fired_skills "$out_jsonl")"
+  fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"; [[ -z "$fired_csv" ]] && fired_csv="(none)"
+  rm -rf "$workdir"
+
+  if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($forbidden_regex)$"; then
+    echo "FAIL $name -> $forbidden_regex fired on a prompt that is not its situation [$fired_csv]"
+    RESULT_LINES+=("FAIL $name -> over-triggered")
+    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> fired: %s' "$name" "$fired_csv")")
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  else
+    echo "PASS $name -> did not over-trigger [$fired_csv]"
+    RESULT_LINES+=("PASS $name -> no over-trigger")
+    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> clean (%s)' "$name" "$fired_csv")")
+    PASS_COUNT=$((PASS_COUNT + 1))
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -226,7 +282,7 @@ echo "---"
 run_case \
   "readme-writing" \
   "Write a README section explaining what this script does." \
-  "technical-writing|unslop" \
+  "technical-writing" \
   "setup_readme"
 
 run_case \
@@ -244,9 +300,14 @@ run_case \
 run_case \
   "blast-radius-auth" \
   "I need to ship a risky change to auth, review the blast radius." \
-  "blast-radius|interrogate" \
+  "blast-radius" \
   ""
 
+# The three-way match is deliberate and stays. This case protects "a feature request routes
+# into the planning chain", and any of the three IS the chain — narrowing it to brainstorming
+# alone would assert a specific entry point that measures ~50% per attempt, which makes the
+# suite flaky rather than strict. A flaky gate gets ignored, and an ignored gate is worse than
+# a wide one. The hit-rate table below is what makes erosion here visible instead.
 run_case \
   "feature-chain" \
   "I want a dark-mode toggle feature in this notes app. Build it." \
@@ -277,7 +338,20 @@ run_case \
   "principle-make-operations-idempotent" \
   ""
 
+run_negative_case \
+  "negative-arithmetic" \
+  "What is 17 times 23? Just the number." \
+  "ui-iterate|impeccable|blast-radius|show-me-your-work|swarm"
+
+run_negative_case \
+  "negative-factual" \
+  "Which HTTP status code means Payment Required?" \
+  "ui-iterate|impeccable|blast-radius|brainstorming|writing-plans"
+
 echo "---"
+echo "Hit rates (which attempt each case landed on):"
+for l in "${HIT_LINES[@]}"; do echo "  $l"; done
+echo
 echo "Summary: $PASS_COUNT passed, $FAIL_COUNT failed (of $((PASS_COUNT + FAIL_COUNT)))"
 
 if (( FAIL_COUNT > 0 )); then
