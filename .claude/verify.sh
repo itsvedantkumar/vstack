@@ -2,15 +2,35 @@
 # verify.sh — proof that this bundle is installable and portable.
 #
 # Run by the verify-gate.sh Stop hook: a non-zero exit blocks an agent from claiming the
-# work is done. Checks that need a missing tool SKIP rather than fail, so a fresh clone
-# without jq still gets a useful answer instead of a red herring.
+# work is done.
+#
+# A check that needs a missing tool SKIPs, but check 0 fails when that tool is one this
+# gate depends on, and the accounting line at the bottom proves every declared check
+# actually reported. That combination is deliberate: three checks used to be wrapped in a
+# bare `if command -v jq` with no else, so on a host without jq they printed nothing at all
+# and the operator read VERIFIED off a gate that had run eight of thirteen checks.
 set -uo pipefail
+SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 FAIL=0
-ok(){   printf 'ok    %s\n' "$1"; }
-bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; FAIL=1; }
-skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; }
+RAN=0
+SKIPPED=0
+# Declared checks, counted from this file's own section headers, so adding a check cannot
+# leave the accounting behind.
+TOTAL=$(grep -c '^# --- [0-9]' "$SELF")
+ok(){   printf 'ok    %s\n' "$1"; RAN=$((RAN+1)); }
+bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; FAIL=1; RAN=$((RAN+1)); }
+skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
+
+# --- 0. the toolchain this gate depends on is present -------------------------------------
+# jq is core tier (README: install via ./setup-machine.sh). Five checks below need it and
+# git. Reporting their absence as a quiet skip let a partial run masquerade as a full pass,
+# so a missing dependency is a failure here and the skips below merely say which ones went.
+missing=""
+for t in jq git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; done
+[ -z "$missing" ] && ok "toolchain (jq, git)" \
+  || bad "toolchain" "missing:$missing — install with ./setup-machine.sh, then re-run"
 
 # --- 1. every shell script parses ----------------------------------------------------------
 errs=""
@@ -121,15 +141,20 @@ if command -v jq >/dev/null; then
   if [ -z "$prog" ]; then
     bad "settings merge program" "could not extract the jq program from install.sh"
   else
-    out=$(printf '{}\n' > /tmp/vs-merge-a.json; cp claude/settings.json /tmp/vs-merge-b.json;
-          jq -s --arg h "/tmp/hooks" --arg n "true" "$prog" /tmp/vs-merge-a.json /tmp/vs-merge-b.json 2>&1)
+    # mktemp, not fixed /tmp names: two Conductor workspaces verifying at once would
+    # otherwise clobber each other's scratch files mid-check.
+    md=$(mktemp -d)
+    out=$(printf '{}\n' > "$md/a.json"; cp claude/settings.json "$md/b.json";
+          jq -s --arg h "/tmp/hooks" --arg n "true" "$prog" "$md/a.json" "$md/b.json" 2>&1)
     if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
       ok "settings merge program"
     else
       bad "settings merge program" "$out"
     fi
-    rm -f /tmp/vs-merge-a.json /tmp/vs-merge-b.json
+    rm -rf "$md"
   fi
+else
+  skip "settings merge program" "jq not installed"
 fi
 
 # --- 9. the installer runs ---------------------------------------------------------------------
@@ -161,12 +186,18 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     bad "overlay merge path" "$out"
   fi
   rm -rf "$od"
+else
+  skip "overlay merge path" "jq or git not installed"
 fi
 
 # --- 10. agents and commands are loadable ------------------------------------------------------
 # Same failure class as check 3: frontmatter drift silently breaks discovery.
-errs=""
+# The n>0 guards mirror check 3: an empty directory makes the glob expand to itself, and
+# without a count this check would report green on a tree that had lost every agent.
+errs=""; na=0; nc=0
 for f in claude/agents/*.md; do
+  [ -e "$f" ] || continue
+  na=$((na+1))
   b=$(basename "$f" .md)
   name=$(awk -F': *' '/^name:/{print $2; exit}' "$f" | tr -d '"')
   desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
@@ -174,11 +205,15 @@ for f in claude/agents/*.md; do
   [ -n "$desc" ] || errs="$errs\nagents/$b: no description"
 done
 for f in claude/commands/*.md; do
+  [ -e "$f" ] || continue
+  nc=$((nc+1))
   b=$(basename "$f" .md)
   desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
   [ -n "$desc" ] || errs="$errs\ncommands/$b: no description"
 done
-[ -z "$errs" ] && ok "agents + commands loadable" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
+[ "$na" -gt 0 ] || errs="$errs\nno agents found"
+[ "$nc" -gt 0 ] || errs="$errs\nno commands found"
+[ -z "$errs" ] && ok "agents ($na) + commands ($nc) loadable" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
 
 # --- 11. hook wiring is complete in both lanes -------------------------------------------------
 # A hook event dropped from claude/settings.json (project/overlay lane) or from install.sh's
@@ -194,6 +229,8 @@ if command -v jq >/dev/null; then
     [ -f "claude/$h" ] || errs="$errs\n$h: referenced in settings but not in claude/hooks/"
   done
   [ -z "$errs" ] && ok "hook wiring (both lanes)" || bad "hook wiring" "$(printf '%b' "$errs")"
+else
+  skip "hook wiring" "jq not installed"
 fi
 
 # --- 12. documented counts match the tree ------------------------------------------------------
@@ -210,5 +247,13 @@ fi
 [ -z "$errs" ] && ok "doc counts match tree ($nsk skills, $nag agents)" || bad "doc counts match tree" "$(printf '%b' "$errs")"
 
 echo
+# Accounting. Every declared check must have reported either a result or a skip. A check
+# that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
+# reports nothing — and used to leave no trace in the output at all. Now it fails the run.
+printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
+if [ "$((RAN + SKIPPED))" -ne "$TOTAL" ]; then
+  bad "check accounting" "$((TOTAL - RAN - SKIPPED)) declared check(s) reported nothing"
+fi
+
 [ "$FAIL" -eq 0 ] && echo "VERIFIED" || echo "VERIFICATION FAILED"
 exit "$FAIL"
