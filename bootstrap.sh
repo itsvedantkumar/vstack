@@ -7,10 +7,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
 #
-# Any arguments are passed straight to install.sh:
-#   ... | bash -s -- --with-launchd
-#
-# Pin a different checkout location with VSTACK_DIR, or a fork with VSTACK_REPO.
+# Any arguments are passed straight to install.sh. Pin a different checkout location with
+# VSTACK_DIR, or a fork with VSTACK_REPO.
 set -euo pipefail
 
 DIR="${VSTACK_DIR:-$HOME/.vstack}"

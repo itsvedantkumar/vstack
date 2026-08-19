@@ -38,12 +38,12 @@ its own.
 
 `tests/auto-trigger.sh` runs real prompts through the CLI and reports which skills fired. A
 version of the hook that dropped the routing table in favour of "the descriptions are the
-triggers" was measured against the same four cases:
+triggers" was measured against nine cases:
 
 | Hook version | Result |
 |---|---|
-| Routing table present | 4 of 4 cases fire the expected skill |
-| Routing table removed | 2 of 4, `technical-writing` and `typescript-best-practices` never fire |
+| Routing table present | 9 of 9 cases fire the expected skill |
+| Routing table removed | 7 of 9, `technical-writing` and `typescript-best-practices` never fire |
 
 Both runs used two attempts per case. The two that keep working without the table, `swarm` and
 `blast-radius`, have descriptions with unusually distinctive trigger language. The two that

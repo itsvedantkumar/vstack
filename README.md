@@ -1,6 +1,6 @@
 # vstack
 
-**A Claude Code setup where the skills fire on their own.** 22 skills, 7 subagents, 15
+**A Claude Code setup where the skills fire on their own.** 23 skills, 8 agents, 15
 commands, and the session hook that routes a situation to the right skill without you typing a
 slash command.
 
@@ -79,11 +79,11 @@ because there you asked for it.
 
 | Component | Count | Installs to |
 |---|---|---|
-| Skills | 22 | `~/.claude/skills/` |
-| Subagents | 7 | `~/.claude/agents/` |
+| Skills | 23 | `~/.claude/skills/` |
+| Subagents | 8 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
-| CLI wrappers | 8 | `~/.config/agents/bin/` |
+| CLI wrappers | 7 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 | Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
 
@@ -92,7 +92,7 @@ matching `ls` per directory.
 
 ## The skills
 
-Ten workflow skills, each triggered by a situation rather than a command.
+Eleven workflow skills, each triggered by a situation rather than a command.
 
 | Skill | Fires when |
 |---|---|
@@ -106,6 +106,7 @@ Ten workflow skills, each triggered by a situation rather than a command.
 | `technical-writing` | writing docs, RFCs, READMEs, PR bodies, commit messages |
 | `unslop` | any prose at all, to cut the AI tells |
 | `typescript-best-practices` | reading, writing, or reviewing `.ts` or `.tsx` |
+| `ui-iterate` | editing UI files when a dev server runs: screenshot, critique, fix before declaring done |
 
 Eight principles load when the moment matches and apply a rule rather than run a procedure.
 
@@ -246,8 +247,8 @@ bootstrap.sh     clone, setup-machine, and install in one line
 
 ## Credits
 
-18 skills are ported from [pstack](https://github.com/cursor/plugins) and 4 come from
-[Superpowers](https://github.com/obra/superpowers). Porting adapted them to Claude Code:
-Cursor model names mapped to Anthropic ones, `Task` calls to the `Agent` tool, and cloud-only
-parameters to local execution. Per-skill sources and licenses are in
-[ATTRIBUTION.md](claude/skills/ATTRIBUTION.md).
+18 skills are ported from [pstack](https://github.com/cursor/plugins), 4 come from
+[Superpowers](https://github.com/obra/superpowers), and 1 is original to this repo (`ui-iterate`).
+Porting adapted them to Claude Code: Cursor model names mapped to Anthropic ones, `Task` calls to
+the `Agent` tool, and cloud-only parameters to local execution. Per-skill sources and licenses are
+in [ATTRIBUTION.md](claude/skills/ATTRIBUTION.md).

@@ -10,7 +10,7 @@ silently once (0 of 4 test prompts fired a skill) with nothing to catch the
 regression.
 
 `auto-trigger.sh` is a black-box regression test for that property. It runs
-`claude -p "<prompt>"` headlessly for four prompts that should each cause a
+`claude -p "<prompt>"` headlessly for nine prompts that should each cause a
 specific skill to auto-fire, inspects the `stream-json` transcript for
 `Skill` tool_use blocks, and reports PASS/FAIL per case.
 
@@ -26,7 +26,9 @@ script prints `SKIP: ...` and exits 0. That is a valid, non-failing outcome,
 not a bug in the test.
 
 Each case runs in its own `mktemp -d` under `/tmp` (never this repo), so
-nothing here pollutes the working tree the model sees.
+nothing here pollutes the working tree the model sees. The test suite covers nine scenarios:
+swarm, blast-radius, feature-chain, root-cause-guard, interrogate, overnight-audit-trail,
+ui-iterate-styles, technical-writing, and idempotent-cron.
 
 ## Why this cannot run in GitHub Actions
 

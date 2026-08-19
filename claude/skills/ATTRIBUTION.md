@@ -1,7 +1,6 @@
 # Skill attribution
 
-vstack ships 22 skills from two sources. Nothing here is original to vstack except the porting
-work described below.
+vstack ships 23 skills from three sources: 18 from pstack, 4 from Superpowers, and 1 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 
@@ -38,7 +37,13 @@ Source: [obra/superpowers](https://github.com/obra/superpowers), MIT.
 | `vercel-deploy` | The `vercel` CLI does the same work with fewer tokens. |
 | `spaceship`, `security-threat-model` | Not used. |
 
+## Original (1)
+
+`ui-iterate` — screenshot and critique cycle for UI files.
+
+Source: this repo, MIT.
+
 ## Which skills are active
 
-All 22. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
+All 23. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.

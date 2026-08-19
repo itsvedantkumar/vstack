@@ -98,7 +98,10 @@ hits=$(grep -rInE --exclude-dir=.git \
 ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|re-pins|re-pin|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|name-only|per-prompt|session-context|session-start|operating-mode|two-line'
 errs=""
 # \b keeps a capitalized word (Per-prompt) from yielding a bogus mid-word token (er-prompt).
-for tok in $(grep -ohE '\b[a-z][a-z0-9]*(-[a-z0-9]+)+' claude/CLAUDE.md claude/hooks/inject-session-context.sh | sort -u); do
+# Only the hook's heredoc prose is scanned — its shell code contains regex character classes
+# (A-Za-z0-9) that shred into false skill-name tokens.
+hook_prose=$(sed -n "/<<'EOF'/,/^EOF\$/p" claude/hooks/inject-session-context.sh)
+for tok in $( { cat claude/CLAUDE.md; printf '%s\n' "$hook_prose"; } | grep -ohE '\b[a-z][a-z0-9]*(-[a-z0-9]+)+' | sort -u); do
   [ -d "claude/skills/$tok" ] && continue
   [ -d "claude/skills/principle-$tok" ] && continue
   [ -f "claude/agents/$tok.md" ] && continue
@@ -137,6 +140,52 @@ if command -v jq >/dev/null; then
 else
   skip "install.sh --dry-run" "jq not installed"
 fi
+
+# --- 10. agents and commands are loadable ------------------------------------------------------
+# Same failure class as check 3: frontmatter drift silently breaks discovery.
+errs=""
+for f in claude/agents/*.md; do
+  b=$(basename "$f" .md)
+  name=$(awk -F': *' '/^name:/{print $2; exit}' "$f" | tr -d '"')
+  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
+  [ "$name" = "$b" ] || errs="$errs\nagents/$b: name ($name) does not match filename"
+  [ -n "$desc" ] || errs="$errs\nagents/$b: no description"
+done
+for f in claude/commands/*.md; do
+  b=$(basename "$f" .md)
+  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
+  [ -n "$desc" ] || errs="$errs\ncommands/$b: no description"
+done
+[ -z "$errs" ] && ok "agents + commands loadable" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
+
+# --- 11. hook wiring is complete in both lanes -------------------------------------------------
+# A hook event dropped from claude/settings.json (project/overlay lane) or from install.sh's
+# rebuild program (user lane) ships green through every other check — this is the check that
+# would have caught a missing UserPromptSubmit.
+if command -v jq >/dev/null; then
+  errs=""
+  for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure; do
+    jq -e --arg e "$ev" '.hooks[$e]' claude/settings.json >/dev/null 2>&1 || errs="$errs\n$ev: missing from claude/settings.json hooks"
+    grep -q "$ev" install.sh || errs="$errs\n$ev: missing from install.sh hook rebuild"
+  done
+  for h in $(jq -r '.hooks[][]?.hooks[]?.command' claude/settings.json 2>/dev/null | grep -o 'hooks/[a-z-]*\.sh' | sort -u); do
+    [ -f "claude/$h" ] || errs="$errs\n$h: referenced in settings but not in claude/hooks/"
+  done
+  [ -z "$errs" ] && ok "hook wiring (both lanes)" || bad "hook wiring" "$(printf '%b' "$errs")"
+fi
+
+# --- 12. documented counts match the tree ------------------------------------------------------
+# README and the marketplace manifest state skill/agent counts in prose; nothing else stops
+# them drifting when a skill or agent is added. This check exists because exactly that shipped.
+nsk=$(find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+nag=$(ls claude/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
+errs=""
+grep -qE "\b$nsk skills\b" README.md || errs="$errs\nREADME.md: does not state '$nsk skills'"
+grep -qE "\b$nag (sub)?agents\b" README.md || errs="$errs\nREADME.md: does not state '$nag agents'"
+if [ -f .claude-plugin/marketplace.json ]; then
+  grep -qE "\b$nsk skills\b" .claude-plugin/marketplace.json || errs="$errs\nmarketplace.json: does not state '$nsk skills'"
+fi
+[ -z "$errs" ] && ok "doc counts match tree ($nsk skills, $nag agents)" || bad "doc counts match tree" "$(printf '%b' "$errs")"
 
 echo
 [ "$FAIL" -eq 0 ] && echo "VERIFIED" || echo "VERIFICATION FAILED"
