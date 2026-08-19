@@ -4,13 +4,15 @@
 substitutes `__HOME__` at install time. Global servers load in every session, so only servers
 you want everywhere belong here.
 
-Three servers ship globally:
+Two servers ship globally:
 
 | server | needs | notes |
 |---|---|---|
 | `cloudflare-mcp` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` in `secrets.env` | wrapper at `bin/cloudflare-mcp`. Set `CLOUDFLARE_MCP_DIST` if the server lives outside `~/Projects/cloudflare-mcp` |
 | `context7` | nothing | fetches current library docs. Runs via `npx` |
-| `figma` | one-time OAuth: run `/mcp` in a session and authenticate | official bidirectional Figma MCP (read frames → code, push UI back as layers). HTTP transport, no local process |
+
+Design-system sync deliberately uses no MCP: Claude Code's built-in DesignSync tool +
+`/design-sync` cover claude.ai/design projects with zero config and zero listing cost.
 
 ## Project-scoped servers
 
