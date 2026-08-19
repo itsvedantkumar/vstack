@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+if [ -f "$HOME/.config/agents/secrets.env" ]; then
+  . "$HOME/.config/agents/secrets.env"
+else
+  echo "cloudflare-mcp: missing $HOME/.config/agents/secrets.env" >&2
+  exit 1
+fi
+exec node "${CLOUDFLARE_MCP_DIST:-$HOME/Projects/cloudflare-mcp/dist/index.js}"

@@ -1,0 +1,12 @@
+{
+  "cloudflare-mcp": {
+    "type": "stdio",
+    "command": "__HOME__/.config/agents/bin/cloudflare-mcp",
+    "args": []
+  },
+  "context7": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@upstash/context7-mcp"]
+  }
+}

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Health-check Claude Code setup — catches silent drift (vanished hooks/agents, missing secrets).
+p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖ $2"; FAIL=1; }; FAIL=0
+echo "── hooks ──"
+# inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
+for f in format inject-session-context verify-gate; do
+  [ -x "$HOME/.claude/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
+[ -x "$HOME/.claude/hooks/failure-diagnose.sh" ] && ok "failure-diagnose.sh" || bad "failure-diagnose.sh" "missing"
+[ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
+n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' '); [ "$n" -ge 6 ] && ok "subagents ($n)" || bad "subagents" "$n<6"
+echo "── secrets ──"
+[ -f "$HOME/.config/agents/secrets.env" ] && [ "$(stat -f '%Lp' "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
+grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || bad "zshenv source" "not sourced"
+for w in cloudflare-mcp namecheap-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
+echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
+echo "── memory ──"; [ -d "$HOME/.claude-mem" ] && ok "claude-mem store" || bad "claude-mem" "missing"
+S="$HOME/.claude/settings.json"
+echo "── parity ──"
+[ -z "${ANTHROPIC_API_KEY:-}" ] && ok "no ANTHROPIC_API_KEY in env" || bad "ANTHROPIC_API_KEY" "set — billing API credits, not the Max sub"
+AS=$(claude auth status 2>/dev/null)
+# NB: there is no `apiKeySource` field in 2.1.226 — `jq '{apiKeySource}'` renders a missing
+# key as null, which looks like a pass but proves nothing. authMethod+apiProvider are real.
+printf '%s' "$AS" | jq -e '.subscriptionType=="max"' >/dev/null 2>&1 && ok "auth: Max subscription" || bad "auth" "not on subscription"
+printf '%s' "$AS" | jq -e '.authMethod=="claude.ai" and .apiProvider=="firstParty"' >/dev/null 2>&1 \
+  && ok "auth: claude.ai OAuth (not API key)" || bad "auth method" "not OAuth — may be billing API credits"
+printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1 \
+  && ok "forceLoginMethod enforced" || bad "forceLoginMethod" "not enforced"
+[ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
+jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true' "$S" >/dev/null 2>&1 \
+  && ok "Conductor parity keys" || bad "Conductor parity keys" "drifted"
+jq -e '.skillListingMaxDescChars and .skillListingBudgetFraction and (.skillOverrides|length>0)' "$S" >/dev/null 2>&1 \
+  && ok "context caps (skill listing)" || bad "context caps" "drifted"
+# claude-mem auto-updates and will silently revert this async flag.
+CM=$(ls -d "$HOME"/.claude/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json 2>/dev/null | tail -1)
+if [ -n "$CM" ]; then
+  jq -e '[.hooks.UserPromptSubmit[].hooks[].async] | all' "$CM" >/dev/null 2>&1 \
+    && ok "claude-mem UserPromptSubmit async" || bad "claude-mem UserPromptSubmit" "sync again (plugin updated) — re-apply"
+fi
+echo "── remote/dispatch ──"
+[ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
+jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
+B="$HOME/Library/Application Support/Claude/bridge-state.json"
+if [ -f "$B" ]; then
+  want=$(jq -r '.remote.defaultEnvironmentId // ""' "$S")
+  jq -e --arg w "$want" 'to_entries | map(.value.environmentId) | index($w)' "$B" >/dev/null 2>&1 \
+    && ok "bridge env matches settings" || bad "bridge env" "settings=$want not in bridge-state.json"
+fi
+[ "${1:-}" = "--mcp" ] && { echo "── mcp ──"; claude mcp list 2>/dev/null | grep -E 'Connected|Failed'; }
+echo; [ "$FAIL" -eq 0 ] && echo "ALL GREEN ✔" || echo "DRIFT ✖"; exit $FAIL

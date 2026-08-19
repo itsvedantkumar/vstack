@@ -1,80 +1,203 @@
 #!/usr/bin/env bash
-# install.sh — materialise the user-scope lane (~/.claude, ~/.config/agents) from this repo.
-# Idempotent. Backs up anything it overwrites.
+# install.sh — install the whole vstack bundle onto this Mac.
 #
-# Lanes (see README):
-#   user-scope   -> this script            : local terminal + Conductor + Remote Control
-#   repo overlay -> ./overlay.sh <repo>    : ALSO reaches cloud sessions / phone dispatch
+# Idempotent: safe to re-run any number of times. Every file it overwrites is copied to a
+# timestamped backup dir first, and it never touches secrets you already have.
+#
+# Lanes it materialises:
+#   ~/.claude/                 hooks, agents, commands, skills, scheduled-tasks, settings
+#   ~/.config/agents/bin/      CLI wrappers (deploy, headless runner, MCP shims, doctor)
+#   ~/.config/agents/shell/    zsh parity wrapper + env snippet, wired into .zshrc/.zshenv
+#   ~/.claude.json             MCP server entries (merged, never clobbered)
+#
+# Usage:
+#   ./install.sh                  full install, no OS-level schedulers
+#   ./install.sh --with-launchd   also load the launchd timers for scheduled routines
+#   ./install.sh --dry-run        print what would change, touch nothing
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
-         "$HOME/.claude/skills" "$HOME/.config/agents/shell"
-chmod 700 "$HOME/.config/agents/backups"
+WITH_LAUNCHD=0
+DRY=0
+for a in "$@"; do
+  case "$a" in
+    --with-launchd) WITH_LAUNCHD=1 ;;
+    --dry-run)      DRY=1 ;;
+    -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
+    *) echo "unknown flag: $a" >&2; exit 2 ;;
+  esac
+done
 
-back(){ [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOME/}" | tr / _)"; }
+say(){ printf '%s\n' "$*"; }
+run(){ if [ "$DRY" = 1 ]; then say "would: $*"; else "$@"; fi; }
 
-# --- hooks / agents / commands ---
-for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")";    cp "$f" "$HOME/.claude/hooks/";    done
-for f in "$SRC"/claude/agents/*.md;   do cp "$f" "$HOME/.claude/agents/";   done
-for f in "$SRC"/claude/commands/*.md; do cp "$f" "$HOME/.claude/commands/"; done
-chmod 755 "$HOME"/.claude/hooks/*.sh
+command -v jq >/dev/null || { echo "error: jq is required (brew install jq)" >&2; exit 1; }
+[ -f "$SRC/claude/settings.json" ] || { echo "error: run this from the vstack repo" >&2; exit 1; }
 
-# --- skills (pstack, ported to Claude Code) ---
-# Whole-dir replace per skill: these carry references/ and scripts/ subtrees, so a
-# file-by-file copy would leave stale files behind after an upstream removal.
-# Only touches skills this repo owns; never deletes user-authored skills.
+if [ "$DRY" = 0 ]; then
+  mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
+           "$HOME/.claude/skills" "$HOME/.claude/scheduled-tasks" \
+           "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
+  chmod 700 "$HOME/.config/agents/backups"
+fi
+back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOME/}" | tr / _)"; return 0; }
+
+# --- hooks / agents / commands ------------------------------------------------------------
+for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")"; run cp "$f" "$HOME/.claude/hooks/"; done
+for f in "$SRC"/claude/agents/*.md;   do run cp "$f" "$HOME/.claude/agents/";   done
+for f in "$SRC"/claude/commands/*.md; do run cp "$f" "$HOME/.claude/commands/"; done
+[ "$DRY" = 0 ] && chmod 755 "$HOME"/.claude/hooks/*.sh
+say "installed  hooks, agents, commands"
+
+# --- skills -------------------------------------------------------------------------------
+# Whole-dir replace per skill: they carry references/ and scripts/ subtrees, so a file-by-file
+# copy would leave stale files behind after an upstream removal. Only touches skills this repo
+# owns; never deletes skills you wrote yourself.
 for d in "$SRC"/claude/skills/*/; do
   s=$(basename "$d")
+  [ "$DRY" = 1 ] && { say "would: install skill $s"; continue; }
   [ -d "$HOME/.claude/skills/$s" ] && cp -R "$HOME/.claude/skills/$s" "$BK/skills_$s"
   rm -rf "${HOME:?}/.claude/skills/$s"
-  # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src's *contents*
-  # into dest, not src itself — which would scatter SKILL.md and references/ at top level.
+  # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src CONTENTS into dest,
+  # not src itself, which would scatter SKILL.md and references/ across the skills root.
   cp -R "${d%/}" "$HOME/.claude/skills/"
 done
-find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null || true
+[ -f "$SRC/claude/skills/LICENSE.pstack" ] && run cp "$SRC/claude/skills/LICENSE.pstack" "$HOME/.claude/skills/"
+[ "$DRY" = 0 ] && find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
+say "installed  skills ($(find "$SRC"/claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' '))"
 
-# --- settings: merge the portable subset INTO existing user settings, then re-point hook
-#     paths to absolute (user scope has no $CLAUDE_PROJECT_DIR). Never clobbers user-only
-#     keys such as forceLoginMethod / remote / statusLine / enabledPlugins / permissions.
+# --- scheduled routines (prompts only; scheduling is separate) ----------------------------
+for d in "$SRC"/claude/scheduled-tasks/*/; do
+  s=$(basename "$d")
+  [ "$DRY" = 1 ] && { say "would: install routine $s"; continue; }
+  mkdir -p "$HOME/.claude/scheduled-tasks/$s"
+  back "$HOME/.claude/scheduled-tasks/$s/SKILL.md"
+  cp "$d/SKILL.md" "$HOME/.claude/scheduled-tasks/$s/SKILL.md"
+done
+say "installed  scheduled-task prompts"
+
+# --- agent bin ----------------------------------------------------------------------------
+for f in "$SRC"/bin/*; do
+  b=$(basename "$f")
+  back "$HOME/.config/agents/bin/$b"
+  run cp "$f" "$HOME/.config/agents/bin/$b"
+done
+[ "$DRY" = 0 ] && chmod 755 "$HOME"/.config/agents/bin/*
+say "installed  bin wrappers"
+
+# --- secrets scaffold ---------------------------------------------------------------------
+# Never overwrite real secrets. Only create the file (from the example) when it is absent.
+SE="$HOME/.config/agents/secrets.env"
+if [ ! -f "$SE" ]; then
+  run cp "$SRC/secrets.env.example" "$SE"
+  [ "$DRY" = 0 ] && chmod 600 "$SE"
+  say "created    secrets.env from example — fill it in"
+else
+  [ "$DRY" = 0 ] && chmod 600 "$SE"
+  say "kept       existing secrets.env (chmod 600)"
+fi
+
+# --- settings ------------------------------------------------------------------------------
+# Merge the portable subset INTO existing user settings, then rebuild hooks with absolute
+# paths (user scope has no $CLAUDE_PROJECT_DIR). Never clobbers user-only keys such as
+# forceLoginMethod / remote / statusLine / enabledPlugins / permissions.
 US="$HOME/.claude/settings.json"; back "$US"
-[ -f "$US" ] || echo '{}' > "$US"
+[ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
 NOTIFY='[ -n "$SUPERSET_HOME_DIR" ] && [ -x "$SUPERSET_HOME_DIR/hooks/notify.sh" ] && SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" || true'
-tmp=$(mktemp)
-jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
-  # merge the portable subset (minus hooks — those need absolute paths at user scope)
-  ((.[1] | del(.hooks)) as $portable | .[0] * $portable)
-  # then rebuild hooks with absolute paths, preserving the Superset notifier on every event
-  | .hooks = {
-      SessionStart: [
-        { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] },
-        { hooks: [ {type:"command", command:$n} ] } ],
-      PostToolUse: [
-        { matcher:"Edit|Write|MultiEdit",
-          hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
-      Stop: [
-        { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] },
-        { hooks: [ {type:"command", command:$n} ] } ],
-      PostToolUseFailure: [
-        { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] },
-        { matcher:"*", hooks: [ {type:"command", command:$n} ] } ],
-      SessionEnd:        [ { hooks: [ {type:"command", command:$n} ] } ],
-      PermissionRequest: [ { matcher:"*", hooks: [ {type:"command", command:$n} ] } ]
-    }
-' "$US" "$SRC/claude/settings.json" > "$tmp"
-jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
+if [ "$DRY" = 0 ]; then
+  tmp=$(mktemp)
+  jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
+    ((.[1] | del(.hooks)) as $portable | .[0] * $portable)
+    | .hooks = {
+        SessionStart: [
+          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] },
+          { hooks: [ {type:"command", command:$n} ] } ],
+        PostToolUse: [
+          { matcher:"Edit|Write|MultiEdit",
+            hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
+        Stop: [
+          { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] },
+          { hooks: [ {type:"command", command:$n} ] } ],
+        PostToolUseFailure: [
+          { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] },
+          { matcher:"*", hooks: [ {type:"command", command:$n} ] } ],
+        SessionEnd:        [ { hooks: [ {type:"command", command:$n} ] } ],
+        PermissionRequest: [ { matcher:"*", hooks: [ {type:"command", command:$n} ] } ]
+      }
+  ' "$US" "$SRC/claude/settings.json" > "$tmp"
+  jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
+fi
+say "merged     ~/.claude/settings.json"
 
-# --- shell lane ---
-cp "$SRC/shell/claude-parity.zsh" "$HOME/.config/agents/shell/"
+# --- MCP servers ---------------------------------------------------------------------------
+# Merged into the GLOBAL mcpServers map. Ours win on key collision; anything else you have
+# configured is preserved. Project-scoped servers stay yours to add (see mcp/README).
+CJ="$HOME/.claude.json"
+if [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
+  cp "$CJ" "$BK/claude.json"
+  tmp=$(mktemp)
+  sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$tmp.servers"
+  jq -s '.[0] as $cur | .[1] as $new | $cur | .mcpServers = (($cur.mcpServers // {}) * $new)' \
+     "$CJ" "$tmp.servers" > "$tmp"
+  jq -e . "$tmp" >/dev/null && cat "$tmp" > "$CJ"
+  rm -f "$tmp" "$tmp.servers"
+  say "merged     MCP servers into ~/.claude.json"
+else
+  say "skipped    MCP merge (no ~/.claude.json yet — run claude once, then re-run this)"
+fi
+
+# --- shell lane ----------------------------------------------------------------------------
+run cp "$SRC/shell/claude-parity.zsh" "$HOME/.config/agents/shell/"
 back "$HOME/.zshrc"
-if ! grep -q '>>> claude-parity >>>' "$HOME/.zshrc" 2>/dev/null; then
+if [ "$DRY" = 0 ] && ! grep -q '>>> claude-parity >>>' "$HOME/.zshrc" 2>/dev/null; then
   printf '\n# >>> claude-parity >>>\n[ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && . "$HOME/.config/agents/shell/claude-parity.zsh"\n# <<< claude-parity <<<\n' >> "$HOME/.zshrc"
 fi
 back "$HOME/.zshenv"
-if ! grep -q '>>> claude-parity env >>>' "$HOME/.zshenv" 2>/dev/null; then
+if [ "$DRY" = 0 ] && ! grep -q '>>> claude-parity env >>>' "$HOME/.zshenv" 2>/dev/null; then
   cat "$SRC/shell/zshenv.snippet" >> "$HOME/.zshenv"
 fi
+if [ "$DRY" = 0 ] && ! grep -q 'agents/secrets.env' "$HOME/.zshenv" 2>/dev/null; then
+  printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/.zshenv"
+fi
+say "installed  shell lane (.zshrc, .zshenv)"
 
-echo "installed. backup: $BK"
-echo "run: exec zsh -l && ~/.config/agents/bin/doctor"
+# --- launchd (opt-in) -----------------------------------------------------------------------
+# Off by default: cloud routines on claude.ai are the primary scheduling lane, and running
+# both would double every job. Use these when the machine is the only runner.
+if [ "$WITH_LAUNCHD" = 1 ]; then
+  uid=$(id -u)
+  for t in "$SRC"/launchd/*.plist.tmpl; do
+    [ -e "$t" ] || continue
+    lbl=$(basename "$t" .plist.tmpl)
+    out="$HOME/Library/LaunchAgents/$lbl.plist"
+    [ "$DRY" = 1 ] && { say "would: load $lbl"; continue; }
+    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.claude/scheduled-tasks/.logs"
+    sed "s|__HOME__|$HOME|g" "$t" > "$out"
+    plutil -lint "$out" >/dev/null || { echo "error: $lbl produced invalid plist" >&2; exit 1; }
+    launchctl bootout "gui/$uid/$lbl" 2>/dev/null || true
+    launchctl bootstrap "gui/$uid" "$out"
+    say "loaded     $lbl"
+  done
+else
+  say "skipped    launchd timers (pass --with-launchd to enable)"
+fi
+
+# --- verify ----------------------------------------------------------------------------------
+say ""
+if [ "$DRY" = 1 ]; then
+  say "dry run complete — nothing was changed."
+  exit 0
+fi
+say "backup: $BK"
+say ""
+if [ -x "$HOME/.config/agents/bin/doctor" ]; then
+  "$HOME/.config/agents/bin/doctor" || {
+    say ""
+    say "doctor reports drift above. Most causes are one-time setup steps it cannot do for you:"
+    say "  - fill in ~/.config/agents/secrets.env"
+    say "  - exec zsh -l   (to pick up the shell lane)"
+    exit 0
+  }
+fi
+say "run: exec zsh -l"

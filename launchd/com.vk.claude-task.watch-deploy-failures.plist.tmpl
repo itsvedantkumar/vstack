@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.vk.claude-task.watch-deploy-failures</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>__HOME__/.config/agents/bin/claude-task.sh</string>
+		<string>watch-deploy-failures</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>StandardOutPath</key>
+	<string>__HOME__/.claude/scheduled-tasks/.logs/watch-deploy-failures.launchd.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/.claude/scheduled-tasks/.logs/watch-deploy-failures.launchd.log</string>
+</dict>
+</plist>
