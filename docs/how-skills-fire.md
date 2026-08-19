@@ -23,7 +23,43 @@ does not.
 by the context window sets the token budget for descriptions. Exceed it and Claude Code
 truncates them, cutting the trigger phrases first because they sit at the end. At `0.006` this
 repo's listing needed roughly 1,667 tokens against a 1,200 token budget, about 39 percent over.
-Nothing reports this. The setting is now `0.012`.
+Nothing reports this. The setting is now `0.016`.
+
+## What the listing actually costs
+
+Measured on a 1M context, so the budget is 16,000 tokens:
+
+| Injected every session | Bytes | Tokens |
+|---|---|---|
+| skill listing, all sources | 9,340 | 2,335 |
+| SessionStart hook block | 2,619 | 655 |
+| subagent listing | 1,606 | 401 |
+| `CLAUDE.md` | 1,230 | 308 |
+| command listing | 1,062 | 265 |
+| **total** | **15,857** | **3,964** |
+
+The skill listing uses about 15 percent of its budget. It is not the constraint, and trimming
+descriptions to save tokens would cost trigger accuracy for nothing. The per-prompt digest is
+222 bytes, which over a hundred turns costs more than the session baseline does once.
+
+## Overrides do not reach skills that come from a plugin
+
+`skillOverrides` sets a skill to `off` or `name-only` to keep it out of the listing. It works
+for bundled skills and has no effect on skills a plugin supplies: for those, Claude Code
+resolves the listing mode before it reads the setting.
+
+The split is visible in any session. Of the four bundled skills set to `off`, none appear. Of
+the thirteen set to `name-only`, all thirteen appear as a bare name with no description. Every
+skill supplied by the `claude-mem` plugin appears with its full description regardless — 19 of
+them, about 992 tokens, roughly 42 percent of the listing.
+
+This file previously carried 38 override entries covering those 19 plugin skills, in both
+`claude-mem:` and `claude-mem@thedotmack:` spellings. Neither works, and having both is what
+made it look like a spelling problem rather than a ceiling. They are deleted, and check 15 now
+fails any `skillOverrides` key containing `:` or `@`.
+
+There is no setting that fixes this. The only lever is disabling the plugin, which would take
+the memory capture with it. The cost is real and is documented here rather than papered over.
 
 ## Something has to route the situation
 

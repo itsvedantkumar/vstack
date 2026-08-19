@@ -375,6 +375,14 @@ $(printf '%s' "$norm" | grep -oE '\| *[A-Za-z][A-Za-z ]*\| *[0-9]+ *\|' | sort -
 EOF
 done
 
+# Config values quoted in prose drift exactly the way counts do. how-skills-fire.md teaches the
+# listing budget fraction as a number, and it sat two revisions behind the settings file.
+if command -v jq >/dev/null && [ -f docs/how-skills-fire.md ]; then
+  bf=$(jq -r '.skillListingBudgetFraction // empty' claude/settings.json 2>/dev/null)
+  [ -n "$bf" ] && ! grep -qF "\`$bf\`" docs/how-skills-fire.md \
+    && errs="$errs\ndocs/how-skills-fire.md: does not state the live skillListingBudgetFraction ($bf)"
+fi
+
 [ -z "$errs" ] \
   && ok "doc counts match tree ($nsk skills, $nag agents, $ncm commands, $nhk hooks, $ncs test cases)" \
   || bad "doc counts match tree" "$(printf '%b' "$errs")"
@@ -439,6 +447,27 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     || bad "stop-hook gate blocks" "$(printf '%b' "$errs")"
 else
   skip "stop-hook gate blocks" "jq or git not installed"
+fi
+
+# --- 15. skillOverrides only names skills it can actually control ------------------------------
+# Claude Code resolves a skill's listing mode before consulting skillOverrides when the skill
+# comes from a plugin, so a plugin-namespaced key is silently inert. This file used to carry 38
+# of them, in two spellings, for the same 19 skills — none had any effect, and their
+# descriptions sat in the listing anyway. Dead config that looks like a working control is worse
+# than no config, because it stops anyone looking for the real cause.
+if command -v jq >/dev/null; then
+  errs=""
+  bk=$(jq -r '.skillOverrides // {} | keys[] | select(test("[:@]"))' claude/settings.json 2>/dev/null)
+  [ -n "$bk" ] && errs="$errs\nplugin-namespaced keys cannot take effect (see docs/how-skills-fire.md):\n$(printf '%s' "$bk" | sed 's/^/  /')"
+  bv=$(jq -r '.skillOverrides // {} | to_entries[]
+              | select(.value != "off" and .value != "name-only" and .value != "on")
+              | "  \(.key) = \(.value)"' claude/settings.json 2>/dev/null)
+  [ -n "$bv" ] && errs="$errs\nunknown override mode:\n$bv"
+  no_=$(jq '.skillOverrides // {} | length' claude/settings.json 2>/dev/null)
+  [ -z "$errs" ] && ok "skillOverrides ($no_ entries, all effective)" \
+    || bad "skillOverrides" "$(printf '%b' "$errs")"
+else
+  skip "skillOverrides" "jq not installed"
 fi
 
 echo
