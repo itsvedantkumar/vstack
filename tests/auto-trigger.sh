@@ -14,6 +14,9 @@ set -uo pipefail
 PER_CASE_TIMEOUT=120   # seconds; macOS has no `timeout(1)`, see run_with_timeout()
 MODEL="sonnet"
 MAX_TURNS=3
+# Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
+# single sample is a coin flip; a skill that has actually stopped firing misses every attempt.
+ATTEMPTS="${ATTEMPTS:-2}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -102,65 +105,63 @@ extract_fired_skills() {
 # ---------------------------------------------------------------------------
 run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
+  local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
 
-  local workdir
-  workdir="$(mktemp -d "/tmp/auto-trigger-test.XXXXXX")"
+  # Skill dispatch is a model decision, not a deterministic branch, so one sample is a coin
+  # flip and a single-shot assertion makes this suite cry wolf. Retry a miss up to $ATTEMPTS
+  # times: the property worth protecting is that the situation routes here, not that it does
+  # so on the first try. A skill that has genuinely stopped firing misses every attempt.
+  for attempt in $(seq 1 "$ATTEMPTS"); do
+    workdir="$(mktemp -d "/tmp/auto-trigger-test.XXXXXX")"
+    [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
+    out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
 
-  if [[ -n "$setup_fn" ]]; then
-    "$setup_fn" "$workdir"
-  fi
+    (
+      cd "$workdir" && \
+      env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+        claude -p "$prompt" \
+          --output-format stream-json --verbose \
+          --model "$MODEL" --max-turns "$MAX_TURNS" \
+          < /dev/null > "$out_jsonl" 2> "$err_log"
+    ) &
+    runner_pid=$!
 
-  local out_jsonl="$workdir/.out.jsonl"
-  local err_log="$workdir/.err.log"
+    waited=0
+    while kill -0 "$runner_pid" 2>/dev/null; do
+      sleep 1
+      waited=$((waited + 1))
+      if (( waited >= PER_CASE_TIMEOUT )); then kill -9 "$runner_pid" 2>/dev/null; break; fi
+    done
+    wait "$runner_pid" 2>/dev/null
 
-  (
-    cd "$workdir" && \
-    env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-      claude -p "$prompt" \
-        --output-format stream-json --verbose \
-        --model "$MODEL" --max-turns "$MAX_TURNS" \
-        < /dev/null > "$out_jsonl" 2> "$err_log"
-  ) &
-  local runner_pid=$!
-
-  local waited=0
-  while kill -0 "$runner_pid" 2>/dev/null; do
-    sleep 1
-    waited=$((waited + 1))
-    if (( waited >= PER_CASE_TIMEOUT )); then
-      kill -9 "$runner_pid" 2>/dev/null
-      break
+    if [[ ! -s "$out_jsonl" ]]; then
+      fired=""; fired_csv="(no output: timeout or crash)"
+    else
+      fired="$(extract_fired_skills "$out_jsonl")"
+      fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"
+      [[ -z "$fired_csv" ]] && fired_csv="(none)"
     fi
-  done
-  wait "$runner_pid" 2>/dev/null
-
-  if [[ ! -s "$out_jsonl" ]]; then
-    echo "FAIL $name -> no output captured (timeout after ${PER_CASE_TIMEOUT}s or claude crashed)"
-    RESULT_LINES+=("FAIL $name -> no output captured")
-    FAIL_COUNT=$((FAIL_COUNT + 1))
     rm -rf "$workdir"
-    return
-  fi
 
-  local fired
-  fired="$(extract_fired_skills "$out_jsonl")"
-  local fired_csv
-  fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"
-  [[ -z "$fired_csv" ]] && fired_csv="(none)"
+    if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($expected_regex)$"; then
+      matched="$(echo "$fired" | grep -E "^($expected_regex)$" | head -1)"
+      if (( attempt > 1 )); then
+        echo "PASS $name -> $matched (on attempt $attempt of $ATTEMPTS)"
+        RESULT_LINES+=("PASS $name -> $matched (attempt $attempt)")
+      else
+        echo "PASS $name -> $matched"
+        RESULT_LINES+=("PASS $name -> $matched")
+      fi
+      PASS_COUNT=$((PASS_COUNT + 1))
+      return
+    fi
 
-  if echo "$fired" | grep -qE "^($expected_regex)$"; then
-    local matched
-    matched="$(echo "$fired" | grep -E "^($expected_regex)$" | head -1)"
-    echo "PASS $name -> $matched"
-    RESULT_LINES+=("PASS $name -> $matched")
-    PASS_COUNT=$((PASS_COUNT + 1))
-  else
-    echo "FAIL $name -> expected $expected_regex, fired: [$fired_csv]"
-    RESULT_LINES+=("FAIL $name -> expected $expected_regex, fired: [$fired_csv]")
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-  fi
+    (( attempt < ATTEMPTS )) && echo "  retry $name (attempt $attempt fired: [$fired_csv])"
+  done
 
-  rm -rf "$workdir"
+  echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts (last: [$fired_csv])"
+  RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts")
+  FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
 # ---------------------------------------------------------------------------

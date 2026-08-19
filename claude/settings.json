@@ -1,7 +1,6 @@
 {
   "model": "claude-opus-5[1m]",
   "effortLevel": "high",
-  "fastMode": true,
   "skillListingMaxDescChars": 200,
   "skillListingBudgetFraction": 0.012,
   "skillOverrides": {

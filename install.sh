@@ -121,8 +121,11 @@ fi
 
 # --- settings ------------------------------------------------------------------------------
 # Merge the portable subset INTO existing user settings, then rebuild hooks with absolute
-# paths (user scope has no $CLAUDE_PROJECT_DIR). Never clobbers user-only keys such as
-# forceLoginMethod / remote / statusLine / enabledPlugins / permissions.
+# paths (user scope has no $CLAUDE_PROJECT_DIR). The portable file is authoritative for
+# every key it ships — including enabledPlugins and skillOverrides, which is replaced
+# wholesale so overrides for deleted skills don't linger in the live file forever. Keys the
+# portable file never mentions (forceLoginMethod / remote / permissions) survive untouched;
+# retired top-level keys are del()ed explicitly below.
 US="$HOME/.claude/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
 NOTIFY='[ -n "$SUPERSET_HOME_DIR" ] && [ -x "$SUPERSET_HOME_DIR/hooks/notify.sh" ] && SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" || true'
@@ -138,7 +141,10 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
   jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
-    ((.[1] | del(.hooks)) as $portable | .[0] * $portable)
+    ((.[1] | del(.hooks)) as $portable
+      | (.[0] * $portable)
+      | .skillOverrides = ($portable.skillOverrides // {})
+      | del(.fastMode))
     | .hooks = {
         SessionStart: [
           { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] },
