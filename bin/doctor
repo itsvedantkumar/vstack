@@ -116,7 +116,7 @@ n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' '); [ "$n" -ge 
 echo "── secrets ──"
 [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(stat -f '%Lp' "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
 grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || bad "zshenv source" "not sourced"
-for w in cloudflare-mcp namecheap-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
+for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
 echo "── memory ──"; [ -d "$HOME/.claude-mem" ] && ok "claude-mem store" || bad "claude-mem" "missing"
 S="$HOME/.claude/settings.json"

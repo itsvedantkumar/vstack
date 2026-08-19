@@ -18,13 +18,13 @@ Doing so keeps the tool list, and its token cost, out of every other session. Ad
 the project key in `~/.claude.json`:
 
 ```bash
-jq '.projects["/abs/path/to/repo"].mcpServers["namecheap"] =
-    {"type":"stdio","command":"'"$HOME"'/.config/agents/bin/namecheap-mcp","args":[]}' \
+jq '.projects["/abs/path/to/repo"].mcpServers["my-server"] =
+    {"type":"stdio","command":"'"$HOME"'/.config/agents/bin/my-server-mcp","args":[]}' \
   ~/.claude.json > /tmp/cj && jq -e . /tmp/cj >/dev/null && mv /tmp/cj ~/.claude.json
 ```
 
-`bin/namecheap-mcp` ships as a ready wrapper on this basis. Nothing loads it until you scope
-it to a project, as shown above.
+Write the wrapper into `bin/` the same way as `bin/cloudflare-mcp` (source `secrets.env`,
+then exec the server). Nothing loads it until you scope it to a project, as shown above.
 
 ## Add credentials
 

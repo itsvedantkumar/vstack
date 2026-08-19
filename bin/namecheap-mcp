@@ -1,9 +1,0 @@
-#!/bin/sh
-set -eu
-if [ -f "$HOME/.config/agents/secrets.env" ]; then
-  . "$HOME/.config/agents/secrets.env"
-else
-  echo "namecheap-mcp: missing $HOME/.config/agents/secrets.env" >&2
-  exit 1
-fi
-exec node "${NAMECHEAP_MCP_DIST:-$HOME/Projects/namecheap-mcp-server/dist/index.js}"
