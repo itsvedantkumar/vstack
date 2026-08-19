@@ -49,14 +49,15 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
 - repo has no scripted proof it works -> create-verification-skill (it writes the
   .claude/verify.sh the Stop hook runs). That gate stale -> maintain-verification-skill.
 - unattended/overnight/multi-phase work a human reviews later -> show-me-your-work.
+- any feature or change request -> run the chain: brainstorming, then writing-plans, then
+  test-driven-development, then executing-plans.
 - you were corrected, or found a workflow worth keeping -> reflect.
 - PRINCIPLES (load the one that matches, then apply it): before claiming done ->
   prove-it-works. Debugging or adding a try/except guard -> fix-root-causes. Same correction
   twice -> encode-lessons-in-structure. Designing types/signatures -> type-system-discipline.
   Validation/error handling/auth/MCP adapters -> boundary-discipline. Cron, launchd, retry
   loops -> make-operations-idempotent. Sweeps, migrations, stacked commits ->
-  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever. Prose you write (docs,
-README, PR body, commit msg) -> unslop; docs/RFC/README -> technical-writing.
+  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever.
 EOF
 )
 
