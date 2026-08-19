@@ -45,6 +45,32 @@ echo "wrote   .claude/{hooks,agents,commands,skills}"
 
 [ -f "$DEST/CLAUDE.md" ] || { cp "$SRC/CLAUDE.md.tmpl" "$DEST/CLAUDE.md"; echo "wrote   CLAUDE.md (template — edit it)"; }
 
+# Conductor: give the repo a verify button and, for cloud workspaces, a way to pull vstack
+# into the sandbox. Never overwrite an existing file — a repo's own setup script matters more
+# than this one, so print the lines to merge by hand instead.
+mkdir -p "$DEST/.conductor"
+if [ -f "$DEST/.conductor/settings.toml" ]; then
+  echo "kept    .conductor/settings.toml (already exists)"
+  echo "        to run the verify gate from Conductor, add:"
+  echo "          [scripts.run.verify]"
+  echo "          command = \"./.claude/verify.sh\""
+else
+  cat > "$DEST/.conductor/settings.toml" <<'TOML'
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+# Cloud workspaces start from a bare Linux sandbox with no ~/.claude, so pull vstack in.
+# Add this repo's own install step (npm ci, uv sync, ...) to the end of this line.
+setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash"
+run_mode = "concurrent"
+
+[scripts.run.verify]
+command = "./.claude/verify.sh"
+icon = "shield-check"
+TOML
+  echo "wrote   .conductor/settings.toml"
+fi
+
 # .context/ is agent scratch space; keep it out of the repo without touching .gitignore.
 ex="$(git -C "$DEST" rev-parse --git-common-dir)/info/exclude"
 grep -qxF '.context/' "$ex" 2>/dev/null || { echo '.context/' >> "$ex"; echo "excluded .context/"; }

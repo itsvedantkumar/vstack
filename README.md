@@ -17,6 +17,13 @@ Run `./install.sh --dry-run` first if you want to see what it touches. It backs 
 it overwrites to `~/.config/agents/backups/install-<timestamp>/`, and it never overwrites
 `secrets.env`.
 
+On a machine with nothing set up yet, including a Linux sandbox, one line does the clone and
+the install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
+```
+
 ## What lands where
 
 | Component | Count | Installs to |
@@ -82,8 +89,11 @@ choice, and there are two lanes:
   or not the Mac is awake. This is the better default.
 - **launchd timers** run locally. Install them with `./install.sh --with-launchd`.
 
-Pick one lane. Running both doubles every job. The routines target one specific site as
-examples, and each file names the values to change to retarget it.
+Pick one lane. Running both doubles every job.
+
+The three routines are templates, not live jobs. They carry `<owner>/<repo>` and
+`prj_YOUR_PROJECT_ID` placeholders, and each file opens with the list of values to replace.
+`./.claude/verify.sh` fails if a real Vercel, environment, or trigger ID lands in the repo.
 
 ## Health check
 
@@ -106,6 +116,22 @@ launchd/         plist templates, __HOME__ substituted at install time
 install.sh       user-scope install, idempotent
 overlay.sh       copies the config into a repo so cloud sessions get it
 ```
+
+## Conductor
+
+`.conductor/settings.toml` makes a Conductor workspace install this bundle as its setup step,
+and puts the verification gate behind a run button. Creating a workspace on vstack installs
+vstack.
+
+For your other repos, `./overlay.sh /path/to/repo` writes a `.conductor/settings.toml` whose
+setup step pulls vstack in through `bootstrap.sh`. That matters for cloud workspaces: they
+start from a bare Linux sandbox with no `~/.claude`, so without a setup step they get none of
+this. If the repo already has a `.conductor/settings.toml`, `overlay.sh` leaves it alone and
+prints the lines to merge yourself.
+
+Cloud sandboxes often ship without `jq`. The installer no longer treats that as fatal: it
+installs skills, hooks, agents, and commands, then skips only the two merge steps that need
+`jq` and says so.
 
 ## Two lanes, and why both exist
 

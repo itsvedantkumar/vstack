@@ -1,0 +1,23 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Opening vstack in a Conductor workspace installs it. Editing the config and having it
+# take effect is then a single workspace creation, local or cloud.
+[scripts]
+setup = "./install.sh"
+run_mode = "concurrent"
+
+# The gate that decides whether the bundle is shippable. Default so it is one click.
+[scripts.run.verify]
+command = "./.claude/verify.sh"
+icon = "shield-check"
+default = true
+
+# doctor inspects the installed machine state, which only exists locally.
+[scripts.run.doctor]
+available_in = [ "local" ]
+command = "$HOME/.config/agents/bin/doctor"
+icon = "stethoscope"
+
+[scripts.run.install]
+command = "./install.sh"
+icon = "download"

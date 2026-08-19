@@ -1,23 +1,23 @@
 ---
 name: weekly-yc-cto-audit
-description: Weekly YC CTO audit of vedant.to — security, performance, code quality
+description: Weekly YC CTO audit of your site — security, performance, code quality
 ---
 
 <!--
-Example routine — targets one specific site (vedant.to / itsvedantkumar).
+Example routine — targets one specific site (<owner>/<repo>).
 To retarget for your own project, change:
-  - repo slug: itsvedantkumar/vedant.to → <owner>/<repo> (appears throughout this file)
-  - working directory: $HOME/Projects/vedant.to → your project's checkout path
+  - repo slug: <owner>/<repo> → <owner>/<repo> (appears throughout this file)
+  - working directory: $HOME/Projects/<repo> → your project's checkout path
 -->
 
-You are acting as a YC CTO auditing the vedant.to Next.js blog repo at $HOME/Projects/vedant.to. Your job is to produce a rigorous weekly audit covering security, performance, and code quality — without touching design or existing functionality.
+You are acting as a YC CTO auditing the Next.js repo at $HOME/Projects/<repo>. Your job is to produce a rigorous weekly audit covering security, performance, and code quality — without touching design or existing functionality.
 
 ## Context
 - Stack: Next.js 15 (App Router, RSC), TypeScript strict, Tailwind CSS, Keystatic CMS
 - Deploy: push to main → GitHub Actions → Vercel (direct, no PR gate)
 - Secrets: live in Vercel env + GitHub Actions secrets + .env.local (never committed)
-- Cloudflare R2 for image hosting at assets.vedant.to
-- Repo: github.com/itsvedantkumar/vedant.to
+- Cloudflare R2 for image hosting at assets.example.com
+- Repo: github.com/<owner>/<repo>
 
 ## What to audit each run
 
@@ -66,4 +66,4 @@ End with a one-paragraph executive summary suitable for a weekly standup.
 Use Bash tool for all commands. PATH prefix required for node/npm/gh:
 export PATH="$(dirname "$(command -v node)"):$HOME/.local/bin:$PATH"
 
-Working directory: $HOME/Projects/vedant.to
+Working directory: $HOME/Projects/<repo>

@@ -32,8 +32,12 @@ done
 say(){ printf '%s\n' "$*"; }
 run(){ if [ "$DRY" = 1 ]; then say "would: $*"; else "$@"; fi; }
 
-command -v jq >/dev/null || { echo "error: jq is required (brew install jq)" >&2; exit 1; }
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run this from the vstack repo" >&2; exit 1; }
+
+# jq drives the two merge steps (settings, MCP). Linux cloud sandboxes often lack it, and
+# skills plus hooks are still worth installing there, so degrade instead of aborting.
+HAVE_JQ=1
+command -v jq >/dev/null || { HAVE_JQ=0; echo "warn: jq not found — settings and MCP merge will be skipped (brew install jq / apt install jq)" >&2; }
 
 if [ "$DRY" = 0 ]; then
   mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
@@ -105,7 +109,16 @@ fi
 US="$HOME/.claude/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
 NOTIFY='[ -n "$SUPERSET_HOME_DIR" ] && [ -x "$SUPERSET_HOME_DIR/hooks/notify.sh" ] && SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" || true'
-if [ "$DRY" = 0 ]; then
+if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
+  # No jq: never hand-merge JSON. Write the portable settings only when there is nothing
+  # to lose, otherwise leave the existing file untouched.
+  if [ ! -s "$US" ] || [ "$(cat "$US")" = "{}" ]; then
+    cp "$SRC/claude/settings.json" "$US"
+    say "wrote      ~/.claude/settings.json (no jq — hook paths stay relative)"
+  else
+    say "skipped    settings merge (no jq — existing settings left untouched)"
+  fi
+elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
   jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
     ((.[1] | del(.hooks)) as $portable | .[0] * $portable)
@@ -127,14 +140,16 @@ if [ "$DRY" = 0 ]; then
       }
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
+  say "merged     ~/.claude/settings.json"
 fi
-say "merged     ~/.claude/settings.json"
 
 # --- MCP servers ---------------------------------------------------------------------------
 # Merged into the GLOBAL mcpServers map. Ours win on key collision; anything else you have
 # configured is preserved. Project-scoped servers stay yours to add (see mcp/README).
 CJ="$HOME/.claude.json"
-if [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
+if [ "$HAVE_JQ" = 0 ]; then
+  say "skipped    MCP merge (no jq)"
+elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
   cp "$CJ" "$BK/claude.json"
   tmp=$(mktemp)
   sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$tmp.servers"

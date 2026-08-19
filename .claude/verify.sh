@@ -86,7 +86,16 @@ hits=$(grep -rIn --exclude-dir=.git -E \
 hits=$(grep -rIln -e 'github_pat_' -e 'Vercel MCP' -e 'remote get-url.*sed' claude/scheduled-tasks 2>/dev/null)
 [ -z "$hits" ] && ok "routines use gh auth" || bad "routines use gh auth" "$hits"
 
-# --- 8. the installer runs -----------------------------------------------------------------------
+# --- 8. no infrastructure identifiers ---------------------------------------------------------
+# This repo is public and its routines are templates. Real Vercel project or team IDs, Claude
+# Code environment IDs, and cloud routine trigger IDs identify live infrastructure, so they
+# belong in a local copy, never here. Placeholders ending in _ID or _xxx pass.
+hits=$(grep -rInE --exclude-dir=.git \
+  '(prj_|team_|env_|trig_)[A-Za-z0-9]{12,}' . 2>/dev/null \
+  | grep -vE '(YOUR_[A-Z_]*ID|_xxx|placeholder)' | head -5)
+[ -z "$hits" ] && ok "no infrastructure ids" || bad "no infrastructure ids" "$hits"
+
+# --- 9. the installer runs -----------------------------------------------------------------------
 # Dry run: exercises every code path in install.sh without touching the filesystem.
 if command -v jq >/dev/null; then
   out=$(./install.sh --dry-run 2>&1)

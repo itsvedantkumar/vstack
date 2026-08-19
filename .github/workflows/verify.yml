@@ -1,0 +1,42 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The gate needs jq for the JSON checks and the install dry run. plutil does not exist
+      # on Linux, so the launchd check skips itself and says so.
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Run the verification gate
+        run: ./.claude/verify.sh
+
+      # A gate that cannot fail proves nothing. Break a skill description on purpose and
+      # require the gate to catch it.
+      - name: Prove the gate is falsifiable
+        run: |
+          cp claude/skills/unslop/SKILL.md /tmp/unslop.bak
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("claude/skills/unslop/SKILL.md")
+          t = p.read_text()
+          p.write_text(t.replace('description: "', 'description: "' + 'x' * 210 + ' ', 1))
+          PY
+          if ./.claude/verify.sh > /tmp/out.txt 2>&1; then
+            echo "gate passed on a broken skill description — it is not enforcing"
+            cat /tmp/out.txt
+            exit 1
+          fi
+          echo "gate correctly rejected the broken description"
+          cp /tmp/unslop.bak claude/skills/unslop/SKILL.md
+
+      - name: Confirm the tree is restored
+        run: git diff --exit-code

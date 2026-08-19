@@ -4,23 +4,23 @@ description: Monitor Vercel + GitHub Actions for failures, auto-investigate and 
 ---
 
 <!--
-Example routine — targets one specific site (vedant.to / itsvedantkumar).
+Example routine — targets one specific site (<owner>/<repo>).
 To retarget for your own project, change:
-  - repo slug: itsvedantkumar/vedant.to → <owner>/<repo> (appears throughout this file)
-  - working directory: $HOME/Projects/vedant.to → your project's checkout path
+  - repo slug: <owner>/<repo> → <owner>/<repo> (appears throughout this file)
+  - working directory: $HOME/Projects/<repo> → your project's checkout path
   - Vercel project ID / team ID below (only relevant if you use them directly instead of the gh deployment API)
 -->
 
-You are an autonomous deployment watchdog for vedant.to. Check for failing CI/Vercel builds and fix them.
+You are an autonomous deployment watchdog for your site. Check for failing CI/Vercel builds and fix them.
 
 ## Setup
-Working directory: $HOME/Projects/vedant.to
+Working directory: $HOME/Projects/<repo>
 PATH prefix (required for all shell commands):
 export PATH="$(dirname "$(command -v node)"):$HOME/.local/bin:$PATH"
 
-Vercel project ID: prj_H7FbvQwd30eUAzyUURXPnOYijWDY
-Vercel team ID: team_23bLMUgHrJGGdYbJIzGI7Mj8
-GitHub repo: itsvedantkumar/vedant.to
+Vercel project ID: prj_YOUR_PROJECT_ID
+Vercel team ID: team_YOUR_TEAM_ID
+GitHub repo: <owner>/<repo>
 
 ## Step 1: Check for recent failures
 
@@ -28,14 +28,14 @@ Run both checks in parallel:
 ```bash
 export PATH="$(dirname "$(command -v node)"):$HOME/.local/bin:$PATH"
 # GitHub Actions — last 5 runs on main
-gh run list --repo itsvedantkumar/vedant.to --branch main --limit 5 --json databaseId,status,conclusion,name,createdAt
+gh run list --repo <owner>/<repo> --branch main --limit 5 --json databaseId,status,conclusion,name,createdAt
 ```
 
 Also check Vercel through GitHub's deployment API (the Vercel git integration mirrors every deploy there — no Vercel CLI/account needed):
 ```bash
 # latest Production deployment + its status
-ID=$(gh api "repos/itsvedantkumar/vedant.to/deployments?environment=Production&per_page=1" --jq '.[0].id')
-gh api "repos/itsvedantkumar/vedant.to/deployments/$ID/statuses" --jq '.[0] | "\(.state) \(.created_at)"'
+ID=$(gh api "repos/<owner>/<repo>/deployments?environment=Production&per_page=1" --jq '.[0].id')
+gh api "repos/<owner>/<repo>/deployments/$ID/statuses" --jq '.[0] | "\(.state) \(.created_at)"'
 ```
 
 ## Step 2: Triage
@@ -44,7 +44,7 @@ If the most recent GitHub Actions run on main has conclusion = "failure" AND it 
 → It's a new failure. Fetch the full logs:
 ```bash
 export PATH="$(dirname "$(command -v node)"):$HOME/.local/bin:$PATH"
-gh run view <RUN_ID> --repo itsvedantkumar/vedant.to --log-failed
+gh run view <RUN_ID> --repo <owner>/<repo> --log-failed
 ```
 
 If the latest Production deployment status is "error" or "failure" and was created within the last 30 minutes:
@@ -85,12 +85,12 @@ Never use `git add -A` or commit .env files.
 After pushing, wait ~90 seconds then check if the new GitHub Actions run passes:
 ```bash
 export PATH="$(dirname "$(command -v node)"):$HOME/.local/bin:$PATH"
-gh run list --repo itsvedantkumar/vedant.to --branch main --limit 1 --json status,conclusion
+gh run list --repo <owner>/<repo> --branch main --limit 1 --json status,conclusion
 ```
 
 If still failing, attempt one more fix cycle. If you cannot determine the fix, open a GitHub issue:
 ```bash
-gh issue create --repo itsvedantkumar/vedant.to --title "🚨 Deploy failure: <summary>" --body "<full error log>"
+gh issue create --repo <owner>/<repo> --title "🚨 Deploy failure: <summary>" --body "<full error log>"
 ```
 
 ## Output
