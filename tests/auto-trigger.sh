@@ -11,7 +11,7 @@
 #   1  one or more cases failed to fire the expected skill
 set -uo pipefail
 
-PER_CASE_TIMEOUT=120   # seconds; macOS has no `timeout(1)`, see run_with_timeout()
+PER_CASE_TIMEOUT=120   # seconds; enforced by the polling loop in run_case (macOS has no timeout(1))
 MODEL="sonnet"
 MAX_TURNS=3
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
@@ -46,35 +46,6 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# run_with_timeout SECONDS -- CMD...
-# macOS ships no timeout(1). Background the command, race it against a
-# sleeping watcher, kill whichever loses. Returns the command's exit status,
-# or 124 if the watcher won (timeout).
-# ---------------------------------------------------------------------------
-run_with_timeout() {
-  local secs="$1"; shift
-  "$@" &
-  local cmd_pid=$!
-  (
-    sleep "$secs"
-    kill -9 "$cmd_pid" 2>/dev/null
-  ) &
-  local watcher_pid=$!
-
-  local status
-  if wait "$cmd_pid" 2>/dev/null; then
-    status=0
-  else
-    status=$?
-  fi
-
-  # Watcher is still around unless it already fired; either way, reap it.
-  kill "$watcher_pid" 2>/dev/null
-  wait "$watcher_pid" 2>/dev/null
-
-  return "$status"
-}
 
 # ---------------------------------------------------------------------------
 # extract_fired_skills OUT_JSONL
@@ -119,9 +90,12 @@ run_case() {
     [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
     out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
 
+    # exec is load-bearing: without it the subshell forks claude as a child, and the
+    # timeout's kill -9 hits only the empty parent — leaking a live, billed claude session
+    # per timed-out attempt. exec makes $runner_pid BE the claude process.
     (
-      cd "$workdir" && \
-      env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+      cd "$workdir" || exit 1
+      exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
         claude -p "$prompt" \
           --output-format stream-json --verbose \
           --model "$MODEL" --max-turns "$MAX_TURNS" \
