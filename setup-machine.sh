@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# setup-machine.sh — install the tools vstack and its agents expect, on a machine that has
+# nothing. Idempotent: every tool is checked before it is installed, so a second run is a
+# fast no-op rather than a reinstall.
+#
+#   ./setup-machine.sh                 core + claude + deploy tiers
+#   ./setup-machine.sh --with-security also trivy, gitleaks, nmap, nuclei
+#   ./setup-machine.sh --check         report what is present, install nothing
+#   ./setup-machine.sh --dry-run       print what would be installed
+#
+# What each tier is for:
+#   core      git, jq, ripgrep, fd, gh, node, bun, uv   — the agent tooling and this installer
+#   claude    the Claude Code CLI itself
+#   deploy    vercel, wrangler                          — the autonomous deploy chain
+#   security  trivy, gitleaks, nmap, nuclei             — the /security command
+#
+# This script installs software. It never removes any, and it never touches your dotfiles.
+set -uo pipefail
+
+WITH_SECURITY=0; CHECK=0; DRY=0
+for a in "$@"; do
+  case "$a" in
+    --with-security) WITH_SECURITY=1 ;;
+    --check)         CHECK=1 ;;
+    --dry-run)       DRY=1 ;;
+    -h|--help)       sed -n '2,20p' "$0"; exit 0 ;;
+    *) echo "unknown flag: $a" >&2; exit 2 ;;
+  esac
+done
+
+# Absolute path first: a stripped-down PATH (cron, launchd, a bare sandbox) may not carry it,
+# and guessing the platform wrong would pick the wrong package manager.
+OS=$(/usr/bin/uname -s 2>/dev/null || uname -s 2>/dev/null || echo unknown)
+INSTALLED=""; SKIPPED=""; FAILED=""
+note(){ printf '%s\n' "$*"; }
+mark(){ # mark <list-name> <tool>
+  case "$1" in
+    ok)   INSTALLED="$INSTALLED $2" ;;
+    have) SKIPPED="$SKIPPED $2" ;;
+    fail) FAILED="$FAILED $2" ;;
+  esac
+}
+
+# --- package manager -------------------------------------------------------------------------
+PM=""
+setup_pm(){
+  if [ "$OS" = "Darwin" ]; then
+    # Xcode command line tools carry git and the compilers Homebrew needs. The installer is a
+    # GUI prompt, so it cannot be automated. Say so and keep going.
+    if ! xcode-select -p >/dev/null 2>&1; then
+      note "!! Xcode command line tools are missing. Run: xcode-select --install"
+      note "   Accept the dialog, wait for it to finish, then re-run this script."
+    fi
+    if command -v brew >/dev/null; then PM=brew; return 0; fi
+    [ "$CHECK" = 1 ] && { note "-- homebrew: missing"; return 1; }
+    [ "$DRY" = 1 ]   && { note "would install homebrew"; PM=brew; return 0; }
+    note ">> installing homebrew (may prompt for your password)"
+    NONINTERACTIVE=1 /bin/bash -c \
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+      || { note "!! homebrew install failed — install it manually from https://brew.sh"; return 1; }
+    for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+      [ -x "$p" ] && eval "$("$p" shellenv)"
+    done
+    command -v brew >/dev/null && PM=brew
+  else
+    for c in apt-get dnf apk; do command -v "$c" >/dev/null && { PM="$c"; break; }; done
+    [ -z "$PM" ] && note "!! no supported package manager found"
+  fi
+  [ -n "$PM" ]
+}
+
+pm_install(){ # pm_install <package>
+  case "$PM" in
+    brew)    brew install "$1" ;;
+    apt-get) sudo apt-get install -y -qq "$1" ;;
+    dnf)     sudo dnf install -y -q "$1" ;;
+    apk)     sudo apk add --quiet "$1" ;;
+    *)       return 1 ;;
+  esac
+}
+
+# ensure <command> <package> [label]
+ensure(){
+  cmd="$1"; pkg="$2"; label="${3:-$1}"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    note "-- $label: present ($(command -v "$cmd"))"; mark have "$label"; return 0
+  fi
+  [ "$CHECK" = 1 ] && { note "-- $label: MISSING"; mark fail "$label"; return 1; }
+  [ "$DRY"   = 1 ] && { note "would install $label ($pkg)"; mark ok "$label"; return 0; }
+  note ">> installing $label"
+  if pm_install "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
+    mark ok "$label"
+  else
+    note "!! $label failed to install"; mark fail "$label"
+  fi
+}
+
+# ensure_npm <command> <npm-package>
+ensure_npm(){
+  cmd="$1"; pkg="$2"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    note "-- $cmd: present"; mark have "$cmd"; return 0
+  fi
+  [ "$CHECK" = 1 ] && { note "-- $cmd: MISSING"; mark fail "$cmd"; return 1; }
+  [ "$DRY"   = 1 ] && { note "would install $cmd (npm -g $pkg)"; mark ok "$cmd"; return 0; }
+  command -v npm >/dev/null || { note "!! $cmd needs npm, which is missing"; mark fail "$cmd"; return 1; }
+  note ">> installing $cmd"
+  if npm install -g "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
+    mark ok "$cmd"
+  else
+    note "!! $cmd failed to install"; mark fail "$cmd"
+  fi
+}
+
+# --- run -----------------------------------------------------------------------------------
+note "== platform: $OS"
+setup_pm || note "!! continuing without a package manager; most installs will fail"
+[ -n "$PM" ] && note "== package manager: $PM"
+
+note ""
+note "== core"
+ensure git      git
+ensure jq       jq
+ensure rg       ripgrep    rg
+ensure fd       fd
+ensure gh       gh
+ensure node     node
+ensure bun      oven-sh/bun/bun bun
+ensure uv       uv
+
+note ""
+note "== claude code"
+if command -v claude >/dev/null 2>&1; then
+  note "-- claude: present ($(command -v claude))"; mark have claude
+elif [ "$CHECK" = 1 ]; then
+  note "-- claude: MISSING"; mark fail claude
+elif [ "$DRY" = 1 ]; then
+  note "would install claude code"; mark ok claude
+else
+  note ">> installing claude code"
+  if curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1; then
+    export PATH="$HOME/.local/bin:$PATH"
+    command -v claude >/dev/null && mark ok claude || { note "!! installed but not on PATH — add \$HOME/.local/bin"; mark fail claude; }
+  else
+    note "!! claude install failed — see https://claude.ai/install"; mark fail claude
+  fi
+fi
+
+note ""
+note "== deploy"
+ensure_npm vercel   vercel
+ensure_npm wrangler wrangler
+
+if [ "$WITH_SECURITY" = 1 ]; then
+  note ""
+  note "== security"
+  ensure trivy    trivy
+  ensure gitleaks gitleaks
+  ensure nmap     nmap
+  ensure nuclei   nuclei
+  note "   OWASP ZAP is not installed here: it is a large Java app. Get it from zaproxy.org."
+fi
+
+# --- report ----------------------------------------------------------------------------------
+note ""
+note "== summary"
+[ -n "$SKIPPED" ]   && note "already present:$SKIPPED"
+[ -n "$INSTALLED" ] && note "installed:$INSTALLED"
+[ -n "$FAILED" ]    && note "missing:$FAILED"
+
+# Only the tools vstack cannot work without decide the exit code. A missing nuclei is not a
+# broken machine; a missing jq or git is.
+REQUIRED="git jq"
+missing=""
+for r in $REQUIRED; do command -v "$r" >/dev/null 2>&1 || missing="$missing $r"; done
+if [ -n "$missing" ] && [ "$DRY" = 0 ]; then
+  note ""
+  note "REQUIRED TOOLS MISSING:$missing"
+  exit 1
+fi
+
+note ""
+if [ "$CHECK" = 1 ]; then
+  note "check complete."
+else
+  note "done. Next: ./install.sh"
+fi
+exit 0

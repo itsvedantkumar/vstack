@@ -20,9 +20,11 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
 WITH_LAUNCHD=0
 DRY=0
+WITH_DEPS=0
 for a in "$@"; do
   case "$a" in
     --with-launchd) WITH_LAUNCHD=1 ;;
+    --with-deps)    WITH_DEPS=1 ;;
     --dry-run)      DRY=1 ;;
     -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown flag: $a" >&2; exit 2 ;;
@@ -33,6 +35,13 @@ say(){ printf '%s\n' "$*"; }
 run(){ if [ "$DRY" = 1 ]; then say "would: $*"; else "$@"; fi; }
 
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run this from the vstack repo" >&2; exit 1; }
+
+# --with-deps installs the tools first. Kept opt-in here because a normal re-install should
+# not reach for a package manager; bootstrap.sh turns it on for fresh machines.
+if [ "$WITH_DEPS" = 1 ] && [ -x "$SRC/setup-machine.sh" ]; then
+  if [ "$DRY" = 1 ]; then "$SRC/setup-machine.sh" --dry-run; else "$SRC/setup-machine.sh"; fi
+  echo
+fi
 
 # jq drives the two merge steps (settings, MCP). Linux cloud sandboxes often lack it, and
 # skills plus hooks are still worth installing there, so degrade instead of aborting.

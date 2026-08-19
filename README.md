@@ -17,11 +17,38 @@ Run `./install.sh --dry-run` first if you want to see what it touches. It backs 
 it overwrites to `~/.config/agents/backups/install-<timestamp>/`, and it never overwrites
 `secrets.env`.
 
-On a machine with nothing set up yet, including a Linux sandbox, one line does the clone and
-the install:
+## A machine with nothing on it
+
+One line takes a new Mac from empty to working. It installs Homebrew, the tools, the Claude
+Code CLI, and then this config:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
+```
+
+`bootstrap.sh` clones vstack to `~/.vstack`, runs `setup-machine.sh`, then runs `install.sh`.
+Pass `--skip-deps` to install config only.
+
+`setup-machine.sh` installs by tier, and checks each tool before installing it, so re-running
+costs seconds:
+
+| Tier | Tools | For |
+|---|---|---|
+| core | `git`, `jq`, `ripgrep`, `fd`, `gh`, `node`, `bun`, `uv` | agent tooling and this installer |
+| claude | Claude Code CLI | the agent itself |
+| deploy | `vercel`, `wrangler` | the autonomous deploy chain |
+| security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
+
+Only `git` and `jq` decide the exit code. A missing `nuclei` is not a broken machine.
+
+Two things it cannot do for you. Xcode command line tools need a GUI prompt, so it tells you
+to run `xcode-select --install` and continues. OWASP ZAP is a large Java app and is left to
+you.
+
+Check a machine without changing it:
+
+```bash
+./setup-machine.sh --check
 ```
 
 ## What lands where
