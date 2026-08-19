@@ -10,7 +10,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
-         "$HOME/.config/agents/shell"
+         "$HOME/.claude/skills" "$HOME/.config/agents/shell"
 chmod 700 "$HOME/.config/agents/backups"
 
 back(){ [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOME/}" | tr / _)"; }
@@ -20,6 +20,20 @@ for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$
 for f in "$SRC"/claude/agents/*.md;   do cp "$f" "$HOME/.claude/agents/";   done
 for f in "$SRC"/claude/commands/*.md; do cp "$f" "$HOME/.claude/commands/"; done
 chmod 755 "$HOME"/.claude/hooks/*.sh
+
+# --- skills (pstack, ported to Claude Code) ---
+# Whole-dir replace per skill: these carry references/ and scripts/ subtrees, so a
+# file-by-file copy would leave stale files behind after an upstream removal.
+# Only touches skills this repo owns; never deletes user-authored skills.
+for d in "$SRC"/claude/skills/*/; do
+  s=$(basename "$d")
+  [ -d "$HOME/.claude/skills/$s" ] && cp -R "$HOME/.claude/skills/$s" "$BK/skills_$s"
+  rm -rf "${HOME:?}/.claude/skills/$s"
+  # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src's *contents*
+  # into dest, not src itself — which would scatter SKILL.md and references/ at top level.
+  cp -R "${d%/}" "$HOME/.claude/skills/"
+done
+find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null || true
 
 # --- settings: merge the portable subset INTO existing user settings, then re-point hook
 #     paths to absolute (user scope has no $CLAUDE_PROJECT_DIR). Never clobbers user-only

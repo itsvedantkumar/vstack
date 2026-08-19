@@ -15,7 +15,7 @@ DEST="${1:-$PWD}"
 [ -d "$DEST/.git" ] || { echo "error: $DEST is not a git repo" >&2; exit 1; }
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run from the conductor-setup repo" >&2; exit 1; }
 
-mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands"
+mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
 # settings.json: merge, don't clobber — a repo may already have project settings.
 if [ -f "$DEST/.claude/settings.json" ] && command -v jq >/dev/null; then
@@ -32,7 +32,16 @@ fi
 cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.claude/hooks/*.sh
 cp "$SRC"/claude/agents/*.md   "$DEST/.claude/agents/"
 cp "$SRC"/claude/commands/*.md "$DEST/.claude/commands/"
-echo "wrote   .claude/{hooks,agents,commands}"
+
+# skills carry references/ and scripts/ subtrees — replace each whole, don't merge.
+for d in "$SRC"/claude/skills/*/; do
+  s=$(basename "$d")
+  rm -rf "$DEST/.claude/skills/$s"
+  # strip trailing slash — BSD `cp -R src/ dest/` copies contents, not the dir itself
+  cp -R "${d%/}" "$DEST/.claude/skills/"
+done
+find "$DEST/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null || true
+echo "wrote   .claude/{hooks,agents,commands,skills}"
 
 [ -f "$DEST/CLAUDE.md" ] || { cp "$SRC/CLAUDE.md.tmpl" "$DEST/CLAUDE.md"; echo "wrote   CLAUDE.md (template — edit it)"; }
 
