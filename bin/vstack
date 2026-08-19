@@ -94,12 +94,26 @@ case "$CMD" in
     else h=$(sha256sum "$v" | cut -d' ' -f1); fi
     ts="$HOME/.config/agents/verify-trust"
     mkdir -p "${ts%/*}"
+    root="$(cd "$d" && pwd)"
+    # verify.sh is rarely the only thing that runs. This repo's own gate executes
+    # install.sh --dry-run and overlay.sh, so hashing one file while those two float free draws
+    # the trust boundary around the entry point instead of around the code. Record the scripts
+    # at the repo root too, and the gate re-checks every recorded file before running anything.
     tmp=$(mktemp)
-    grep -vF "  $v" "$ts" 2>/dev/null > "$tmp" || true
+    grep -vF "  $root/" "$ts" 2>/dev/null | grep -vF "  $v" > "$tmp" || true
     printf '%s  %s\n' "$h" "$v" >> "$tmp"
+    n=1
+    for extra in install.sh overlay.sh uninstall.sh bootstrap.sh; do
+      [ -f "$root/$extra" ] || continue
+      if command -v shasum >/dev/null 2>&1; then eh=$(shasum -a 256 "$root/$extra" | cut -d' ' -f1)
+      else eh=$(sha256sum "$root/$extra" | cut -d' ' -f1); fi
+      printf '%s  %s\n' "$eh" "$root/$extra" >> "$tmp"
+      n=$((n+1))
+    done
     mv "$tmp" "$ts"
     echo "trusted: $v"
-    echo "the Stop-hook verify gate will now run it (re-run 'vstack trust' after editing it)"
+    [ "$n" -gt 1 ] && echo "         plus $((n-1)) script(s) at the repo root that it executes"
+    echo "the Stop-hook verify gate will now run it (re-run 'vstack trust' after editing any of them)"
     ;;
   uninstall)
     "$REPO/uninstall.sh" "$@"

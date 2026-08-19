@@ -436,6 +436,19 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
   printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
     || errs="$errs\nwithout jq: a failing verify.sh did not produce a parseable decision:block"
 
+  # A script verify.sh executes, changed after it was trusted, must stop the gate. Trust used
+  # to cover the entry point alone, so a byte-identical verify.sh sailed through while the
+  # install.sh it runs had been swapped underneath.
+  printf '#!/usr/bin/env bash\necho original\n' > "$gd/repo/install.sh"
+  if command -v shasum >/dev/null 2>&1; then ih=$(shasum -a 256 "$gd/repo/install.sh" | cut -d' ' -f1)
+  else ih=$(sha256sum "$gd/repo/install.sh" | cut -d' ' -f1); fi
+  printf '%s  %s\n' "$ih" "$gd/repo/install.sh" >> "$gd/home/.config/agents/verify-trust"
+  printf '#!/usr/bin/env bash\necho swapped\n' > "$gd/repo/install.sh"
+  o=$(printf '{"session_id":"vs-trust"}' \
+      | env HOME="$gd/home" TMPDIR="$gd/tmp" CLAUDE_PROJECT_DIR="$gd/repo" bash claude/hooks/verify-gate.sh 2>/dev/null)
+  printf '%s' "$o" | grep -q 'changed since it was trusted' \
+    || errs="$errs\na trusted script changed underneath and the gate ran anyway"
+
   rm -rf "$gd"
 
   # And no hook may reach for jq by absolute path again. /usr/bin/jq is fine as a preference

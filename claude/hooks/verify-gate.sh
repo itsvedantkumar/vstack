@@ -37,6 +37,27 @@ if ! grep -qxF "$h  $v" "$HOME/.config/agents/verify-trust" 2>/dev/null; then
   else printf '{"systemMessage":"%s"}\n' "$(esc "$m")"; fi
   exit 0
 fi
+# verify.sh is the entry point, not the whole blast radius: this repo's gate runs
+# install.sh --dry-run and overlay.sh, and neither was covered. A verify.sh byte-identical to a
+# trusted one would sail through while the scripts it calls had changed underneath. Every
+# recorded file inside this repo has to still match, or nothing runs.
+root=$(dirname "$(dirname "$v")")
+tf="$HOME/.config/agents/verify-trust"
+while IFS= read -r line; do
+  rh=${line%% *}; rp=${line#*  }
+  case "$rp" in "$root"/*) ;; *) continue ;; esac
+  [ "$rp" = "$v" ] || [ -f "$rp" ] || continue
+  [ "$rp" = "$v" ] && continue
+  if command -v shasum >/dev/null 2>&1; then ch=$(shasum -a 256 "$rp" | cut -d' ' -f1)
+  else ch=$(sha256sum "$rp" 2>/dev/null | cut -d' ' -f1); fi
+  if [ "$ch" != "$rh" ]; then
+    m="verify gate: refused to run — ${rp##*/} changed since it was trusted, and .claude/verify.sh executes it. Review the change, then re-run 'vstack trust'."
+    if [ -n "$JQ" ]; then "$JQ" -cn --arg m "$m" '{systemMessage:$m}'
+    else printf '{"systemMessage":"%s"}\n' "$(esc "$m")"; fi
+    exit 0
+  fi
+done < "$tf" 2>/dev/null
+
 sid=""
 [ -n "$JQ" ] && sid=$(printf '%s' "$input" | "$JQ" -r '.session_id // empty' 2>/dev/null)
 # A missing session id must not collapse every session onto one shared counter file. It used to
