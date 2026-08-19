@@ -1,6 +1,6 @@
 ---
 name: show-me-your-work
-description: "Use for long-running, autonomous, background, overnight or multi-phase work a human reviews after stepping away: keep an append-only TSV trail of each decision (what, why, evidence, result)."
+description: "Before unattended, overnight, or multi-phase work someone reviews after you step away, open an append-only TSV decision log: what, why, evidence, result, one row per decision."
 ---
 
 # Show me your work

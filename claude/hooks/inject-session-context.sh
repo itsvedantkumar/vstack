@@ -48,7 +48,8 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
   or agent-written code with no second reviewer -> interrogate.
 - repo has no scripted proof it works -> create-verification-skill (it writes the
   .claude/verify.sh the Stop hook runs). That gate stale -> maintain-verification-skill.
-- unattended/overnight/multi-phase work a human reviews later -> show-me-your-work.
+- work runs unattended/overnight, or you are told someone reviews it later -> start
+  show-me-your-work BEFORE doing the work, not after.
 - any feature or change request -> run the chain: brainstorming, then writing-plans, then
   test-driven-development, then executing-plans.
 - you were corrected, or found a workflow worth keeping -> reflect.
