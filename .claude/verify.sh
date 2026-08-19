@@ -526,6 +526,26 @@ else
   skip "overlay ships project keys only" "jq or git not installed"
 fi
 
+# --- 18. the session hook's injected context stays bounded -------------------------------------
+# Every byte here is paid on every session, and the per-prompt digest is paid on every turn —
+# over a hundred turns it costs more than the session baseline does once. Nothing stopped
+# either growing, and prose grows by default. The caps sit about 25 percent above the measured
+# sizes: they catch a block that ran away, not a sentence added on purpose.
+if command -v jq >/dev/null; then
+  errs=""
+  probe(){ printf '{"hook_event_name":"%s"}' "$1" | env CONDUCTOR_WORKSPACE_PATH="${3:-}" ${2:+VSTACK_PROFILE=$2} \
+           bash claude/hooks/inject-session-context.sh 2>/dev/null | wc -c | tr -d ' '; }
+  chk(){ [ "$2" -le "$3" ] || errs="$errs\n$1: $2 bytes exceeds the $3 byte cap"; }
+  chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)" 512
+  chk "session baseline"       "$(probe SessionStart '' '')"    4096
+  chk "skills profile"         "$(probe SessionStart skills 1)" 2560
+  [ -z "$errs" ] \
+    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $(probe SessionStart '' '') B)" \
+    || bad "injected context bounded" "$(printf '%b' "$errs")"
+else
+  skip "injected context bounded" "jq not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

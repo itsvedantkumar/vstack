@@ -7,7 +7,14 @@ branch_prefix_type = "github_username"
 [models]
 default = "opus-5"
 default_fast_mode = true
-default_plan_mode = true
+# Off by default. Installing bypassPermissions to stop approving individual tool calls, and
+# then blocking every session on approving a plan, is the same interruption moved one level
+# up. Plan mode is an unconditional prior; the planning skills are conditional and fire on the
+# situations that actually warrant them, which tests/auto-trigger.sh measures. The safety net
+# for a bad change is the Stop-hook verify gate plus per-workspace worktree isolation, neither
+# of which depends on a human reading a plan first. Turn it back on per workspace when a
+# change genuinely needs it.
+default_plan_mode = false
 
 [models.codex]
 default_thinking_level = "high"
