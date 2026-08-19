@@ -93,9 +93,12 @@ break_it(){ case "$1" in
       awk 'BEGIN{d="x"; for(i=0;i<209;i++) d=d "y"}
            /^description:/{print "description: " d; next} {print}' \
           claude/skills/unslop/SKILL.md > /tmp/fx.$$ && mv /tmp/fx.$$ claude/skills/unslop/SKILL.md ;;
-  4)  printf '\npath /Users/realperson/notes\n' >> README.md ;;
-  5)  printf '\napi_key=AbCdEf0123456789AbCdEf0123456789\n' >> README.md ;;
-  6)  printf '\nproject prj_A1b2C3d4E5f6G7h8\n' >> README.md ;;
+  # Assembled at runtime, never written out whole. Checks 4-6 scan every tracked file, and
+  # this is a tracked file: a literal probe here is a real hit on the repo itself, which is
+  # how these three rows turned the gate red the moment the suite was committed.
+  4)  printf '\npath /Users/%s/notes\n' 'realperson' >> README.md ;;
+  5)  printf '\napi%s=AbCdEf0123456789AbCdEf0123456789\n' '_key' >> README.md ;;
+  6)  printf '\nproject prj%sA1b2C3d4E5f6G7h8\n' '_' >> README.md ;;
   7)  printf '\nRoute this to the totally-invented-skill when it matters.\n' >> claude/CLAUDE.md ;;
   8)  sed -i.t 's/as \$portable/as $portable @@@/' install.sh && rm -f install.sh.t ;;
   9)  # Early, not appended: the dry-run path exits 0 partway down install.sh, so anything
