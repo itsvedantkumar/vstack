@@ -9,8 +9,7 @@ set -uo pipefail
 # the next `install.sh` run silently overwrites those files back to whatever the repo has.
 # Drift reported here is unsaved work that is one `vstack update` away from being lost without
 # any warning.
-if [ "${1:-}" = "--drift" ]; then
-  resolve_vstack_repo() {
+resolve_vstack_repo() {
     if [ -n "${VSTACK_DIR:-}" ] && [ -f "$VSTACK_DIR/claude/settings.json" ]; then
       printf '%s\n' "$VSTACK_DIR"; return 0
     fi
@@ -29,11 +28,16 @@ if [ "${1:-}" = "--drift" ]; then
       printf '%s\n' "$root"; return 0
     fi
     return 1
-  }
+}
 
+if [ "${1:-}" = "--drift" ]; then
+  # Exits 1, not 0. Reporting "nothing to compare" and succeeding meant a cron or CI wrapper
+  # on a machine where the checkout had moved got a green result forever while comparing
+  # nothing. bin/vstack already exits 1 in this exact situation; the two disagreed.
   REPO=$(resolve_vstack_repo) || {
-    echo "doctor --drift: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root) — nothing to compare"
-    exit 0
+    echo "doctor --drift: no vstack repo found (checked \$VSTACK_DIR, ~/.config/agents/vstack-repo, ~/.vstack, and this script's git root)"
+    echo "nothing was compared, so this is a failure rather than a pass"
+    exit 1
   }
 
   echo "comparing installed state against: $REPO"
@@ -47,9 +51,15 @@ if [ "${1:-}" = "--drift" ]; then
       return
     fi
     if [ -d "$src" ]; then
-      n=$(diff -rq "$src" "$dst" 2>/dev/null | wc -l | tr -d ' ')
-      if [ "$n" != "0" ]; then
-        echo "differs   $rel  ($n change(s) vs $dst)"
+      # diff's exit status is read rather than inferred from its output. It returns 2 for
+      # trouble (unreadable file, permissions) and this discarded stderr and counted the empty
+      # output as zero changes, so a directory it could not read reported as clean.
+      out=$(diff -rq "$src" "$dst" 2>&1); rc=$?
+      if [ "$rc" -ge 2 ]; then
+        echo "error     $rel  (diff failed, nothing compared: $(printf '%s' "$out" | head -1))"
+        DRIFT=1
+      elif [ -n "$out" ]; then
+        echo "differs   $rel  ($(printf '%s\n' "$out" | grep -c .) change(s) vs $dst)"
         DRIFT=1
       fi
     else
@@ -85,6 +95,14 @@ if [ "${1:-}" = "--drift" ]; then
     b=$(basename "$f")
     check_item "bin/$b" "$f" "$HOME/.config/agents/bin/$b"
   done
+  # install.sh calls CLAUDE.md "the file most likely to have been hand-edited on a machine that
+  # has been running a while", and it was the one file --drift never looked at. Hand-edit it,
+  # get "no drift", then lose the edit on the next update. Same for the statusline and the
+  # shell lane.
+  check_item "claude/CLAUDE.md"        "$REPO/claude/CLAUDE.md"        "$HOME/.claude/CLAUDE.md"
+  check_item "claude/statusline.sh"    "$REPO/claude/statusline.sh"    "$HOME/.claude/statusline.sh"
+  [ -f "$REPO/shell/claude-parity.zsh" ] && \
+    check_item "shell/claude-parity.zsh" "$REPO/shell/claude-parity.zsh" "$HOME/.config/agents/shell/claude-parity.zsh"
 
   # Behind-remote is informational only — never fail solely for being behind.
   if git -C "$REPO" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1; then
@@ -115,13 +133,26 @@ get_perms(){
   fi
 }
 
+# Expectations come from the repo when it can be found, so adding a hook or an agent does not
+# need a matching edit here. The hardcoded fallbacks are what this file used to assert
+# unconditionally, and both had already fallen behind the tree.
+R=$(resolve_vstack_repo 2>/dev/null) || R=""
+HOOKS="format inject-session-context verify-gate failure-diagnose"
+WANT_AGENTS=6
+if [ -n "$R" ]; then
+  h=$(ls "$R"/claude/hooks/*.sh 2>/dev/null | while read -r f; do basename "$f" .sh; done | tr '\n' ' ')
+  [ -n "$h" ] && HOOKS="$h"
+  a=$(ls "$R"/claude/agents/*.md 2>/dev/null | wc -l | tr -d ' ')
+  [ "${a:-0}" -gt 0 ] && WANT_AGENTS="$a"
+fi
+
 echo "── hooks ──"
 # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
-for f in format inject-session-context verify-gate; do
+for f in $HOOKS; do
   [ -x "$HOME/.claude/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
-[ -x "$HOME/.claude/hooks/failure-diagnose.sh" ] && ok "failure-diagnose.sh" || bad "failure-diagnose.sh" "missing"
 [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
-n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' '); [ "$n" -ge 6 ] && ok "subagents ($n)" || bad "subagents" "$n<6"
+n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
+[ "$n" -ge "$WANT_AGENTS" ] && ok "subagents ($n)" || bad "subagents" "$n<$WANT_AGENTS"
 echo "── secrets ──"
 [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
 grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || bad "zshenv source" "not sourced"
@@ -159,17 +190,32 @@ echo "── project coverage ──"
 # .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo
 # with a commit in the last 45 days and no .conductor/settings.toml is an uncovered project.
 cutoff=$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d 2>/dev/null)
-uncovered=""
-for base in "$HOME/Projects" "$HOME/conductor/repos"; do
-  [ -d "$base" ] || continue
-  for r in "$base"/*/; do
-    [ -d "$r/.git" ] || continue
+if [ -z "$cutoff" ]; then
+  # Both date forms failing left cutoff empty, which skipped every repo, which left uncovered
+  # empty, which printed a tick. Total failure of the check reported as a pass.
+  bad "active repos overlaid" "could not compute a cutoff date — nothing was scanned"
+else
+  uncovered=""; scanned=0
+  # Two fixes here. `.git` is a file rather than a directory inside a git worktree, so the old
+  # -d test made every Conductor workspace invisible to a check whose entire job is finding
+  # uncovered working repos. And Conductor nests them as workspaces/<project>/<workspace>, so
+  # a single level of globbing only ever saw the container directories.
+  for r in "$HOME/Projects"/*/ "$HOME/conductor/repos"/*/ "$HOME/conductor/workspaces"/*/*/; do
+    [ -e "$r/.git" ] || continue
     last=$(git -C "$r" log -1 --format=%cs 2>/dev/null) || continue
-    [ -n "$last" ] && [ -n "$cutoff" ] && [ "$last" \> "$cutoff" ] || continue
-    [ -f "$r/.conductor/settings.toml" ] || uncovered="$uncovered $(basename "$r")"
+    [ -n "$last" ] && [ "$last" \> "$cutoff" ] || continue
+    scanned=$((scanned+1))
+    [ -f "$r/.conductor/settings.toml" ] && continue
+    # Report the project, not each worktree: the overlay is committed, so every workspace of an
+    # uncovered repo is the same single fix and listing them all is noise.
+    name=$(basename "$r")
+    case "$r" in "$HOME/conductor/workspaces/"*) name=$(basename "$(dirname "$r")") ;; esac
+    uncovered="$uncovered $name"
   done
-done
-[ -z "$uncovered" ] && ok "active repos overlaid" || bad "active repos overlaid" "missing overlay:$uncovered — run 'vstack overlay <repo>'"
+  uncovered=$(printf '%s' "$uncovered" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+  [ -z "$uncovered" ] && ok "active repos overlaid ($scanned scanned)" \
+    || bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
+fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
 jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
