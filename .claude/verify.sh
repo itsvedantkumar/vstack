@@ -392,6 +392,45 @@ else
   skip "plugin manifest versions" "jq not installed"
 fi
 
+# --- 14. the Stop-hook gate actually blocks ----------------------------------------------------
+# The gate is the mechanism every other check depends on: none of them matter if a failing
+# verify.sh does not stop the agent. It hardcoded /usr/bin/jq, so on a host without that exact
+# path the block decision was never emitted and the gate enforced nothing while looking
+# installed. Drive it end to end against a seeded failing verify.sh, in both jq conditions.
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  gd=$(mktemp -d)
+  mkdir -p "$gd/repo/.claude" "$gd/home/.config/agents" "$gd/bin"
+  printf '#!/usr/bin/env bash\necho "seeded failure"\nexit 1\n' > "$gd/repo/.claude/verify.sh"
+  chmod +x "$gd/repo/.claude/verify.sh"
+  gv="$gd/repo/.claude/verify.sh"
+  if command -v shasum >/dev/null 2>&1; then gh=$(shasum -a 256 "$gv" | cut -d' ' -f1)
+  else gh=$(sha256sum "$gv" | cut -d' ' -f1); fi
+  printf '%s  %s\n' "$gh" "$gv" > "$gd/home/.config/agents/verify-trust"
+
+  errs=""
+  o=$(printf '{"session_id":"vs-gate"}' \
+      | env HOME="$gd/home" CLAUDE_PROJECT_DIR="$gd/repo" bash claude/hooks/verify-gate.sh 2>/dev/null)
+  printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
+    || errs="$errs\nwith jq: a failing verify.sh did not produce decision:block"
+
+  # Same run with no jq reachable: rewrite the absolute path and hand it a PATH holding only
+  # the tools the hook itself needs.
+  sed 's#/usr/bin/jq#/nonexistent/jq#' claude/hooks/verify-gate.sh > "$gd/nojq.sh"
+  for t in bash sh cat cut grep sed awk tr shasum sha256sum rm mkdir env dirname basename; do
+    p=$(command -v "$t" 2>/dev/null) && ln -sf "$p" "$gd/bin/$t"
+  done
+  o=$(printf '{"session_id":"vs-gate-nojq"}' \
+      | env PATH="$gd/bin" HOME="$gd/home" CLAUDE_PROJECT_DIR="$gd/repo" bash "$gd/nojq.sh" 2>/dev/null)
+  printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
+    || errs="$errs\nwithout jq: a failing verify.sh did not produce a parseable decision:block"
+
+  rm -rf "$gd"
+  [ -z "$errs" ] && ok "stop-hook gate blocks (jq present and absent)" \
+    || bad "stop-hook gate blocks" "$(printf '%b' "$errs")"
+else
+  skip "stop-hook gate blocks" "jq or git not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
