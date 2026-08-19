@@ -20,7 +20,7 @@
 # This script installs software. It never removes any, and it never touches your dotfiles.
 set -uo pipefail
 
-WITH_SECURITY=0; CHECK=0; DRY=0
+WITH_SECURITY=0; CHECK=0; DRY=0; APT_UPDATED=0
 for a in "$@"; do
   case "$a" in
     --with-security) WITH_SECURITY=1 ;;
@@ -75,21 +75,71 @@ setup_pm(){
 pm_install(){ # pm_install <package>
   case "$PM" in
     brew)    brew install "$1" ;;
-    apt-get) sudo apt-get install -y -qq "$1" ;;
-    dnf)     sudo dnf install -y -q "$1" ;;
-    apk)     sudo apk add --quiet "$1" ;;
+    apt-get)
+      if [ "$EUID" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        return 1
+      fi
+      if [ "$EUID" -ne 0 ]; then
+        sudo apt-get install -y -qq "$1"
+      else
+        apt-get install -y -qq "$1"
+      fi
+      ;;
+    dnf)
+      if [ "$EUID" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        return 1
+      fi
+      if [ "$EUID" -ne 0 ]; then
+        sudo dnf install -y -q "$1"
+      else
+        dnf install -y -q "$1"
+      fi
+      ;;
+    apk)
+      if [ "$EUID" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        return 1
+      fi
+      if [ "$EUID" -ne 0 ]; then
+        sudo apk add --quiet "$1"
+      else
+        apk add --quiet "$1"
+      fi
+      ;;
     *)       return 1 ;;
   esac
 }
 
-# ensure <command> <package> [label]
+apt_update_guard(){
+  [ "$PM" != "apt-get" ] && return 0
+  [ "$APT_UPDATED" = 1 ] && return 0
+  if [ "$DRY" = 1 ]; then
+    note "would run: apt-get update"; return 0
+  fi
+  if [ "$EUID" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+    note "!! cannot run apt-get update: not root and sudo not available"
+    return 1
+  fi
+  if [ "$EUID" -ne 0 ]; then
+    sudo apt-get update -qq >/dev/null 2>&1 || return 1
+  else
+    apt-get update -qq >/dev/null 2>&1 || return 1
+  fi
+  APT_UPDATED=1
+}
+
+# ensure <command> <package-brew> <package-apt> [label]
+# on apt systems, uses package-apt; on brew, uses package-brew; others use package-brew
 ensure(){
-  cmd="$1"; pkg="$2"; label="${3:-$1}"
+  cmd="$1"; pkg_brew="$2"; pkg_apt="${3:-$2}"; label="${4:-$1}"
   if command -v "$cmd" >/dev/null 2>&1; then
     note "-- $label: present ($(command -v "$cmd"))"; mark have "$label"; return 0
   fi
   [ "$CHECK" = 1 ] && { note "-- $label: MISSING"; mark fail "$label"; return 1; }
-  [ "$DRY"   = 1 ] && { note "would install $label ($pkg)"; mark ok "$label"; return 0; }
+
+  pkg="$pkg_brew"
+  [ "$PM" = "apt-get" ] && pkg="$pkg_apt"
+
+  [ "$DRY" = 1 ] && { note "would install $label ($pkg)"; mark ok "$label"; return 0; }
   note ">> installing $label"
   if pm_install "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
     mark ok "$label"
@@ -115,6 +165,23 @@ ensure_npm(){
   fi
 }
 
+# ensure_remote <command> <installer-url> [label]
+# For tools like bun and uv that provide curl installers outside package managers
+ensure_remote(){
+  cmd="$1"; url="$2"; label="${3:-$1}"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    note "-- $label: present ($(command -v "$cmd"))"; mark have "$label"; return 0
+  fi
+  [ "$CHECK" = 1 ] && { note "-- $label: MISSING"; mark fail "$label"; return 1; }
+  [ "$DRY"   = 1 ] && { note "would install $label (via curl)"; mark ok "$label"; return 0; }
+  note ">> installing $label"
+  if curl -fsSL "$url" | bash >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
+    mark ok "$label"
+  else
+    note "!! $label failed to install"; mark fail "$label"
+  fi
+}
+
 # --- run -----------------------------------------------------------------------------------
 note "== platform: $OS"
 setup_pm || note "!! continuing without a package manager; most installs will fail"
@@ -122,14 +189,16 @@ setup_pm || note "!! continuing without a package manager; most installs will fa
 
 note ""
 note "== core"
-ensure git      git
-ensure jq       jq
-ensure rg       ripgrep    rg
-ensure fd       fd
-ensure gh       gh
-ensure node     node
-ensure bun      oven-sh/bun/bun bun
-ensure uv       uv
+apt_update_guard
+
+ensure git      git         git
+ensure jq       jq          jq
+ensure rg       ripgrep     ripgrep  rg
+ensure fd       fd          fd-find  fd
+ensure gh       gh          gh
+ensure node     node        nodejs   node
+ensure_remote bun "https://bun.sh/install.sh"
+ensure_remote uv  "https://astral.sh/uv/install.sh"
 
 note ""
 note "== bundled with node"

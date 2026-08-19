@@ -106,6 +106,15 @@ if [ "${1:-}" = "--drift" ]; then
 fi
 
 p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖ $2"; FAIL=1; }; FAIL=0
+
+get_perms(){
+  if [ "$(/usr/bin/uname -s 2>/dev/null || uname -s 2>/dev/null)" = "Darwin" ]; then
+    stat -f '%Lp' "$1" 2>/dev/null
+  else
+    stat -c '%a' "$1" 2>/dev/null
+  fi
+}
+
 echo "── hooks ──"
 # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
 for f in format inject-session-context verify-gate; do
@@ -114,7 +123,7 @@ for f in format inject-session-context verify-gate; do
 [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
 n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' '); [ "$n" -ge 6 ] && ok "subagents ($n)" || bad "subagents" "$n<6"
 echo "── secrets ──"
-[ -f "$HOME/.config/agents/secrets.env" ] && [ "$(stat -f '%Lp' "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
+[ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
 grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || bad "zshenv source" "not sourced"
 for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
