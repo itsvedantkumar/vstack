@@ -1,5 +1,105 @@
 #!/usr/bin/env bash
 # Health-check Claude Code setup — catches silent drift (vanished hooks/agents, missing secrets).
+set -uo pipefail
+
+# --drift: compare the INSTALLED state (~/.claude, ~/.config/agents/bin) against the vstack
+# repo checkout it came from.
+#
+# WHY this matters: editing ~/.claude (or ~/.config/agents/bin) directly appears to work, but
+# the next `install.sh` run silently overwrites those files back to whatever the repo has.
+# Drift reported here is unsaved work that is one `vstack update` away from being lost without
+# any warning.
+if [ "${1:-}" = "--drift" ]; then
+  resolve_vstack_repo() {
+    if [ -n "${VSTACK_DIR:-}" ] && [ -f "$VSTACK_DIR/claude/settings.json" ]; then
+      printf '%s\n' "$VSTACK_DIR"; return 0
+    fi
+    if [ -f "$HOME/.vstack/claude/settings.json" ]; then
+      printf '%s\n' "$HOME/.vstack"; return 0
+    fi
+    sdir=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || sdir=""
+    root=""
+    [ -n "$sdir" ] && root=$(cd "$sdir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+    if [ -n "${root:-}" ] && [ -f "$root/claude/settings.json" ]; then
+      printf '%s\n' "$root"; return 0
+    fi
+    return 1
+  }
+
+  REPO=$(resolve_vstack_repo) || {
+    echo "doctor --drift: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root) — nothing to compare"
+    exit 0
+  }
+
+  echo "comparing installed state against: $REPO"
+  DRIFT=0
+
+  check_item() {
+    rel="$1"; src="$2"; dst="$3"
+    if [ ! -e "$dst" ]; then
+      echo "missing   $rel  (not installed at $dst)"
+      DRIFT=1
+      return
+    fi
+    if [ -d "$src" ]; then
+      n=$(diff -rq "$src" "$dst" 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$n" != "0" ]; then
+        echo "differs   $rel  ($n change(s) vs $dst)"
+        DRIFT=1
+      fi
+    else
+      if ! diff -q "$src" "$dst" >/dev/null 2>&1; then
+        echo "differs   $rel  (vs $dst)"
+        DRIFT=1
+      fi
+    fi
+  }
+
+  for f in "$REPO"/claude/hooks/*.sh; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_item "claude/hooks/$b" "$f" "$HOME/.claude/hooks/$b"
+  done
+  for f in "$REPO"/claude/agents/*.md; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_item "claude/agents/$b" "$f" "$HOME/.claude/agents/$b"
+  done
+  for f in "$REPO"/claude/commands/*.md; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_item "claude/commands/$b" "$f" "$HOME/.claude/commands/$b"
+  done
+  for d in "$REPO"/claude/skills/*/; do
+    [ -d "$d" ] || continue
+    s=$(basename "$d")
+    check_item "claude/skills/$s" "${d%/}" "$HOME/.claude/skills/$s"
+  done
+  for f in "$REPO"/bin/*; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_item "bin/$b" "$f" "$HOME/.config/agents/bin/$b"
+  done
+
+  # Behind-remote is informational only — never fail solely for being behind.
+  if git -C "$REPO" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    git -C "$REPO" fetch -q 2>/dev/null || true
+    behind=$(git -C "$REPO" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+    case "$behind" in ''|*[!0-9]*) behind=0 ;; esac
+    if [ "$behind" -gt 0 ]; then
+      echo "note: repo is $behind commit(s) behind its remote (git -C \"$REPO\" pull)"
+    fi
+  fi
+
+  echo
+  if [ "$DRIFT" = 1 ]; then
+    echo "DRIFT ✖"
+    exit 1
+  fi
+  echo "no drift ✔"
+  exit 0
+fi
+
 p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖ $2"; FAIL=1; }; FAIL=0
 echo "── hooks ──"
 # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)

@@ -118,15 +118,30 @@ asking, verify before claiming done, and chain the planning skills without being
 `install.sh` backs it up before overwriting, because on a machine that has been running a
 while this is the file most likely to have been hand-edited.
 
-## Health check
+## Day-to-day
 
 ```bash
-~/.config/agents/bin/doctor
+vstack update            # pull the repo, reinstall
+vstack doctor            # health check
+vstack doctor --drift    # has anything been edited in place?
+vstack overlay <repo>    # commit the config into another repo
+vstack verify            # run the gate
+vstack uninstall --list  # show restorable backups
 ```
 
 `doctor` checks hooks, subagents, secrets file permissions, auth method, Conductor parity
-keys, context caps, and Remote Control settings. It exits non-zero on drift. Run it after any
-Claude Code update: plugin updates have reverted config here before.
+keys, context caps, and Remote Control settings. Run it after any Claude Code update: plugin
+updates have reverted config here before.
+
+`doctor --drift` answers a different question: does the installed state still match the repo
+it came from? Editing `~/.claude` directly works right up until the next `install.sh`
+overwrites it, so drift means unsaved work is about to disappear. Fix it by copying the change
+back into the repo, then reinstalling.
+
+`uninstall.sh` restores from the backups `install.sh` has been writing all along. `--list`
+shows the timestamps, `--dry-run` prints the plan, and it refuses to touch anything without
+`--yes`. It never removes `secrets.env`, and it never deletes a skill that is a symlink,
+because those belong to Claude Code and its plugins.
 
 ## Layout
 

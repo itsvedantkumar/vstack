@@ -56,8 +56,8 @@ back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOM
 
 # --- hooks / agents / commands ------------------------------------------------------------
 for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")"; run cp "$f" "$HOME/.claude/hooks/"; done
-for f in "$SRC"/claude/agents/*.md;   do run cp "$f" "$HOME/.claude/agents/";   done
-for f in "$SRC"/claude/commands/*.md; do run cp "$f" "$HOME/.claude/commands/"; done
+for f in "$SRC"/claude/agents/*.md;   do back "$HOME/.claude/agents/$(basename "$f")";   run cp "$f" "$HOME/.claude/agents/";   done
+for f in "$SRC"/claude/commands/*.md; do back "$HOME/.claude/commands/$(basename "$f")"; run cp "$f" "$HOME/.claude/commands/"; done
 [ "$DRY" = 0 ] && chmod 755 "$HOME"/.claude/hooks/*.sh
 say "installed  hooks, agents, commands"
 

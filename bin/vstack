@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# vstack — one-word dispatcher for the common vstack operations.
+#
+# Usage: vstack <update|install|doctor|overlay|verify|uninstall|help> [args...]
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: vstack <command> [args...]
+
+commands:
+  update              git pull the vstack repo, then run its install.sh
+  install [args...]   run the repo's install.sh (args passed through, e.g. --dry-run)
+  doctor [args...]    run ~/.config/agents/bin/doctor (args passed through, e.g. --drift)
+  overlay <repo>       run the repo's overlay.sh against <repo>
+  verify               run the repo's .claude/verify.sh
+  uninstall [args...]  run the repo's uninstall.sh (args passed through)
+  help                 show this message
+
+The repo is resolved the same way as `doctor --drift`: $VSTACK_DIR, else ~/.vstack, else the
+git root containing this script's parent (if it has claude/settings.json).
+EOF
+}
+
+resolve_vstack_repo() {
+  if [ -n "${VSTACK_DIR:-}" ] && [ -f "$VSTACK_DIR/claude/settings.json" ]; then
+    printf '%s\n' "$VSTACK_DIR"; return 0
+  fi
+  if [ -f "$HOME/.vstack/claude/settings.json" ]; then
+    printf '%s\n' "$HOME/.vstack"; return 0
+  fi
+  sdir=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || sdir=""
+  root=""
+  [ -n "$sdir" ] && root=$(cd "$sdir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "${root:-}" ] && [ -f "$root/claude/settings.json" ]; then
+    printf '%s\n' "$root"; return 0
+  fi
+  return 1
+}
+
+CMD="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$CMD" in
+  ""|help|-h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+REPO=$(resolve_vstack_repo) || {
+  echo "vstack: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root)" >&2
+  echo "vstack: set \$VSTACK_DIR to your checkout, or clone one to ~/.vstack" >&2
+  exit 1
+}
+
+case "$CMD" in
+  update)
+    git -C "$REPO" pull && "$REPO/install.sh"
+    ;;
+  install)
+    "$REPO/install.sh" "$@"
+    ;;
+  doctor)
+    D="$HOME/.config/agents/bin/doctor"
+    [ -x "$D" ] || D="$REPO/bin/doctor"
+    "$D" "$@"
+    ;;
+  overlay)
+    if [ $# -lt 1 ]; then
+      echo "vstack overlay: missing <repo> argument" >&2
+      exit 2
+    fi
+    "$REPO/overlay.sh" "$@"
+    ;;
+  verify)
+    "$REPO/.claude/verify.sh"
+    ;;
+  uninstall)
+    "$REPO/uninstall.sh" "$@"
+    ;;
+  *)
+    echo "vstack: unknown command: $CMD" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
