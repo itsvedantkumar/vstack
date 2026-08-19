@@ -12,7 +12,10 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${1:-$PWD}"
 
-[ -d "$DEST/.git" ] || { echo "error: $DEST is not a git repo" >&2; exit 1; }
+# -e, not -d: inside a git worktree .git is a file pointing at the real git dir. The -d test
+# rejected every Conductor workspace, which is precisely where this needs to run — Conductor
+# lays them out as workspaces/<project>/<workspace>, and each one is a worktree.
+[ -e "$DEST/.git" ] || { echo "error: $DEST is not a git repo or worktree" >&2; exit 1; }
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run from the vstack repo" >&2; exit 1; }
 
 mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"

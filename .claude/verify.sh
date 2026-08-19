@@ -530,6 +530,16 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
       || errs="$errs\nwired a verify gate but shipped no .claude/verify.sh"
     grep -qF "$(git rev-parse HEAD)" "$ov/.conductor/settings.toml" 2>/dev/null \
       || errs="$errs\n.conductor/settings.toml does not pin the commit being overlaid"
+    # A Conductor workspace is a git worktree, where .git is a file rather than a directory.
+    # overlay.sh tested -d and so refused to run in the exact place it is most needed.
+    git -C "$ov" commit -q --allow-empty -m seed 2>/dev/null
+    wt=$(mktemp -d); rm -rf "$wt"
+    if git -C "$ov" worktree add -q "$wt" -b vs-overlay-probe 2>/dev/null; then
+      ./overlay.sh "$wt" >/dev/null 2>&1 \
+        || errs="$errs\noverlay.sh refuses to run in a git worktree (Conductor workspaces are worktrees)"
+      git -C "$ov" worktree remove --force "$wt" 2>/dev/null
+    fi
+    rm -rf "$wt"
   else
     errs="$errs\noverlay.sh failed:\n$out"
   fi
