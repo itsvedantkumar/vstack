@@ -14,6 +14,7 @@ commands:
   doctor [args...]    run ~/.config/agents/bin/doctor (args passed through, e.g. --drift)
   overlay <repo>       run the repo's overlay.sh against <repo>
   verify               run the repo's .claude/verify.sh
+  test                 run tests/auto-trigger.sh (live skill-firing regression; needs claude auth, ~15 min)
   uninstall [args...]  run the repo's uninstall.sh (args passed through)
   help                 show this message
 
@@ -75,6 +76,9 @@ case "$CMD" in
     ;;
   verify)
     "$REPO/.claude/verify.sh"
+    ;;
+  test)
+    "$REPO/tests/auto-trigger.sh" "$@"
     ;;
   uninstall)
     "$REPO/uninstall.sh" "$@"

@@ -24,7 +24,8 @@ done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*
 if command -v jq >/dev/null; then
   errs=""
   for f in claude/settings.json mcp/servers.json claude/hooks/hooks.json \
-           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json; do
+           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
+           plugins/vstack-core/.claude-plugin/plugin.json plugins/vstack-core/hooks/hooks.json; do
     [ -f "$f" ] || { errs="$errs\n$f: missing"; continue; }
     jq -e . "$f" >/dev/null 2>&1 || errs="$errs\n$f: invalid JSON"
   done
@@ -95,7 +96,7 @@ hits=$(grep -rInE --exclude-dir=.git \
 # check catches. Short principle names (prove-it-works) resolve via the principle- prefix;
 # agent and command names are legitimate non-skill references; ALLOW covers generic hyphenated
 # English and git plumbing that the token pattern also matches.
-ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|re-pins|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|name-only|per-prompt|session-context|session-start|operating-mode|two-line'
+ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|re-pins|re-pin|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|name-only|per-prompt|session-context|session-start|operating-mode|two-line'
 errs=""
 # \b keeps a capitalized word (Per-prompt) from yielding a bogus mid-word token (er-prompt).
 for tok in $(grep -ohE '\b[a-z][a-z0-9]*(-[a-z0-9]+)+' claude/CLAUDE.md claude/hooks/inject-session-context.sh | sort -u); do

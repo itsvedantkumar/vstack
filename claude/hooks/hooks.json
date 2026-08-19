@@ -1,5 +1,5 @@
 {
-  "description": "Routes situations to skills at session start, and re-pins the essentials on every prompt so the discipline survives a long session.",
+  "description": "Routes situations to skills so they fire without a slash command, and runs the repo's .claude/verify.sh gate before the agent is allowed to finish.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,19 +7,19 @@
           {
             "type": "command",
             "shell": "bash",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-session-context.sh\"",
-            "statusMessage": "context"
+            "command": "VSTACK_PROFILE=skills \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-session-context.sh\"",
+            "statusMessage": "skill routing"
           }
         ]
       }
     ],
-    "UserPromptSubmit": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "shell": "bash",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-session-context.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
           }
         ]
       }

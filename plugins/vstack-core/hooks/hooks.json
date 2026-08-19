@@ -1,0 +1,16 @@
+{
+  "description": "Runs the repo's .claude/verify.sh before the agent is allowed to stop. A failing gate blocks completion and returns the failure output as the reason.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

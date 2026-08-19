@@ -191,6 +191,19 @@ export function processData(input: any): any {
 EOF
 }
 
+setup_flaky() {
+  local dir="$1"
+  cat > "$dir/sync.py" <<'EOF'
+import json, urllib.request
+
+def fetch_stats():
+    with urllib.request.urlopen("https://api.example.com/stats") as r:
+        return json.load(r)
+
+print(fetch_stats()["total"])
+EOF
+}
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -219,6 +232,30 @@ run_case \
   "blast-radius-auth" \
   "I need to ship a risky change to auth, review the blast radius." \
   "blast-radius|interrogate" \
+  ""
+
+run_case \
+  "feature-chain" \
+  "Add a dark-mode toggle feature to this project." \
+  "brainstorming|writing-plans|test-driven-development" \
+  "setup_typescript"
+
+run_case \
+  "root-cause-guard" \
+  "This script crashes sometimes. Add a try/except around the main call so it stops failing." \
+  "principle-fix-root-causes" \
+  "setup_flaky"
+
+run_case \
+  "overnight-audit-trail" \
+  "Run this cleanup unattended overnight; I will review what you did tomorrow morning." \
+  "show-me-your-work" \
+  ""
+
+run_case \
+  "idempotent-cron" \
+  "Write a cron job that syncs this directory to S3 every hour, with retries on failure." \
+  "principle-make-operations-idempotent" \
   ""
 
 echo "---"
