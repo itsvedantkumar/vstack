@@ -191,6 +191,29 @@ export function processData(input: any): any {
 EOF
 }
 
+setup_webapp() {
+  local dir="$1"
+  cat > "$dir/package.json" <<'EOF'
+{ "name": "notes-app", "version": "1.0.0", "scripts": { "test": "node --test" } }
+EOF
+  cat > "$dir/app.js" <<'EOF'
+const notes = [];
+export function addNote(text) { notes.push({ text, at: Date.now() }); }
+export function listNotes() { return notes; }
+EOF
+  cat > "$dir/index.html" <<'EOF'
+<!doctype html><html><head><title>Notes</title></head>
+<body><ul id="notes"></ul><script type="module" src="app.js"></script></body></html>
+EOF
+}
+
+setup_messy() {
+  local dir="$1"
+  mkdir -p "$dir/old" "$dir/tmp"
+  for f in draft1 draft2 final final-v2 final-FINAL; do echo "$f" > "$dir/$f.txt"; done
+  echo "log" > "$dir/tmp/build.log"; echo "bak" > "$dir/old/app.js.bak"
+}
+
 setup_flaky() {
   local dir="$1"
   cat > "$dir/sync.py" <<'EOF'
@@ -236,9 +259,9 @@ run_case \
 
 run_case \
   "feature-chain" \
-  "Add a dark-mode toggle feature to this project." \
+  "I want a dark-mode toggle feature in this notes app. Build it." \
   "brainstorming|writing-plans|test-driven-development" \
-  "setup_typescript"
+  "setup_webapp"
 
 run_case \
   "root-cause-guard" \
@@ -248,9 +271,9 @@ run_case \
 
 run_case \
   "overnight-audit-trail" \
-  "Run this cleanup unattended overnight; I will review what you did tomorrow morning." \
+  "Clean up and reorganize the files in this directory. You are running unattended overnight - I will step away now and review everything you did tomorrow morning." \
   "show-me-your-work" \
-  ""
+  "setup_messy"
 
 run_case \
   "idempotent-cron" \
