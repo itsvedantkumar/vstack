@@ -77,6 +77,12 @@ if [ -z "$CONDUCTOR_WORKSPACE_PATH" ]; then
     root=$(git -C "$d" rev-parse --show-toplevel)
     branch=$(git -C "$d" branch --show-current 2>/dev/null)
     base=$(git -C "$d" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    # These values are repo-controlled (a cloned repo picks its branch names and its dir
+    # name) and get spliced into trusted session context — strip them to a plain charset so
+    # a crafted name cannot smuggle instruction text or formatting into the block.
+    root=$(printf '%s' "$root" | tr -cd 'A-Za-z0-9 ._/-' | head -c 160)
+    branch=$(printf '%s' "$branch" | tr -cd 'A-Za-z0-9._/-' | head -c 80)
+    base=$(printf '%s' "$base" | tr -cd 'A-Za-z0-9._/-' | head -c 80)
     if [ -z "$base" ]; then
       for c in origin/main origin/master; do
         git -C "$d" rev-parse --verify --quiet "$c" >/dev/null 2>&1 && { base="$c"; break; }

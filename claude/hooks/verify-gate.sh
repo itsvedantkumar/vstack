@@ -6,6 +6,19 @@ input=$(cat 2>/dev/null || true)
 d="${CLAUDE_PROJECT_DIR:-$PWD}"
 v="$d/.claude/verify.sh"
 [ -x "$v" ] || exit 0
+# Trust gate: this hook fires in whatever repo is open, and a cloned repo's executable
+# .claude/verify.sh is arbitrary code — running it silently on every Stop would hand any
+# repository author code execution on this machine. Only run scripts the user explicitly
+# trusted (`vstack trust`), keyed by content hash so an edited script needs re-trusting.
+v=$(cd "$d/.claude" 2>/dev/null && pwd)/verify.sh
+[ -f "$v" ] || exit 0
+if command -v shasum >/dev/null 2>&1; then h=$(shasum -a 256 "$v" | cut -d' ' -f1)
+else h=$(sha256sum "$v" 2>/dev/null | cut -d' ' -f1); fi
+if ! grep -qxF "$h  $v" "$HOME/.config/agents/verify-trust" 2>/dev/null; then
+  /usr/bin/jq -cn --arg m "verify gate: skipped untrusted .claude/verify.sh (new or changed). Run 'vstack trust' in this repo to arm the Stop-hook gate." \
+    '{systemMessage:$m}'
+  exit 0
+fi
 sid=$(printf '%s' "$input" | /usr/bin/jq -r '.session_id // "nosess"' 2>/dev/null || echo nosess)
 cnt_file="${TMPDIR:-/tmp}/verify-gate-block-$sid"
 cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)

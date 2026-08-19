@@ -15,6 +15,7 @@ commands:
   overlay <repo>       run the repo's overlay.sh against <repo>
   verify               run the repo's .claude/verify.sh
   test                 run tests/auto-trigger.sh (live skill-firing regression; needs claude auth, ~15 min)
+  trust [repo-dir]     trust a repo's .claude/verify.sh so the Stop-hook gate runs it
   uninstall [args...]  run the repo's uninstall.sh (args passed through)
   help                 show this message
 
@@ -84,6 +85,21 @@ case "$CMD" in
     ;;
   test)
     "$REPO/tests/auto-trigger.sh" "$@"
+    ;;
+  trust)
+    d="${1:-$PWD}"
+    [ -f "$d/.claude/verify.sh" ] || { echo "vstack trust: no .claude/verify.sh in $d" >&2; exit 2; }
+    v="$(cd "$d/.claude" && pwd)/verify.sh"
+    if command -v shasum >/dev/null 2>&1; then h=$(shasum -a 256 "$v" | cut -d' ' -f1)
+    else h=$(sha256sum "$v" | cut -d' ' -f1); fi
+    ts="$HOME/.config/agents/verify-trust"
+    mkdir -p "${ts%/*}"
+    tmp=$(mktemp)
+    grep -vF "  $v" "$ts" 2>/dev/null > "$tmp" || true
+    printf '%s  %s\n' "$h" "$v" >> "$tmp"
+    mv "$tmp" "$ts"
+    echo "trusted: $v"
+    echo "the Stop-hook verify gate will now run it (re-run 'vstack trust' after editing it)"
     ;;
   uninstall)
     "$REPO/uninstall.sh" "$@"

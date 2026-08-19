@@ -72,8 +72,10 @@ else
 
 [scripts]
 # Cloud workspaces start from a bare Linux sandbox with no ~/.claude, so pull vstack in.
+# Pinned to a reviewed commit so a compromised repo/account cannot push code into every
+# sandbox at once — bump the SHA deliberately when updating vstack.
 # Add this repo's own install step (npm ci, uv sync, ...) to the end of this line.
-setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash"
+setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/ecb6992e848599bc1b6eaa648ab4c6cfa85ae8f0/bootstrap.sh | bash"
 run_mode = "concurrent"
 
 [scripts.run.verify]

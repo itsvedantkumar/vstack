@@ -63,6 +63,19 @@ back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOM
 # when it is cloned somewhere other than ~/.vstack and $VSTACK_DIR is unset.
 [ "$DRY" = 0 ] && printf '%s\n' "$SRC" > "$HOME/.config/agents/vstack-repo"
 
+# Trust this repo's own verify.sh for the Stop-hook gate: running install.sh IS the explicit
+# consent. Other repos' gates stay off until the user runs `vstack trust` there — the gate
+# executes repo-controlled code, so a bare clone must never arm it by itself.
+if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
+  tv="$(cd "$SRC/.claude" && pwd)/verify.sh"
+  if command -v shasum >/dev/null 2>&1; then th=$(shasum -a 256 "$tv" | cut -d' ' -f1)
+  else th=$(sha256sum "$tv" | cut -d' ' -f1); fi
+  tf="$HOME/.config/agents/verify-trust"
+  ttmp=$(mktemp); grep -vF "  $tv" "$tf" 2>/dev/null > "$ttmp" || true
+  printf '%s  %s\n' "$th" "$tv" >> "$ttmp"; mv "$ttmp" "$tf"
+  say "trusted    $SRC/.claude/verify.sh (verify gate)"
+fi
+
 # --- hooks / agents / commands ------------------------------------------------------------
 for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")"; run cp "$f" "$HOME/.claude/hooks/"; done
 for f in "$SRC"/claude/agents/*.md;   do back "$HOME/.claude/agents/$(basename "$f")";   run cp "$f" "$HOME/.claude/agents/";   done
