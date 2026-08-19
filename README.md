@@ -1,6 +1,6 @@
 # vstack
 
-**A Claude Code setup where the skills fire on their own.** 23 skills, 8 agents, 15
+**A Claude Code setup where the skills fire on their own.** 24 skills, 8 agents, 15
 commands, and the session hook that routes a situation to the right skill without you typing a
 slash command.
 
@@ -79,7 +79,7 @@ because there you asked for it.
 
 | Component | Count | Installs to |
 |---|---|---|
-| Skills | 23 | `~/.claude/skills/` |
+| Skills | 24 | `~/.claude/skills/` |
 | Subagents | 8 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
@@ -92,7 +92,7 @@ matching `ls` per directory.
 
 ## The skills
 
-Eleven workflow skills, each triggered by a situation rather than a command.
+Twelve workflow skills, each triggered by a situation rather than a command.
 
 | Skill | Fires when |
 |---|---|
@@ -107,6 +107,7 @@ Eleven workflow skills, each triggered by a situation rather than a command.
 | `unslop` | any prose at all, to cut the AI tells |
 | `typescript-best-practices` | reading, writing, or reviewing `.ts` or `.tsx` |
 | `ui-iterate` | editing UI files when a dev server runs: screenshot, critique, fix before declaring done |
+| `impeccable` | building or polishing UI where visual quality matters: typography, motion, spacing, design modes |
 
 Eight principles load when the moment matches and apply a rule rather than run a procedure.
 
@@ -248,7 +249,9 @@ bootstrap.sh     clone, setup-machine, and install in one line
 ## Credits
 
 18 skills are ported from [pstack](https://github.com/cursor/plugins), 4 come from
-[Superpowers](https://github.com/obra/superpowers), and 1 is original to this repo (`ui-iterate`).
+[Superpowers](https://github.com/obra/superpowers), 1 from
+[Impeccable](https://github.com/pbakaus/impeccable) by Paul Bakaus (Apache 2.0), and 1 is
+original to this repo (`ui-iterate`).
 Porting adapted them to Claude Code: Cursor model names mapped to Anthropic ones, `Task` calls to
 the `Agent` tool, and cloud-only parameters to local execution. Per-skill sources and licenses are
 in [ATTRIBUTION.md](claude/skills/ATTRIBUTION.md).

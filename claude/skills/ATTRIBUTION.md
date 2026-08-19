@@ -1,6 +1,6 @@
 # Skill attribution
 
-vstack ships 23 skills from three sources: 18 from pstack, 4 from Superpowers, and 1 original to this repo.
+vstack ships 24 skills from four sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, and 1 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 
@@ -26,6 +26,21 @@ planning and implementation chain.
 
 Source: [obra/superpowers](https://github.com/obra/superpowers), MIT.
 
+## From Impeccable (1)
+
+`impeccable` — design-director quality bar for frontend work: typography, motion, spacing,
+color, and brand-vs-product design modes, with per-command reference playbooks.
+
+Source: [pbakaus/impeccable](https://github.com/pbakaus/impeccable), Apache 2.0.
+Author: Paul Bakaus. Its `reference/ios.md` and `reference/android.md` derive from ehmo's
+[platform-design-skills](https://github.com/ehmo/platform-design-skills), MIT.
+
+The port vendors only the skill (SKILL.md + reference files), not the repo's 23 slash
+commands, subagents, or helper scripts. The frontmatter is trimmed to vstack's
+`name` + `description` convention; the body is upstream's, so its mentions of
+`scripts/*.mjs` helpers and `impeccable-*` subagents refer to pieces that are not vendored —
+the `reference/degraded/` playbooks cover the subagent roles inline.
+
 ## What was removed, and why
 
 | Skill | Removed because |
@@ -45,5 +60,5 @@ Source: this repo, MIT.
 
 ## Which skills are active
 
-All 23. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
+All 24. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.
