@@ -59,6 +59,10 @@ if [ "$DRY" = 0 ]; then
 fi
 back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] && cp "$1" "$BK/$(echo "${1#$HOME/}" | tr / _)"; return 0; }
 
+# Record where this install came from so doctor --drift and `vstack` can find the repo even
+# when it is cloned somewhere other than ~/.vstack and $VSTACK_DIR is unset.
+[ "$DRY" = 0 ] && printf '%s\n' "$SRC" > "$HOME/.config/agents/vstack-repo"
+
 # --- hooks / agents / commands ------------------------------------------------------------
 for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")"; run cp "$f" "$HOME/.claude/hooks/"; done
 for f in "$SRC"/claude/agents/*.md;   do back "$HOME/.claude/agents/$(basename "$f")";   run cp "$f" "$HOME/.claude/agents/";   done

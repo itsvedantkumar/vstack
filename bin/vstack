@@ -27,6 +27,11 @@ resolve_vstack_repo() {
   if [ -n "${VSTACK_DIR:-}" ] && [ -f "$VSTACK_DIR/claude/settings.json" ]; then
     printf '%s\n' "$VSTACK_DIR"; return 0
   fi
+  # install.sh records where it last ran from, so a repo cloned anywhere is findable.
+  if [ -f "$HOME/.config/agents/vstack-repo" ]; then
+    p=$(cat "$HOME/.config/agents/vstack-repo")
+    [ -f "$p/claude/settings.json" ] && { printf '%s\n' "$p"; return 0; }
+  fi
   if [ -f "$HOME/.vstack/claude/settings.json" ]; then
     printf '%s\n' "$HOME/.vstack"; return 0
   fi
