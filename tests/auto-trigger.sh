@@ -95,9 +95,13 @@ run_case() {
     # per timed-out attempt. exec makes $runner_pid BE the claude process.
     (
       cd "$workdir" || exit 1
+      # Mutation tools are denied: with bypassPermissions inherited from user settings, a
+      # test prompt once wrote a real script into ~/.config/agents/bin. Detection only needs
+      # the Skill tool call, which still happens.
       exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
         claude -p "$prompt" \
           --output-format stream-json --verbose \
+          --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash" \
           --model "$MODEL" --max-turns "$MAX_TURNS" \
           < /dev/null > "$out_jsonl" 2> "$err_log"
     ) &
