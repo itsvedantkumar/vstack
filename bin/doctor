@@ -200,17 +200,22 @@ else
   # -d test made every Conductor workspace invisible to a check whose entire job is finding
   # uncovered working repos. And Conductor nests them as workspaces/<project>/<workspace>, so
   # a single level of globbing only ever saw the container directories.
+  seen=""
   for r in "$HOME/Projects"/*/ "$HOME/conductor/repos"/*/ "$HOME/conductor/workspaces"/*/*/; do
     [ -e "$r/.git" ] || continue
-    last=$(git -C "$r" log -1 --format=%cs 2>/dev/null) || continue
+    # Resolve a worktree to the checkout it belongs to, and judge coverage there. Two reasons:
+    # the overlay is committed, so fixing the main checkout fixes every workspace of that
+    # project; and Conductor's workspaces are the only way this scan ever learns about repos
+    # living outside the directories below — every one of these projects actually lives under
+    # ~/Desktop, which no hardcoded root list here was ever going to guess.
+    main=$(cd "$r" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd) || continue
+    [ -n "$main" ] || continue
+    case " $seen " in *" $main "*) continue ;; esac
+    seen="$seen $main"
+    last=$(git -C "$main" log -1 --format=%cs 2>/dev/null) || continue
     [ -n "$last" ] && [ "$last" \> "$cutoff" ] || continue
     scanned=$((scanned+1))
-    [ -f "$r/.conductor/settings.toml" ] && continue
-    # Report the project, not each worktree: the overlay is committed, so every workspace of an
-    # uncovered repo is the same single fix and listing them all is noise.
-    name=$(basename "$r")
-    case "$r" in "$HOME/conductor/workspaces/"*) name=$(basename "$(dirname "$r")") ;; esac
-    uncovered="$uncovered $name"
+    [ -f "$main/.conductor/settings.toml" ] || uncovered="$uncovered $(basename "$main")"
   done
   uncovered=$(printf '%s' "$uncovered" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
   [ -z "$uncovered" ] && ok "active repos overlaid ($scanned scanned)" \
