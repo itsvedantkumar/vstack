@@ -37,6 +37,7 @@ costs seconds:
 | core | `git`, `jq`, `ripgrep`, `fd`, `gh`, `node`, `bun`, `uv` | agent tooling and this installer |
 | claude | Claude Code CLI | the agent itself |
 | deploy | `vercel`, `wrangler` | the autonomous deploy chain |
+| plugins | claude-mem, frontend-design, typescript-lsp | memory layer and language tooling |
 | security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
 
 Only `git` and `jq` decide the exit code. A missing `nuclei` is not a broken machine.
@@ -56,6 +57,8 @@ Check a machine without changing it:
 | Component | Count | Installs to |
 |---|---|---|
 | Skills | 22 | `~/.claude/skills/` |
+| Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Plugins | 3 | installed and enabled by `setup-machine.sh` |
 | Subagents | 7 | `~/.claude/agents/` |
 | Slash commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
@@ -106,6 +109,15 @@ The example deliberately names the Anthropic key `ANTHROPIC_SDK_API_KEY`. Claude
 shell wrapper strips that name from the environment and `doctor` fails if it is set.
 
 
+## Standing directives
+
+`claude/CLAUDE.md` installs to `~/.claude/CLAUDE.md` and is read at the start of every
+session. It is the shortest file here and the one that changes behaviour most: act instead of
+asking, verify before claiming done, and chain the planning skills without being told to.
+
+`install.sh` backs it up before overwriting, because on a machine that has been running a
+while this is the file most likely to have been hand-edited.
+
 ## Health check
 
 ```bash
@@ -119,7 +131,8 @@ Claude Code update: plugin updates have reverted config here before.
 ## Layout
 
 ```
-claude/          settings, hooks, agents, commands, skills
+claude/          settings, CLAUDE.md, statusline, hooks, agents, commands, skills
+conductor/       user-level Conductor defaults (model, plan mode)
 bin/             CLI wrappers installed to ~/.config/agents/bin
 shell/           zsh wrapper and env snippet
 mcp/             MCP server definitions merged into ~/.claude.json

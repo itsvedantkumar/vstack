@@ -1,0 +1,17 @@
+"$schema" = "https://conductor.build/schemas/settings.schema.json"
+
+[git]
+archive_on_merge = true
+branch_prefix_type = "github_username"
+
+[models]
+default = "opus-5"
+default_fast_mode = true
+default_plan_mode = true
+
+[models.codex]
+default_thinking_level = "high"
+review_thinking_level = "high"
+
+[scripts]
+auto_run_after_setup = true

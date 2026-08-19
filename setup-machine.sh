@@ -147,6 +147,32 @@ else
 fi
 
 note ""
+note "== claude plugins"
+# Plugins carry the memory layer and the language tooling. settings.json enables them by
+# name, but a name means nothing until the marketplace is added and the plugin installed,
+# so a fresh machine would enable three plugins that are not there.
+if ! command -v claude >/dev/null 2>&1; then
+  note "-- plugins: skipped (claude not installed)"
+elif [ "$CHECK" = 1 ] || [ "$DRY" = 1 ]; then
+  claude plugin list 2>/dev/null | grep -qi claude-mem \
+    && note "-- plugins: claude-mem present" \
+    || note "${DRY:+would install }plugins: claude-mem, frontend-design, typescript-lsp"
+else
+  for mkt in anthropics/claude-plugins-official thedotmack/claude-mem; do
+    claude plugin marketplace add "$mkt" >/dev/null 2>&1 || true
+  done
+  for pl in claude-mem@thedotmack frontend-design@claude-plugins-official typescript-lsp@claude-plugins-official; do
+    if claude plugin list 2>/dev/null | grep -q "${pl%@*}"; then
+      note "-- ${pl%@*}: present"; mark have "${pl%@*}"
+    elif claude plugin install "$pl" >/dev/null 2>&1; then
+      note ">> installed ${pl%@*}"; mark ok "${pl%@*}"
+    else
+      note "!! ${pl%@*} failed (add it later with: claude plugin install $pl)"; mark fail "${pl%@*}"
+    fi
+  done
+fi
+
+note ""
 note "== deploy"
 ensure_npm vercel   vercel
 ensure_npm wrangler wrangler

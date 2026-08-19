@@ -61,6 +61,26 @@ for f in "$SRC"/claude/commands/*.md; do run cp "$f" "$HOME/.claude/commands/"; 
 [ "$DRY" = 0 ] && chmod 755 "$HOME"/.claude/hooks/*.sh
 say "installed  hooks, agents, commands"
 
+# --- global directives + statusline ---------------------------------------------------------
+# CLAUDE.md is the standing instruction file every session reads. It is backed up first: it is
+# the file most likely to have been hand-edited on a machine that has been running a while.
+back "$HOME/.claude/CLAUDE.md"
+run cp "$SRC/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+back "$HOME/.claude/statusline.sh"
+run cp "$SRC/claude/statusline.sh" "$HOME/.claude/statusline.sh"
+[ "$DRY" = 0 ] && chmod 755 "$HOME/.claude/statusline.sh"
+say "installed  CLAUDE.md, statusline.sh"
+
+# --- conductor user settings ------------------------------------------------------------------
+# Conductor reads model and workflow defaults from here. Only written when absent: these are
+# per-person preferences, and clobbering them would change how every workspace launches.
+if [ ! -f "$HOME/.conductor/settings.toml" ]; then
+  [ "$DRY" = 0 ] && { mkdir -p "$HOME/.conductor"; cp "$SRC/conductor/settings.toml" "$HOME/.conductor/settings.toml"; }
+  say "installed  ~/.conductor/settings.toml"
+else
+  say "kept       existing ~/.conductor/settings.toml"
+fi
+
 # --- skills -------------------------------------------------------------------------------
 # Whole-dir replace per skill: they carry references/ and scripts/ subtrees, so a file-by-file
 # copy would leave stale files behind after an upstream removal. Only touches skills this repo
@@ -135,6 +155,7 @@ elif [ "$DRY" = 0 ]; then
         SessionEnd:        [ { hooks: [ {type:"command", command:$n} ] } ],
         PermissionRequest: [ { matcher:"*", hooks: [ {type:"command", command:$n} ] } ]
       }
+    | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3}
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
   say "merged     ~/.claude/settings.json"

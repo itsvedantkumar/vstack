@@ -88,6 +88,27 @@ hits=$(grep -rInE --exclude-dir=.git \
   | grep -vE '(YOUR_[A-Z_]*ID|_xxx|placeholder)' | head -5)
 [ -z "$hits" ] && ok "no infrastructure ids" || bad "no infrastructure ids" "$hits"
 
+# --- 8b. the settings merge program compiles ---------------------------------------------------
+# The dry run cannot catch this: the jq merge only runs when DRY=0, so a syntax error in that
+# program ships green and then aborts a real install halfway through. Run the same program
+# here against a throwaway target. This check exists because exactly that happened.
+if command -v jq >/dev/null; then
+  prog=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh \
+         | sed '1d;$d')
+  if [ -z "$prog" ]; then
+    bad "settings merge program" "could not extract the jq program from install.sh"
+  else
+    out=$(printf '{}\n' > /tmp/vs-merge-a.json; cp claude/settings.json /tmp/vs-merge-b.json;
+          jq -s --arg h "/tmp/hooks" --arg n "true" "$prog" /tmp/vs-merge-a.json /tmp/vs-merge-b.json 2>&1)
+    if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+      ok "settings merge program"
+    else
+      bad "settings merge program" "$out"
+    fi
+    rm -f /tmp/vs-merge-a.json /tmp/vs-merge-b.json
+  fi
+fi
+
 # --- 9. the installer runs -----------------------------------------------------------------------
 # Dry run: exercises every code path in install.sh without touching the filesystem.
 if command -v jq >/dev/null; then
