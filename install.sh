@@ -143,12 +143,13 @@ elif [ "$DRY" = 0 ]; then
   jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
     ((.[1] | del(.hooks)) as $portable
       | (.[0] * $portable)
-      | .skillOverrides = ($portable.skillOverrides // {})
-      | del(.fastMode))
+      | .skillOverrides = ($portable.skillOverrides // {}))
     | .hooks = {
         SessionStart: [
           { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] },
           { hooks: [ {type:"command", command:$n} ] } ],
+        UserPromptSubmit: [
+          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh")} ] } ],
         PostToolUse: [
           { matcher:"Edit|Write|MultiEdit",
             hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],

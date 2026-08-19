@@ -94,9 +94,10 @@ hits=$(grep -rInE --exclude-dir=.git \
 # check catches. Short principle names (prove-it-works) resolve via the principle- prefix;
 # agent and command names are legitimate non-skill references; ALLOW covers generic hyphenated
 # English and git plumbing that the token pattern also matches.
-ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|inject-orchestrator|inject-tokenmaxxing|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|top-hook|name-only|per-prompt|act-don-t-ask|session-start'
+ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|re-pins|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|name-only|per-prompt|session-context|session-start|operating-mode|two-line'
 errs=""
-for tok in $(grep -ohE '[a-z][a-z0-9]*(-[a-z0-9]+)+' claude/CLAUDE.md claude/hooks/inject-session-context.sh | sort -u); do
+# \b keeps a capitalized word (Per-prompt) from yielding a bogus mid-word token (er-prompt).
+for tok in $(grep -ohE '\b[a-z][a-z0-9]*(-[a-z0-9]+)+' claude/CLAUDE.md claude/hooks/inject-session-context.sh | sort -u); do
   [ -d "claude/skills/$tok" ] && continue
   [ -d "claude/skills/principle-$tok" ] && continue
   [ -f "claude/agents/$tok.md" ] && continue

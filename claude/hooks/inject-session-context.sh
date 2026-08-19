@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# Merged SessionStart injector: TOKENMAXXING + ORCHESTRATOR + workspace conventions.
-# Replaces inject-tokenmaxxing.sh + inject-orchestrator.sh (one spawn instead of three).
+# Session-context injector. SessionStart gets the full operating-mode baseline plus
+# workspace conventions; UserPromptSubmit gets a two-line digest so the discipline
+# survives long sessions without paying the full block every turn.
 # Portable: no absolute /Users paths, so it also works from a committed repo overlay.
 event=$(/usr/bin/jq -r '.hook_event_name // "SessionStart"' 2>/dev/null </dev/stdin)
 [ -z "$event" ] || [ "$event" = "null" ] && event="SessionStart"
 
+# Per-prompt digest: must stay tiny and fast (no git work) — it runs on every prompt.
+if [ "$event" = "UserPromptSubmit" ]; then
+  /usr/bin/jq -cn --arg e "$event" --arg c \
+'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
+DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.' \
+    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
+  exit 0
+fi
+
 MSG=$(cat <<'EOF'
-OPERATING MODE — ACTIVE EVERY RESPONSE, REGARDLESS OF MODEL.
+OPERATING MODE — SESSION BASELINE (a per-prompt digest re-pins the essentials).
 TOKENS: never read whole files (grep/glob + line ranges), never dump file contents to output
 (summarize), batch all independent tool calls in ONE message, cap context use.
 DELEGATE: the main loop is the expensive frontier model. Mechanical work (simple edits,
@@ -18,7 +28,8 @@ edits to shared files. Skip delegation only for a truly trivial one-step ask.
 AUTONOMY: act without asking; assume + document + proceed. Still confirm irreversible
 destructive ops.
 SKILLS: these fire on the SITUATION, not on a slash command. When one matches, call the Skill
-tool and follow it — do not reconstruct its method from memory, and do not wait to be asked.
+tool and follow it; do not reconstruct its method from memory, and do not wait to be asked.
+Descriptions alone do not reliably trigger the first two lines below, so they are spelled out:
 - any prose you write (docs, README, PR body, commit msg) -> unslop; docs/RFC/README ->
   technical-writing. Reading/writing/reviewing .ts/.tsx -> typescript-best-practices.
 - work splits into independent parts, or "in parallel"/"at once"/"try N ways" -> swarm.
@@ -33,7 +44,8 @@ tool and follow it — do not reconstruct its method from memory, and do not wai
   twice -> encode-lessons-in-structure. Designing types/signatures -> type-system-discipline.
   Validation/error handling/auth/MCP adapters -> boundary-discipline. Cron, launchd, retry
   loops -> make-operations-idempotent. Sweeps, migrations, stacked commits ->
-  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever.
+  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever. Prose you write (docs,
+README, PR body, commit msg) -> unslop; docs/RFC/README -> technical-writing.
 EOF
 )
 
