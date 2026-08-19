@@ -32,7 +32,7 @@ else
   skip "json valid" "jq not installed"
 fi
 
-# --- 4. skills are loadable ------------------------------------------------------------------
+# --- 3. skills are loadable ------------------------------------------------------------------
 # A skill with no description, or one longer than the configured listing cap, gets truncated
 # out of the listing and silently stops auto-triggering. That is the failure this catches.
 CAP=200
@@ -64,14 +64,14 @@ done
 [ "$n" -gt 0 ] || errs="$errs\nno skills found"
 [ -z "$errs" ] && ok "skills ($n) loadable" || bad "skills loadable" "$(printf '%b' "$errs")"
 
-# --- 5. nothing is pinned to the author machine ----------------------------------------------
+# --- 4. nothing is pinned to the author machine ----------------------------------------------
 # The bracket class keeps this pattern from matching its own source line. Generic
 # placeholders in docs (/Users/you) are fine; a real account name is what breaks portability.
 hits=$(grep -rInE --exclude-dir=.git "/Users/[A-Za-z0-9]" . 2>/dev/null \
        | grep -vE "/Users/(you|USER|user|username|name)\b" | head -5)
 [ -z "$hits" ] && ok "no hardcoded home paths" || bad "no hardcoded home paths" "$hits"
 
-# --- 6. no credentials committed --------------------------------------------------------------
+# --- 5. no credentials committed --------------------------------------------------------------
 # Matches real token shapes and any KEY/TOKEN/SECRET assigned a long opaque value. The
 # example file assigns nothing, so it passes; a filled-in secrets.env would not.
 hits=$(grep -rIn --exclude-dir=.git -E \
@@ -79,7 +79,7 @@ hits=$(grep -rIn --exclude-dir=.git -E \
   . 2>/dev/null | head -5)
 [ -z "$hits" ] && ok "no committed secrets" || bad "no committed secrets" "$hits"
 
-# --- 8. no infrastructure identifiers ---------------------------------------------------------
+# --- 6. no infrastructure identifiers ---------------------------------------------------------
 # This repo is public and its routines are templates. Real Vercel project or team IDs, Claude
 # Code environment IDs, and cloud routine trigger IDs identify live infrastructure, so they
 # belong in a local copy, never here. Placeholders ending in _ID or _xxx pass.
@@ -88,7 +88,25 @@ hits=$(grep -rInE --exclude-dir=.git \
   | grep -vE '(YOUR_[A-Z_]*ID|_xxx|placeholder)' | head -5)
 [ -z "$hits" ] && ok "no infrastructure ids" || bad "no infrastructure ids" "$hits"
 
-# --- 8b. the settings merge program compiles ---------------------------------------------------
+# --- 7. every skill named in prose exists on disk ----------------------------------------------
+# CLAUDE.md and the session hook route situations to skills by name. Deleting or renaming a
+# skill leaves those references dangling and the routing silently dead — this is the drift the
+# check catches. Short principle names (prove-it-works) resolve via the principle- prefix;
+# agent and command names are legitimate non-skill references; ALLOW covers generic hyphenated
+# English and git plumbing that the token pattern also matches.
+ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|inject-orchestrator|inject-tokenmaxxing|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|top-hook|name-only|per-prompt|act-don-t-ask|session-start'
+errs=""
+for tok in $(grep -ohE '[a-z][a-z0-9]*(-[a-z0-9]+)+' claude/CLAUDE.md claude/hooks/inject-session-context.sh | sort -u); do
+  [ -d "claude/skills/$tok" ] && continue
+  [ -d "claude/skills/principle-$tok" ] && continue
+  [ -f "claude/agents/$tok.md" ] && continue
+  [ -f "claude/commands/$tok.md" ] && continue
+  printf '%s' "$tok" | grep -qE "^($ALLOW)$" && continue
+  errs="$errs\n$tok: referenced in prose but no such skill/agent/command"
+done
+[ -z "$errs" ] && ok "referenced skills exist" || bad "referenced skills exist" "$(printf '%b' "$errs")"
+
+# --- 8. the settings merge program compiles ---------------------------------------------------
 # The dry run cannot catch this: the jq merge only runs when DRY=0, so a syntax error in that
 # program ships green and then aborts a real install halfway through. Run the same program
 # here against a throwaway target. This check exists because exactly that happened.
@@ -109,7 +127,7 @@ if command -v jq >/dev/null; then
   fi
 fi
 
-# --- 9. the installer runs -----------------------------------------------------------------------
+# --- 9. the installer runs ---------------------------------------------------------------------
 # Dry run: exercises every code path in install.sh without touching the filesystem.
 if command -v jq >/dev/null; then
   out=$(./install.sh --dry-run 2>&1)
