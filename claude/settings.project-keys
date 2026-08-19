@@ -1,0 +1,45 @@
+# Which keys of claude/settings.json overlay.sh may write into another repo's committed
+# .claude/settings.json.
+#
+# The overlay used to copy the whole file. That put one person's theme, notification channel,
+# login method and plugin list into every repo it touched — including repos other people
+# clone. None of it is portable and none of it belongs in someone else's git history.
+#
+# Anything here is behaviour a cloud sandbox genuinely needs, because the committed overlay is
+# the only config lane that reaches one. Anything absent is a user preference or a
+# machine-local fact. Check 16 of .claude/verify.sh fails if a key in settings.json appears in
+# neither this list nor the note at the bottom, so adding a key forces the decision.
+#
+# Keys vstack ships that are NOT listed here are stripped from a target repo on the next
+# overlay run, which is how already-overlaid repos get cleaned rather than merely stopping
+# accumulating.
+
+# The hook wiring and the statusline are the overlay's entire point.
+hooks
+statusLine
+
+# Tool timeouts and output caps. A sandbox with different limits behaves differently enough
+# to change results, so these travel with the work.
+env
+
+# Skill listing shape. A truncated description stops a skill triggering, and that has to
+# behave the same in a sandbox as it does locally or the routing tests mean nothing.
+skillListingMaxDescChars
+skillListingBudgetFraction
+skillOverrides
+
+# Deliberate Conductor parity: a cloud workspace that quietly ran a different model or effort
+# level would not be reproducing the local run at all.
+model
+effortLevel
+fastMode
+
+# The workflow tool is part of how the agents here are expected to work.
+enableWorkflows
+
+# Deliberately not shipped, for the record: agentPushNotifEnabled, autoUpdatesChannel,
+# awaySummaryEnabled, cleanupPeriodDays, enabledPlugins, extraKnownMarketplaces,
+# fileCheckpointingEnabled, forceLoginMethod, inputNeededNotifEnabled, permissions,
+# precomputeCompactionEnabled, preferredNotifChannel, prefersReducedMotion,
+# promptSuggestionEnabled, remoteControlAtStartup, showTurnDuration, skipDangerousModePermissionPrompt,
+# spinnerTipsEnabled, switchModelsOnFlag, theme, tui.

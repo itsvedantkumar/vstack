@@ -489,6 +489,43 @@ else
   bad "falsifiability coverage" "tests/gate-falsifiability.sh is missing"
 fi
 
+# --- 17. the overlay ships project settings and nothing personal -------------------------------
+# overlay.sh copied claude/settings.json wholesale into other people's repos, theme and
+# notification channel and login method included. The target is seeded the way an
+# already-overlaid repo looks, so this proves both halves: personal keys are removed, and the
+# repo's own settings survive.
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  ov=$(mktemp -d)
+  git -C "$ov" init -q 2>/dev/null
+  mkdir -p "$ov/.claude"
+  printf '{"theme":"dark","permissions":{"allow":["Bash(ls)"]}}\n' > "$ov/.claude/settings.json"
+  errs=""
+  if out=$(./overlay.sh "$ov" 2>&1); then
+    allow=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' claude/settings.project-keys | tr '\n' ' ')
+    leaked=$(jq -r --arg a "$allow" '
+      ($a | split(" ") | map(select(length > 0))) as $A
+      | (keys - $A - ["permissions"]) | join(" ")' "$ov/.claude/settings.json" 2>/dev/null)
+    [ -n "$leaked" ] && errs="$errs\nshipped non-project keys: $leaked"
+    jq -e 'has("theme")' "$ov/.claude/settings.json" >/dev/null 2>&1 \
+      && errs="$errs\nleft a personal key (theme) behind on an already-overlaid repo"
+    jq -e '.permissions.allow[0] == "Bash(ls)"' "$ov/.claude/settings.json" >/dev/null 2>&1 \
+      || errs="$errs\ndropped the target repo's own permissions key"
+    jq -e '.model and .hooks and .statusLine' "$ov/.claude/settings.json" >/dev/null 2>&1 \
+      || errs="$errs\ndid not ship the project keys it is supposed to"
+    [ -x "$ov/.claude/verify.sh" ] \
+      || errs="$errs\nwired a verify gate but shipped no .claude/verify.sh"
+    grep -qF "$(git rev-parse HEAD)" "$ov/.conductor/settings.toml" 2>/dev/null \
+      || errs="$errs\n.conductor/settings.toml does not pin the commit being overlaid"
+  else
+    errs="$errs\noverlay.sh failed:\n$out"
+  fi
+  rm -rf "$ov"
+  [ -z "$errs" ] && ok "overlay ships project keys only" \
+    || bad "overlay ships project keys only" "$(printf '%b' "$errs")"
+else
+  skip "overlay ships project keys only" "jq or git not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

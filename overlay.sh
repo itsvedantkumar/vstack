@@ -17,23 +17,43 @@ DEST="${1:-$PWD}"
 
 mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
-# settings.json: merge, don't clobber — a repo may already have project settings.
-# skillOverrides is replaced wholesale (same reason as install.sh: dead overrides for
-# removed skills must not linger), and hook events both sides define are won by vstack —
-# say so instead of doing it silently.
-if [ -f "$DEST/.claude/settings.json" ] && command -v jq >/dev/null; then
+# settings.json: ship the project-safe subset, merge it, don't clobber the repo's own keys.
+#
+# This used to copy the entire file, which put theme, tui, notification channels,
+# forceLoginMethod and the plugin list into every repo it touched, and into the git history of
+# anyone who cloned them. claude/settings.project-keys is the allowlist and says why each key
+# earns its place.
+#
+# Keys vstack ships but no longer allows are deleted from the target, so a repo overlaid under
+# the old behaviour gets cleaned instead of merely not accumulating more. Only keys this repo
+# actually ships are eligible for deletion — a target's own unrelated settings are left alone.
+KEYFILE="$SRC/claude/settings.project-keys"
+[ -f "$KEYFILE" ] || { echo "error: missing $KEYFILE" >&2; exit 1; }
+ALLOW=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$KEYFILE" | tr '\n' ' ')
+
+if command -v jq >/dev/null; then
+  [ -f "$DEST/.claude/settings.json" ] || echo '{}' > "$DEST/.claude/settings.json"
   clobbered=$(jq -rs '((.[0].hooks // {} | keys) - ((.[0].hooks // {} | keys) - (.[1].hooks // {} | keys))) | join(", ")' \
     "$DEST/.claude/settings.json" "$SRC/claude/settings.json")
   tmp=$(mktemp)
-  jq -s '. as [$dest, $src] | ($dest * $src) | .skillOverrides = ($src.skillOverrides // {})' \
-    "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
+  jq -s --arg allow "$ALLOW" '
+    ($allow | split(" ") | map(select(length > 0))) as $A
+    | . as [$dest, $src]
+    | ($src | with_entries(select(.key as $k | $A | index($k)))) as $ship
+    | (($src | keys) - $A) as $strip
+    | ($dest * $ship)
+    | delpaths([$strip[] | [.]])
+    | .skillOverrides = ($ship.skillOverrides // {})
+  ' "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"
   rm -f "$tmp"
-  echo "merged  .claude/settings.json"
+  echo "merged  .claude/settings.json ($(printf '%s' "$ALLOW" | wc -w | tr -d ' ') project keys)"
   [ -n "$clobbered" ] && echo "        note: vstack's hook config replaced this repo's for: $clobbered"
 else
-  cp "$SRC/claude/settings.json" "$DEST/.claude/settings.json"
-  echo "wrote   .claude/settings.json"
+  # No jq means no way to take a subset, and copying the whole file is what this change
+  # exists to stop. Refuse rather than ship someone's preferences into their repo.
+  echo "error: jq is required to build the project settings subset" >&2
+  exit 1
 fi
 
 cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.claude/hooks/*.sh
@@ -64,6 +84,18 @@ echo "wrote   .claude/{hooks,agents,commands,skills}"
 
 [ -f "$DEST/CLAUDE.md" ] || { cp "$SRC/CLAUDE.md.tmpl" "$DEST/CLAUDE.md"; echo "wrote   CLAUDE.md (template — edit it)"; }
 
+# The Stop hook and Conductor's verify button both point at .claude/verify.sh, and the overlay
+# never shipped one. The hook no-ops safely on a missing file, but the button fails outright.
+# Seed a template that runs whatever the repo already knows how to check. Never overwrite: a
+# repo's real gate matters far more than this placeholder.
+if [ -f "$DEST/.claude/verify.sh" ]; then
+  echo "kept    .claude/verify.sh (already exists)"
+else
+  cp "$SRC/claude/verify.sh.tmpl" "$DEST/.claude/verify.sh"
+  chmod 755 "$DEST/.claude/verify.sh"
+  echo "wrote   .claude/verify.sh (template — write real checks, then 'vstack trust')"
+fi
+
 # Conductor: give the repo a verify button and, for cloud workspaces, a way to pull vstack
 # into the sandbox. Never overwrite an existing file — a repo's own setup script matters more
 # than this one, so print the lines to merge by hand instead.
@@ -74,7 +106,15 @@ if [ -f "$DEST/.conductor/settings.toml" ]; then
   echo "          [scripts.run.verify]"
   echo "          command = \"./.claude/verify.sh\""
 else
-  cat > "$DEST/.conductor/settings.toml" <<'TOML'
+  # The pin was a hardcoded SHA that nobody bumped, so it drifted behind main and every new
+  # sandbox bootstrapped an old vstack. Resolving HEAD keeps the security property — a sandbox
+  # runs a specific reviewed commit, not whatever main happens to be — while pinning to the
+  # commit actually being overlaid.
+  PIN=$(git -C "$SRC" rev-parse HEAD)
+  if ! git -C "$SRC" branch -r --contains "$PIN" 2>/dev/null | grep -q .; then
+    echo "warning: $PIN is not on any remote branch yet — the sandbox setup will 404 until you push" >&2
+  fi
+  sed "s/__PIN__/$PIN/" > "$DEST/.conductor/settings.toml" <<'TOML'
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 
 [scripts]
@@ -82,7 +122,7 @@ else
 # Pinned to a reviewed commit so a compromised repo/account cannot push code into every
 # sandbox at once — bump the SHA deliberately when updating vstack.
 # Add this repo's own install step (npm ci, uv sync, ...) to the end of this line.
-setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/ecb6992e848599bc1b6eaa648ab4c6cfa85ae8f0/bootstrap.sh | bash"
+setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/__PIN__/bootstrap.sh | bash"
 run_mode = "concurrent"
 
 [scripts.run.verify]
