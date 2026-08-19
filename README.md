@@ -1,122 +1,135 @@
 # vstack
 
-One repo that installs a complete Claude Code setup on a Mac: skills that fire on their own,
-subagents, hooks, MCP servers, and deploy scripts.
+**A Claude Code setup where the skills fire on their own.** 22 skills, 7 subagents, 15
+commands, and the session hook that routes a situation to the right skill without you typing a
+slash command.
 
-Everything here used to live in three places at once: some in `~/.claude`, some in
-`~/.config/agents`, and the parts that mattered most in nothing at all. Reinstalling meant
-remembering. Now it is one clone and one command.
+[![verify](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml/badge.svg)](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![plugin](https://img.shields.io/badge/claude%20plugin-vstack-6f42c1.svg)](#install)
 
-```bash
-git clone https://github.com/itsvedantkumar/vstack.git
-cd vstack
-./install.sh
-```
-
-Run `./install.sh --dry-run` first if you want to see what it touches. It backs up every file
-it overwrites to `~/.config/agents/backups/install-<timestamp>/`, and it never overwrites
-`secrets.env`.
-
-## A machine with nothing on it
-
-One line takes a new Mac from empty to working. It installs Homebrew, the tools, the Claude
-Code CLI, and then this config:
+Ask for a README and the writing skills load. Hand it a TypeScript file and the type-safety
+skill loads. Say "audit this three ways" and it fans out three subagents in one message. None
+of that needs a command, and the repo ships a test that proves it still happens.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
 ```
 
-`bootstrap.sh` clones vstack to `~/.vstack`, runs `setup-machine.sh`, then runs `install.sh`.
-Pass `--skip-deps` to install config only.
+That takes a machine with nothing on it to a working setup: Homebrew, the CLI tools, Claude
+Code itself, then this config.
 
-`setup-machine.sh` installs by tier, and checks each tool before installing it, so re-running
-costs seconds:
+## Install
 
-| Tier | Tools | For |
+Three ways in, depending on how much you want.
+
+| You want | Run this | You get |
 |---|---|---|
-| core | `git`, `jq`, `ripgrep`, `fd`, `gh`, `node`, `bun`, `uv` | agent tooling and this installer |
-| claude | Claude Code CLI | the agent itself |
-| deploy | `vercel`, `wrangler` | the autonomous deploy chain |
-| plugins | claude-mem, frontend-design, typescript-lsp | memory layer and language tooling |
-| security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
+| Everything, new machine | `curl -fsSL .../bootstrap.sh \| bash` | tools, Claude Code, and all config |
+| Everything, tools already there | `git clone` then `./install.sh` | all config |
+| Just the skills | `claude plugin install vstack@vstack` | skills, subagents, commands, routing |
 
-Only `git` and `jq` decide the exit code. A missing `nuclei` is not a broken machine.
-
-Two things it cannot do for you. Xcode command line tools need a GUI prompt, so it tells you
-to run `xcode-select --install` and continues. OWASP ZAP is a large Java app and is left to
-you.
-
-Check a machine without changing it:
+For the plugin route, add the marketplace first:
 
 ```bash
-./setup-machine.sh --check
+claude plugin marketplace add itsvedantkumar/vstack
+claude plugin install vstack@vstack
 ```
 
-## What lands where
+Preview any install with `./install.sh --dry-run`. It backs up every file it overwrites to
+`~/.config/agents/backups/install-<timestamp>/`, and it never overwrites `secrets.env`.
+
+Installed as a plugin, the session hook runs in `VSTACK_PROFILE=skills` mode and injects the
+routing block alone. The token, delegation, and autonomy rules are one person's operating
+policy, so a marketplace install does not get them. `install.sh` applies the full block,
+because there you asked for it.
+
+## What you get
 
 | Component | Count | Installs to |
 |---|---|---|
 | Skills | 22 | `~/.claude/skills/` |
-| Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
-| Plugins | 3 | installed and enabled by `setup-machine.sh` |
 | Subagents | 7 | `~/.claude/agents/` |
-| Slash commands | 15 | `~/.claude/commands/` |
+| Commands | 15 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
 | CLI wrappers | 8 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
+| Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
 
-Regenerate these counts with `find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l` and
-the matching `ls` for each directory.
+Counts regenerate with `find claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l` and the
+matching `ls` per directory.
 
-## The part that took the longest to get right
+## The skills
 
-Installing a skill does not make it fire. That distinction cost a week of thinking the setup
-worked when it did not.
+Ten workflow skills, each triggered by a situation rather than a command.
 
-A skill needs three things to trigger on its own. It must not carry
-`disable-model-invocation`. Its description must describe a situation, not a capability,
-because the model matches situations. And the description has to survive the skill listing:
-if `skillListingBudgetFraction` is too small for the number of installed skills, Claude Code
-truncates descriptions, and it truncates exactly the trigger phrases that make matching work.
-That last one is invisible. Nothing errors. The skills just quietly stop firing.
+| Skill | Fires when |
+|---|---|
+| `swarm` | work splits into independent parts, or approaches should be raced |
+| `blast-radius` | you are shipping a risky change and want to know what it breaks |
+| `interrogate` | code is going in that only one reviewer, or none, has seen |
+| `create-verification-skill` | a repo has no scripted way to prove it works |
+| `maintain-verification-skill` | that proof has drifted from the app |
+| `show-me-your-work` | long or overnight work a human reviews after stepping away |
+| `reflect` | you were corrected, or found a workflow worth keeping |
+| `technical-writing` | writing docs, RFCs, READMEs, PR bodies, commit messages |
+| `unslop` | any prose at all, to cut the AI tells |
+| `typescript-best-practices` | reading, writing, or reviewing `.ts` or `.tsx` |
 
-Even with all three right, nothing connects a situation to a skill unless something says so.
-`claude/hooks/inject-session-context.sh` carries a routing block that maps situations to
-skills, and it runs on every session start. That block is the reason the skills in this repo
-fire without being asked for.
+Eight principles load when the moment matches and apply a rule rather than run a procedure.
 
-## Verification is a script, not a promise
+| Principle | Applies when |
+|---|---|
+| `prove-it-works` | before declaring anything done |
+| `fix-root-causes` | debugging, or reaching for a `try`/`except` guard |
+| `encode-lessons-in-structure` | the same correction lands twice |
+| `type-system-discipline` | designing types or a function signature |
+| `boundary-discipline` | wiring validation, error handling, or an adapter |
+| `make-operations-idempotent` | writing cron jobs, retries, anything that can restart |
+| `sequence-verifiable-units` | sweeps, migrations, stacked commits |
+| `build-the-lever` | the same manual edit or check keeps repeating |
 
-`.claude/verify.sh` in a repo is run by the `verify-gate.sh` Stop hook. When it exits
-non-zero, the agent is blocked from claiming the work is done, and the failure output comes
-back as the reason. Three blocks per session, then it stops, so an overnight run cannot loop
-forever.
+Four more cover the planning chain: `brainstorming`, `writing-plans`,
+`test-driven-development`, and `executing-plans`.
 
-This repo gates itself with the same mechanism. Run `./.claude/verify.sh` and it checks shell
-syntax, JSON validity, skill frontmatter and description lengths, hardcoded home paths,
-committed credentials, infrastructure identifiers, and a full `install.sh --dry-run`. To add the same gate to
-another repo, ask Claude for verification in that repo and the `create-verification-skill`
-skill writes one that fits its stack.
+## Why they fire
 
-## Credentials
+Installing a skill does not make it trigger. Three things have to be true at once, and the
+third is invisible when it breaks:
 
-`install.sh` copies `secrets.env.example` to `~/.config/agents/secrets.env` with mode 600 when
-that file does not exist, and leaves it alone when it does. Fill in the variables you use. The
-MCP wrappers in `bin/` source it before they exec, and `.zshenv` sources it for your shell.
+1. The skill must not carry `disable-model-invocation`.
+2. Its description must name a situation, because situations are what the model matches.
+3. The description must survive the skill listing. Set `skillListingBudgetFraction` too low
+   for the number of installed skills and Claude Code truncates descriptions, cutting exactly
+   the trigger phrases that make matching work. Nothing errors. The skills just stop firing.
 
-The example deliberately names the Anthropic key `ANTHROPIC_SDK_API_KEY`. Claude Code reads
-`ANTHROPIC_API_KEY` and bills API credits against it instead of your subscription, so the
-shell wrapper strips that name from the environment and `doctor` fails if it is set.
+Even with all three right, something has to connect a situation to a skill.
+`claude/hooks/inject-session-context.sh` carries that routing block and runs at every session
+start.
 
+`tests/auto-trigger.sh` proves it still works. It runs real prompts through the CLI and checks
+which skills fired. Strip the routing block and cases fail, which is how you know the test is
+worth having. [docs/how-skills-fire.md](docs/how-skills-fire.md) has the measurements.
 
-## Standing directives
+## Verification that blocks completion
 
-`claude/CLAUDE.md` installs to `~/.claude/CLAUDE.md` and is read at the start of every
-session. It is the shortest file here and the one that changes behaviour most: act instead of
-asking, verify before claiming done, and chain the planning skills without being told to.
+Put an executable `.claude/verify.sh` in a repo and the `verify-gate.sh` Stop hook runs it
+before an agent may say the work is done. A non-zero exit blocks the claim and returns the
+failure output as the reason. The gate stops after three blocks per session, so an overnight
+run cannot loop forever.
 
-`install.sh` backs it up before overwriting, because on a machine that has been running a
-while this is the file most likely to have been hand-edited.
+This repo gates itself the same way:
+
+```bash
+./.claude/verify.sh
+```
+
+It checks shell syntax, JSON validity, skill frontmatter and description lengths, hardcoded
+home paths, committed credentials, infrastructure identifiers, the settings merge program, and
+a full `install.sh --dry-run`.
+
+To add the same gate to another repo, ask Claude for verification there and the
+`create-verification-skill` skill writes one that fits the stack.
 
 ## Day-to-day
 
@@ -129,86 +142,81 @@ vstack verify            # run the gate
 vstack uninstall --list  # show restorable backups
 ```
 
-`doctor` checks hooks, subagents, secrets file permissions, auth method, Conductor parity
-keys, context caps, and Remote Control settings. Run it after any Claude Code update: plugin
-updates have reverted config here before.
+`doctor --drift` answers the question that costs you work: does the installed state still
+match the repo it came from? Editing `~/.claude` directly works right up until the next
+`install.sh` overwrites it.
 
-`doctor --drift` answers a different question: does the installed state still match the repo
-it came from? Editing `~/.claude` directly works right up until the next `install.sh`
-overwrites it, so drift means unsaved work is about to disappear. Fix it by copying the change
-back into the repo, then reinstalling.
+`uninstall.sh` restores from those backups. It refuses to act without `--yes`, never touches
+`secrets.env`, and never deletes a symlinked skill, because those belong to Claude Code and
+its plugins.
 
-`uninstall.sh` restores from the backups `install.sh` has been writing all along. `--list`
-shows the timestamps, `--dry-run` prints the plan, and it refuses to touch anything without
-`--yes`. It never removes `secrets.env`, and it never deletes a skill that is a symlink,
-because those belong to Claude Code and its plugins.
+## Where the config goes
+
+```mermaid
+flowchart LR
+  R["vstack repo"]
+  R -->|"install.sh"| H["~/.claude<br/>~/.config/agents"]
+  R -->|"overlay.sh"| O[".claude/ committed<br/>in a target repo"]
+  R -->|"plugin install"| P["Claude Code plugin"]
+  H --> H1["local terminal<br/>Conductor<br/>Remote Control"]
+  O --> O1["cloud sessions<br/>phone dispatch"]
+  P --> P1["any machine<br/>skills only"]
+```
+
+A cloud session clones a repo into a sandbox with no access to your home directory, so a
+committed `.claude/` directory is the only config it can read. That is what `overlay.sh` is
+for. Run it in any repo you dispatch cloud work to.
+
+## Credentials
+
+`install.sh` copies `secrets.env.example` to `~/.config/agents/secrets.env` with mode 600 when
+that file does not exist, and leaves it alone when it does. Fill in the variables you use. The
+MCP wrappers in `bin/` source it before they exec.
+
+The example names the Anthropic key `ANTHROPIC_SDK_API_KEY` on purpose. Claude Code reads
+`ANTHROPIC_API_KEY` and bills API credits against it instead of your subscription, so the
+shell wrapper strips that name and `doctor` fails if it is set.
+
+Two settings stay opt-in. `permissions.defaultMode=bypassPermissions` and
+`skipDangerousModePermissionPrompt` stop Claude asking before it acts. Pass
+`./install.sh --bypass-permissions` if you want them.
+
+## Conductor
+
+`.conductor/settings.toml` makes a Conductor workspace install this bundle as its setup step
+and puts the verification gate behind a run button.
+
+`./overlay.sh <repo>` writes the same file into your other repos, with a setup step that pulls
+vstack in through `bootstrap.sh`. Cloud workspaces start from a bare Linux sandbox with no
+`~/.claude`, so without it they get none of this. If the repo already has a
+`.conductor/settings.toml`, `overlay.sh` leaves it alone and prints the lines to merge.
 
 ## Layout
 
 ```
 claude/          settings, CLAUDE.md, statusline, hooks, agents, commands, skills
-conductor/       user-level Conductor defaults (model, plan mode)
+conductor/       user-level Conductor defaults
 bin/             CLI wrappers installed to ~/.config/agents/bin
 shell/           zsh wrapper and env snippet
 mcp/             MCP server definitions merged into ~/.claude.json
+tests/           the auto-trigger regression suite
 install.sh       user-scope install, idempotent
 overlay.sh       copies the config into a repo so cloud sessions get it
+setup-machine.sh installs the tools a fresh machine lacks
+bootstrap.sh     clone, setup-machine, and install in one line
 ```
 
-## Conductor
+## Docs
 
-`.conductor/settings.toml` makes a Conductor workspace install this bundle as its setup step,
-and puts the verification gate behind a run button. Creating a workspace on vstack installs
-vstack.
-
-For your other repos, `./overlay.sh /path/to/repo` writes a `.conductor/settings.toml` whose
-setup step pulls vstack in through `bootstrap.sh`. That matters for cloud workspaces: they
-start from a bare Linux sandbox with no `~/.claude`, so without a setup step they get none of
-this. If the repo already has a `.conductor/settings.toml`, `overlay.sh` leaves it alone and
-prints the lines to merge yourself.
-
-Cloud sandboxes often ship without `jq`. The installer no longer treats that as fatal: it
-installs skills, hooks, agents, and commands, then skips only the two merge steps that need
-`jq` and says so.
-
-## Install as a plugin
-
-vstack is also a Claude Code marketplace, which is the fastest way to get the skills without
-touching your machine config:
-
-```bash
-claude plugin marketplace add itsvedantkumar/vstack
-claude plugin install vstack@vstack
-```
-
-As a plugin the session hook runs in `VSTACK_PROFILE=skills` mode: it injects the skill
-routing block and nothing else. The token, delegation, and autonomy rules are one person's
-operating policy, and a marketplace install has no business forcing them on you. `install.sh`
-still applies the full block, because there you asked for it.
-
-That delivers the 22 skills, 7 subagents, 15 commands, and the session hook that routes
-situations to skills. It does not deliver the rest: user settings such as
-`skillListingBudgetFraction`, the `bin/` wrappers, the shell lane, MCP servers, or
-`secrets.env`. A plugin cannot write those. Use `install.sh` for the whole setup and the
-plugin when you only want the skills.
-
-Pick one or the other. Installing both runs the session hook twice and injects the operating
-mode into every session two times over.
-
-## Two lanes, and why both exist
-
-`install.sh` writes to `~/.claude`. That covers the local terminal, Conductor, and Remote
-Control sessions from your phone.
-
-A cloud session is different. It clones the repo into a sandbox with no access to your home
-directory, so a committed `.claude/` directory is the only config it can read. Run
-`./overlay.sh /path/to/repo` in any repo you dispatch cloud work to.
+- [How skills fire](docs/how-skills-fire.md), and the measurements behind the routing block
+- [Skill attribution](claude/skills/ATTRIBUTION.md), per-skill source and license
+- [MCP servers](mcp/README.md), what ships globally and how to scope one to a project
+- [The auto-trigger test](tests/README.md), how to run and extend it
 
 ## Credits
 
-The 22 skills come from two places: 18 ported from [pstack](https://github.com/cursor/plugins)
-and 4 from [Superpowers](https://github.com/obra/superpowers). Sources and licenses are
-recorded in `claude/skills/ATTRIBUTION.md`.
-
-Every skill here is one this setup actually uses. A skill that turned out to be redundant was
-deleted rather than shipped disabled: if it is not worth loading, it is not worth carrying.
+18 skills are ported from [pstack](https://github.com/cursor/plugins) and 4 come from
+[Superpowers](https://github.com/obra/superpowers). Porting adapted them to Claude Code:
+Cursor model names mapped to Anthropic ones, `Task` calls to the `Agent` tool, and cloud-only
+parameters to local execution. Per-skill sources and licenses are in
+[ATTRIBUTION.md](claude/skills/ATTRIBUTION.md).
