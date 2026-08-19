@@ -85,29 +85,48 @@ done
 [ "$n" -gt 0 ] || errs="$errs\nno skills found"
 [ -z "$errs" ] && ok "skills ($n) loadable" || bad "skills loadable" "$(printf '%b' "$errs")"
 
+# Content scanner shared by checks 4-6.
+#
+# Two deliberate departures from the `grep -rn . 2>/dev/null` form these checks used to
+# take. First it searches tracked files via git grep, not the worktree: an ignored scratch
+# file under .context/ is not something this repo publishes, and scanning it turned the
+# whole gate red over a file git had been told to ignore. Second it reads grep's exit
+# status instead of discarding stderr — rc 1 means clean, but rc 2 or more means grep
+# itself failed, and the old form turned that into empty output and read it as a pass.
+scan(){ # label, ERE pattern, optional exclusion ERE
+  label="$1"; pat="$2"; excl="${3:-}"
+  if ! command -v git >/dev/null 2>&1; then skip "$label" "git not installed"; return; fi
+  hits=$(git grep -InIE -e "$pat" 2>&1); rc=$?
+  case "$rc" in
+    0) [ -n "$excl" ] && hits=$(printf '%s\n' "$hits" | grep -vE "$excl")
+       if [ -z "$hits" ]; then ok "$label"; else bad "$label" "$(printf '%s\n' "$hits" | head -5)"; fi ;;
+    1) ok "$label" ;;
+    *) bad "$label" "git grep failed (exit $rc), so this check proved nothing: $hits" ;;
+  esac
+}
+
 # --- 4. nothing is pinned to the author machine ----------------------------------------------
 # The bracket class keeps this pattern from matching its own source line. Generic
 # placeholders in docs (/Users/you) are fine; a real account name is what breaks portability.
-hits=$(grep -rInE --exclude-dir=.git "/Users/[A-Za-z0-9]" . 2>/dev/null \
-       | grep -vE "/Users/(you|USER|user|username|name)\b" | head -5)
-[ -z "$hits" ] && ok "no hardcoded home paths" || bad "no hardcoded home paths" "$hits"
+scan "no hardcoded home paths" \
+  '/Users/[A-Za-z0-9]' \
+  '/Users/(you|USER|user|username|name)\b'
 
 # --- 5. no credentials committed --------------------------------------------------------------
-# Matches real token shapes and any KEY/TOKEN/SECRET assigned a long opaque value. The
-# example file assigns nothing, so it passes; a filled-in secrets.env would not.
-hits=$(grep -rIn --exclude-dir=.git -E \
-  '(sk-ant-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|(KEY|TOKEN|SECRET|PASSWORD)[A-Z_]*=[A-Za-z0-9_/+-]{20,})' \
-  . 2>/dev/null | head -5)
-[ -z "$hits" ] && ok "no committed secrets" || bad "no committed secrets" "$hits"
+# Real token shapes, plus any KEY/TOKEN/SECRET/PASSWORD assigned a long opaque value. The
+# example file assigns nothing, so it passes; a filled-in secrets.env would not. The three
+# spellings of each keyword catch lowercase api_key= and Title_Case, which the uppercase-only
+# class used to walk straight past.
+scan "no committed secrets" \
+  '(sk-ant-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|xoxb-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(KEY|TOKEN|SECRET|PASSWORD|key|token|secret|password|Key|Token|Secret|Password)[A-Za-z_]*=[A-Za-z0-9_/+-]{20,})'
 
 # --- 6. no infrastructure identifiers ---------------------------------------------------------
 # This repo is public and its routines are templates. Real Vercel project or team IDs, Claude
 # Code environment IDs, and cloud routine trigger IDs identify live infrastructure, so they
 # belong in a local copy, never here. Placeholders ending in _ID or _xxx pass.
-hits=$(grep -rInE --exclude-dir=.git \
-  '(prj_|team_|env_|trig_)[A-Za-z0-9]{12,}' . 2>/dev/null \
-  | grep -vE '(YOUR_[A-Z_]*ID|_xxx|placeholder)' | head -5)
-[ -z "$hits" ] && ok "no infrastructure ids" || bad "no infrastructure ids" "$hits"
+scan "no infrastructure ids" \
+  '(prj_|team_|env_|trig_)[A-Za-z0-9]{12,}' \
+  '(YOUR_[A-Z_]*ID|_xxx|placeholder)'
 
 # --- 7. every skill named in prose exists on disk ----------------------------------------------
 # CLAUDE.md and the session hook route situations to skills by name. Deleting or renaming a
