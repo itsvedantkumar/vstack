@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# verify.sh — proof that this bundle is installable and portable.
+#
+# Run by the verify-gate.sh Stop hook: a non-zero exit blocks an agent from claiming the
+# work is done. Checks that need a missing tool SKIP rather than fail, so a fresh clone
+# without jq still gets a useful answer instead of a red herring.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
+FAIL=0
+ok(){   printf 'ok    %s\n' "$1"; }
+bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; FAIL=1; }
+skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; }
+
+# --- 1. every shell script parses ----------------------------------------------------------
+errs=""
+while IFS= read -r f; do
+  head -1 "$f" | grep -q '^#!.*sh' || continue
+  out=$(bash -n "$f" 2>&1) || errs="$errs\n$f: $out"
+done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*" \) -print)
+[ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
+
+# --- 2. every JSON file parses --------------------------------------------------------------
+if command -v jq >/dev/null; then
+  errs=""
+  for f in claude/settings.json mcp/servers.json; do
+    [ -f "$f" ] || { errs="$errs\n$f: missing"; continue; }
+    jq -e . "$f" >/dev/null 2>&1 || errs="$errs\n$f: invalid JSON"
+  done
+  [ -z "$errs" ] && ok "json valid" || bad "json valid" "$(printf '%b' "$errs")"
+else
+  skip "json valid" "jq not installed"
+fi
+
+# --- 3. launchd templates are valid plists --------------------------------------------------
+if command -v plutil >/dev/null; then
+  errs=""
+  for t in launchd/*.plist.tmpl; do
+    [ -e "$t" ] || continue
+    plutil -lint "$t" >/dev/null 2>&1 || errs="$errs\n$t"
+  done
+  [ -z "$errs" ] && ok "launchd templates" || bad "launchd templates" "$(printf '%b' "$errs")"
+else
+  skip "launchd templates" "plutil not available (not macOS)"
+fi
+
+# --- 4. skills are loadable ------------------------------------------------------------------
+# A skill with no description, or one longer than the configured listing cap, gets truncated
+# out of the listing and silently stops auto-triggering. That is the failure this catches.
+CAP=200
+if command -v jq >/dev/null; then
+  CAP=$(jq -r '.skillListingMaxDescChars // 200' claude/settings.json 2>/dev/null || echo 200)
+fi
+errs=""; n=0
+for s in claude/skills/*/SKILL.md; do
+  [ -e "$s" ] || continue
+  n=$((n+1))
+  name=$(awk -F': *' '/^name:/{print $2; exit}' "$s" | tr -d '"')
+  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$s" | tr -d '"')
+  dir=$(basename "$(dirname "$s")")
+  [ -n "$name" ] || errs="$errs\n$dir: no name in frontmatter"
+  [ "$name" = "$dir" ] || errs="$errs\n$dir: name ($name) does not match directory"
+  [ -n "$desc" ] || errs="$errs\n$dir: no description"
+  [ "${#desc}" -le "$CAP" ] || errs="$errs\n$dir: description ${#desc} chars > cap $CAP"
+  grep -q 'disable-model-invocation' "$s" && errs="$errs\n$dir: disable-model-invocation blocks auto-trigger"
+done
+[ "$n" -gt 0 ] || errs="$errs\nno skills found"
+[ -z "$errs" ] && ok "skills ($n) loadable" || bad "skills loadable" "$(printf '%b' "$errs")"
+
+# --- 5. nothing is pinned to the author machine ----------------------------------------------
+# The bracket class keeps this pattern from matching its own source line. Generic
+# placeholders in docs (/Users/you) are fine; a real account name is what breaks portability.
+hits=$(grep -rInE --exclude-dir=.git "/Users/[A-Za-z0-9]" . 2>/dev/null \
+       | grep -vE "/Users/(you|USER|user|username|name)\b" | head -5)
+[ -z "$hits" ] && ok "no hardcoded home paths" || bad "no hardcoded home paths" "$hits"
+
+# --- 6. no credentials committed --------------------------------------------------------------
+# Matches real token shapes and any KEY/TOKEN/SECRET assigned a long opaque value. The
+# example file assigns nothing, so it passes; a filled-in secrets.env would not.
+hits=$(grep -rIn --exclude-dir=.git -E \
+  '(sk-ant-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|(KEY|TOKEN|SECRET|PASSWORD)[A-Z_]*=[A-Za-z0-9_/+-]{20,})' \
+  . 2>/dev/null | head -5)
+[ -z "$hits" ] && ok "no committed secrets" || bad "no committed secrets" "$hits"
+
+# --- 7. routines use gh, never scraped tokens or absent tools ----------------------------------
+hits=$(grep -rIln -e 'github_pat_' -e 'Vercel MCP' -e 'remote get-url.*sed' claude/scheduled-tasks 2>/dev/null)
+[ -z "$hits" ] && ok "routines use gh auth" || bad "routines use gh auth" "$hits"
+
+# --- 8. the installer runs -----------------------------------------------------------------------
+# Dry run: exercises every code path in install.sh without touching the filesystem.
+if command -v jq >/dev/null; then
+  out=$(./install.sh --dry-run 2>&1)
+  if [ $? -eq 0 ]; then ok "install.sh --dry-run"; else bad "install.sh --dry-run" "$out"; fi
+else
+  skip "install.sh --dry-run" "jq not installed"
+fi
+
+echo
+[ "$FAIL" -eq 0 ] && echo "VERIFIED" || echo "VERIFICATION FAILED"
+exit "$FAIL"
