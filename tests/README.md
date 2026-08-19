@@ -1,5 +1,35 @@
 # tests/
 
+Two suites, with opposite constraints.
+
+`gate-falsifiability.sh` runs offline in about 30 seconds and CI runs it on every push. It
+proves `.claude/verify.sh` can actually fail.
+
+`auto-trigger.sh` needs an authenticated CLI and spends real tokens, so it runs by hand. It
+proves skills still fire on the situation.
+
+## gate-falsifiability.sh
+
+A check that cannot fail is indistinguishable from a check that is not there, and this repo has
+shipped both. Check 11 read two of three hook lanes while its label claimed otherwise. Check 12
+asserted only that a correct number appeared somewhere, so a wrong one shipped beside it. Three
+checks were wrapped in a bare `if command -v jq` with no else and printed nothing at all on a
+host without jq. Every one of those was green the whole time.
+
+For each declared check the suite breaks exactly what that check watches, requires the gate to
+go red naming it, restores the file byte for byte, and confirms the tree is unchanged at the
+end. It compares against the working tree as it found it, not against HEAD, so it is safe to
+run mid-change.
+
+**Adding a check to `verify.sh` means adding a row here.** Check 16 of the gate fails otherwise.
+A row is three things: the files it edits (`files_for`), the label the gate must print
+(`label_for`), and the mutation (`break_it`).
+
+Make the mutation surgical. One that trips four checks proves far less than one that trips the
+intended check, and a mutation that lands somewhere unreachable proves nothing at all while
+looking like it passed — appending `exit 3` to the end of `install.sh` did exactly that, because
+the dry-run path exits before reaching it.
+
 ## What this proves
 
 This setup's core property is that Claude Code skills fire on the situation

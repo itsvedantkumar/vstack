@@ -470,6 +470,25 @@ else
   skip "skillOverrides" "jq not installed"
 fi
 
+# --- 16. every check can be shown to fail ------------------------------------------------------
+# The accounting line above proves a check reported something. It cannot prove the check would
+# ever report a failure. tests/gate-falsifiability.sh breaks what each check watches and
+# requires the gate to go red naming it; this asserts that every declared check has a row there,
+# so adding a check without proving it bites is itself a failure.
+if [ -f tests/gate-falsifiability.sh ]; then
+  errs=""
+  cov=" $(grep -m1 -oE '^CHECKS="[^"]*"' tests/gate-falsifiability.sh | sed 's/^CHECKS="//; s/"$//') "
+  nid=0
+  for i in $(grep -oE '^# --- [0-9]+b?\.' "$SELF" | sed 's/^# --- //; s/\.$//'); do
+    nid=$((nid+1))
+    case "$cov" in *" $i "*) ;; *) errs="$errs\ncheck $i has no row in tests/gate-falsifiability.sh" ;; esac
+  done
+  [ -z "$errs" ] && ok "falsifiability coverage ($nid checks)" \
+    || bad "falsifiability coverage" "$(printf '%b' "$errs")"
+else
+  bad "falsifiability coverage" "tests/gate-falsifiability.sh is missing"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
