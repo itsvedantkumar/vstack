@@ -118,7 +118,12 @@ probe_ctx(){ # <profile-or-empty>
 }
 full=$(probe_ctx "")
 skills=$(probe_ctx skills)
-row "context spent per session (cost)" "0 B" "${full} B full / ${skills} B plugin" - "you pay this every session"
+# Rounded, because the exact count is environment-dependent — it embeds text that differs
+# between machines. Publishing a precise-looking number that is only true where it was measured
+# is the kind of false precision this repo keeps deleting from its own docs.
+fullkb=$(awk -v b="$full" 'BEGIN{printf "%.1f", b/1024}')
+skkb=$(awk -v b="$skills" 'BEGIN{printf "%.1f", b/1024}')
+row "context spent per session (cost)" "0 B" "~${fullkb} KB full / ~${skkb} KB plugin" - "you pay this every session"
 
 if [ "$JSON" = 1 ]; then
   printf '%s' "$ROWS" | jq -Rs 'split("\n")|map(select(length>0))|map(split("|"))|map({scenario:.[0],bare:.[1],vstack:.[2],matters:.[3]})'

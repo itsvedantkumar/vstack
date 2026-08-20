@@ -220,7 +220,7 @@ git push --force origin main         runs                deny
 git reset --hard, uncommitted work   runs                ask
 rm -rf node_modules (routine)        runs                allow
 untrusted repo's gate on Stop        no gate at all      did not run it
-context spent per session (cost)     0 B                 3655 B full / 2178 B plugin
+context spent per session (cost)     0 B                 ~3.6 KB full / ~2.1 KB plugin
 ```
 
 Run it yourself; it takes a second and needs no API key. Each row asserts the decision it

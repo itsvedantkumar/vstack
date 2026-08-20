@@ -603,11 +603,23 @@ if command -v jq >/dev/null; then
   # keeps finding in its own docs — so the published figures are read back and compared.
   _full=$(probe SessionStart '' '')
   _sk=$(probe SessionStart skills 1)
-  if [ -f README.md ] && grep -q 'B full / .* B plugin' README.md; then
-    _quoted=$(grep -oE '[0-9]+ B full / [0-9]+ B plugin' README.md | head -1)
-    _want="$_full B full / $_sk B plugin"
-    [ "$_quoted" = "$_want" ] \
-      || errs="$errs\nREADME quotes '$_quoted' for the per-session cost; the live figure is '$_want'"
+  # Compared with tolerance, not for equality. The exact byte count is not a publishable
+  # constant: the block embeds environment-dependent text, so this machine measured 3655 and CI
+  # measured 3667 for the same commit. Demanding equality made the gate depend on where it ran,
+  # which is a worse failure than the staleness it was added to prevent — a check that is only
+  # true on one machine is the thing this repo keeps finding and removing.
+  #
+  # So the README publishes a rounded KB figure and this asserts the live value still rounds to
+  # it. Real drift moves this by hundreds of bytes; noise moves it by tens.
+  if [ -f README.md ] && grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md; then
+    _qf=$(grep -oE '~[0-9.]+ KB full' README.md | head -1 | grep -oE '[0-9.]+')
+    _qs=$(grep -oE '~[0-9.]+ KB plugin' README.md | head -1 | grep -oE '[0-9.]+')
+    _lf=$(awk -v b="$_full" 'BEGIN{printf "%.1f", b/1024}')
+    _ls=$(awk -v b="$_sk"   'BEGIN{printf "%.1f", b/1024}')
+    awk -v a="$_qf" -v b="$_lf" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
+      || errs="$errs\nREADME quotes ~$_qf KB for the full session cost; live is ~$_lf KB"
+    awk -v a="$_qs" -v b="$_ls" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
+      || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
   fi
   [ -z "$errs" ] \
     && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
