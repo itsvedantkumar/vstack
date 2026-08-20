@@ -30,20 +30,53 @@ jobs:
       # later as a check that silently measures nothing.
       - name: Install Claude Code CLI
         run: |
+          set -u
+          # The npm package is a shim; the real binary arrives as a platform-specific optional
+          # dependency. Installing the shim alone produced a false green for as long as this
+          # step existed: the optional dep never landed, every `claude plugin validate` exited
+          # with "native binary not installed", and check 19's old output parsing read that
+          # error as "no findings" and printed ok. CI validated these manifests exactly zero
+          # times before this was found.
+          #
+          # The reason the optional dep never landed is worth naming, because it will recur:
+          # the shim pins its platform deps to its own version, and the platform packages are
+          # published on a lag. At the time of writing the shim was 2.1.237 and linux-x64 was
+          # 2.1.236, so npm resolved nothing and said nothing. Ask for the platform package by
+          # name at whatever version is actually published, and use the binary it ships — it is
+          # self-contained and needs no shim.
           npm install -g @anthropic-ai/claude-code || true
-          root="$(npm root -g)/@anthropic-ai/claude-code"
-          node "$root/install.cjs" || true
-          # The native package resolves as an optional dependency and does not always arrive on
-          # a runner. The package ships a documented pure-node fallback for exactly this, so
-          # prefer it over failing the job: put a shim ahead of the shim.
-          if ! claude --version >/dev/null 2>&1 && [ -f "$root/cli-wrapper.cjs" ]; then
-            printf '#!/bin/sh\nexec node "%s/cli-wrapper.cjs" "$@"\n' "$root" | sudo tee /usr/local/bin/claude >/dev/null
-            sudo chmod +x /usr/local/bin/claude
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  PKG=linux-x64 ;;
+            Linux-aarch64) PKG=linux-arm64 ;;
+            Darwin-arm64)  PKG=darwin-arm64 ;;
+            Darwin-x86_64) PKG=darwin-x64 ;;
+            *)             PKG="" ;;
+          esac
+          if [ -n "$PKG" ]; then
+            PREFIX="$RUNNER_TEMP/ccbin"
+            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG" || true
+            BIN="$PREFIX/node_modules/@anthropic-ai/claude-code-$PKG/claude"
+            if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
+              sudo ln -sf "$BIN" /usr/local/bin/claude
+            fi
           fi
-          # Report, do not fail. Check 19 runs its own control and skips with a reason when the
-          # validator is unusable, so an unavailable CLI degrades to a visible skip in the gate
-          # output rather than a red run over something this repo does not control.
+          # Report rather than fail. Check 19 runs its own two-way control and skips with a
+          # reason when the validator is unusable, so an unavailable CLI degrades to a visible
+          # skip in the gate output instead of a red run over something this repo does not own.
           claude --version || echo "::warning::claude CLI unusable on this runner; check 19 will skip"
+
+      - name: The manifests were actually validated, not skipped
+        run: |
+          # Check 19 is allowed to skip, so a green gate does not prove it ran. On this runner
+          # it must run: that is the whole point of installing the CLI above, and a silent
+          # regression back to skipping is exactly how it went unnoticed before.
+          ./.claude/verify.sh > "$RUNNER_TEMP/gate.txt" 2>&1 || true
+          if grep -q '^skip  plugin manifests valid' "$RUNNER_TEMP/gate.txt"; then
+            grep '^skip  plugin manifests valid' "$RUNNER_TEMP/gate.txt"
+            echo "check 19 skipped on a runner where the CLI was installed on purpose"
+            exit 1
+          fi
+          grep '^ok    plugin manifests valid' "$RUNNER_TEMP/gate.txt"
 
       - name: Run the verification gate
         run: ./.claude/verify.sh
