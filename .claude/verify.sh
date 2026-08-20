@@ -613,18 +613,26 @@ if command -v claude >/dev/null 2>&1 && [ "$ctl_ok" = 0 ]; then
   skip "plugin manifests valid" "validator accepted a manifest with name:42 — it is not validating here, so this check would only be reporting its own silence"
 elif command -v claude >/dev/null 2>&1; then
   errs=""
-  # One warning is expected and correct, so it is named here rather than silenced by dropping
-  # --strict: claude/CLAUDE.md is the source for the global and overlay lanes and only happens
-  # to sit inside the plugin source directory. The plugin lane deliberately does not load it —
-  # that policy belongs to this machine, not to a stranger's install. Every other warning or
-  # error is real and fails.
-  KNOWN='CLAUDE.md at the plugin root'
-  for m in . claude; do
+  # Exactly one warning is expected: claude/CLAUDE.md is the source for the global and overlay
+  # lanes and only happens to sit inside the plugin source directory. The plugin lane
+  # deliberately does not load it, so the warning is correct and must not fail the run.
+  #
+  # This used to allow for it by grepping validate's output for the '❯' bullet and discarding
+  # the line that named CLAUDE.md. That read the repo's health off a decorative glyph. CI does
+  # not run on a TTY and its output carries no '❯', so the filter found nothing, concluded
+  # there were no unknown warnings, and printed ok over a manifest the falsifiability suite had
+  # deliberately corrupted. Green on CI, red locally, same CLI version, for a bullet character.
+  #
+  # Validate a copy with CLAUDE.md removed instead. Then the expected warning cannot arise, no
+  # output has to be parsed at all, and the exit status means what it says.
+  tmpp=$(mktemp -d)
+  cp -R claude "$tmpp/plugin" && rm -f "$tmpp/plugin/CLAUDE.md"
+  for m in . "$tmpp/plugin"; do
     if ! out=$(claude plugin validate --strict "$m" 2>&1); then
-      unknown=$(printf '%s' "$out" | grep '❯' | grep -vF "$KNOWN")
-      [ -n "$unknown" ] && errs="$errs\n$m:\n$unknown"
+      errs="$errs\n${m#"$tmpp/"}:\n$out"
     fi
   done
+  rm -rf "$tmpp"
   [ -z "$errs" ] && ok "plugin manifests valid (claude plugin validate --strict)" \
     || bad "plugin manifests valid" "$(printf '%b' "$errs")"
 else
