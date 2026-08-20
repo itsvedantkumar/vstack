@@ -88,3 +88,22 @@ Source: this repo, MIT.
 
 All 26. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.
+
+## Also adapted: a hook, not a skill
+
+`claude/hooks/guard-destructive.sh` adapts the idea behind gstack's `careful` skill —
+intercepting destructive shell commands at PreToolUse rather than reviewing them afterwards,
+failing toward asking, and carving out build artefacts so the guard is not so noisy that people
+turn it off.
+
+Source: [garrytan/gstack](https://github.com/garrytan/gstack), MIT, Copyright (c) 2026 Garry
+Tan. The notice is reproduced in `LICENSE.mit-upstream`.
+
+The implementation is this repo's own and differs in two deliberate ways. It is armed on every
+install rather than switched on per session, because this setup ships `bypassPermissions` and a
+guard you have to remember to enable is not enabled when it matters. And its decisions are
+covered by check 23, which asserts all three tiers against the real hook — gstack ships the
+equivalent with no test of its decisions.
+
+This lives in a hook, not a skill, so it does not change the skill count or the arithmetic in
+the first line of this file.

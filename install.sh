@@ -286,6 +286,9 @@ elif [ "$DRY" = 0 ]; then
             { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] } ],
           UserPromptSubmit: [
             { hooks: [ {type:"command", command:($h+"/inject-session-context.sh")} ] } ],
+          PreToolUse: [
+            { matcher:"Bash",
+              hooks: [ {type:"command", command:($h+"/guard-destructive.sh"), statusMessage:"guard"} ] } ],
           PostToolUse: [
             { matcher:"Edit|Write|MultiEdit",
               hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],

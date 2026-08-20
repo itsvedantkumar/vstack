@@ -138,7 +138,7 @@ exits 127 on every hook event inside a sandbox.
 | Skills | 26 | `~/.claude/skills/` |
 | Subagents | 8 | `~/.claude/agents/` |
 | Commands | 14 | `~/.claude/commands/` |
-| Hooks | 4 | `~/.claude/hooks/` |
+| Hooks | 5 | `~/.claude/hooks/` |
 | CLI wrappers | 7 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 | Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |

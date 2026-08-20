@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -66,6 +66,7 @@ files_for(){ case "$1" in
   20)  printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
+  23)  printf 'claude/hooks/guard-destructive.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -94,6 +95,7 @@ label_for(){ case "$1" in
   20)  printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
   22)  printf 'skills disclose scripts they do not ship' ;;
+  23)  printf 'destructive guard decides correctly' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -161,6 +163,10 @@ exit 0
   22) # a skill telling the model to run a helper the port does not vendor, with no notice —
       # the shape that shipped in impeccable and in brainstorming's visual companion
       printf '\n```bash\nnode scripts/not-vendored-probe.mjs --run\n```\n' >> claude/skills/swarm/SKILL.md ;;
+  23) # the failure that matters: a guard that stops denying. Make the deny tier unreachable
+      # and the ask/allow tiers keep working, so only a test of the decisions notices.
+      sed -i.t 's/^if \[ "\$SIMPLE" = 1 \]; then/if false; then/' claude/hooks/guard-destructive.sh \
+        && rm -f claude/hooks/guard-destructive.sh.t ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"

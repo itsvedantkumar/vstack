@@ -253,7 +253,7 @@ if command -v jq >/dev/null; then
   errs=""
 
   # Lane 1 — project/overlay. claude/settings.json carries the full five.
-  for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure; do
+  for ev in SessionStart UserPromptSubmit PreToolUse PostToolUse Stop PostToolUseFailure; do
     jq -e --arg e "$ev" '.hooks[$e]' claude/settings.json >/dev/null 2>&1 \
       || errs="$errs\n$ev: missing from claude/settings.json"
   done
@@ -267,7 +267,7 @@ if command -v jq >/dev/null; then
   if [ -z "$prog" ]; then
     errs="$errs\ncould not extract the hook rebuild program from install.sh"
   else
-    for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure; do
+    for ev in SessionStart UserPromptSubmit PreToolUse PostToolUse Stop PostToolUseFailure; do
       printf '%s' "$prog" | grep -qE "^ *$ev: *\[" || errs="$errs\n$ev: missing from install.sh hook rebuild"
     done
     # The user lane wires the same five events as the project lane and nothing more. It used to
@@ -804,6 +804,54 @@ EOF
 done
 [ -z "$errs" ] && ok "skills disclose scripts they do not ship" \
   || bad "skills disclose scripts they do not ship" "$(printf '%b' "$errs")"
+
+# --- 23. the destructive-command guard decides correctly ---------------------------------------
+# The guard is armed on every install and runs before every Bash command, which makes it the
+# single piece of this repo most able to do harm by being wrong in either direction: too loose
+# and it is decoration, too tight and someone disables it and loses the protection entirely.
+#
+# gstack, where the idea comes from, ships an equivalent with no test of its decisions at all.
+# A guard nobody has watched deny is indistinguishable from a guard that returns allow.
+#
+# The three tiers are asserted by feeding real payloads through the real hook: catastrophic
+# commands must deny, destructive-but-legitimate ones must ask, and the commands an agent runs
+# constantly must pass without a prompt. That last row is the one that keeps the guard installed.
+if command -v jq >/dev/null; then
+  errs=""
+  g_decide(){ printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c "$1" '$c')" \
+                | bash claude/hooks/guard-destructive.sh 2>/dev/null \
+                | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null; }
+  g_want(){ # <command> <expected>
+    got=$(g_decide "$1")
+    [ "$got" = "$2" ] || errs="$errs\n'$1' -> $got, expected $2"
+  }
+  g_want 'rm -rf /'                      deny
+  g_want 'rm -rf ~'                      deny
+  g_want 'rm -rf $HOME'                  deny
+  g_want 'git push --force origin main'  deny
+  g_want 'git push -f origin master'     deny
+  g_want 'rm -rf /etc/nginx'             ask
+  g_want 'git reset --hard HEAD~3'       ask
+  g_want 'psql -c "DROP TABLE users"'    ask
+  g_want 'terraform destroy'             ask
+  g_want 'echo x && rm -rf /'            ask
+  g_want 'rm -rf node_modules /etc'      ask
+  g_want 'rm -rf node_modules'           allow
+  g_want 'rm -rf dist'                   allow
+  g_want 'npm test'                      allow
+  g_want 'git push origin feature-x'     allow
+  g_want 'git commit -m "wip"'           allow
+  # Unparseable or absent input must never reach allow. A guard that opens on malformed input
+  # has inverted its own purpose, and malformed input is exactly what an attacker sends.
+  for bad in 'not json' ''; do
+    d=$(printf '%s' "$bad" | bash claude/hooks/guard-destructive.sh 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
+    [ "$d" = ask ] || errs="$errs\nmalformed payload -> $d, expected ask"
+  done
+  [ -z "$errs" ] && ok "destructive guard decides correctly (16 commands, 3 tiers)" \
+    || bad "destructive guard decides correctly" "$(printf '%b' "$errs")"
+else
+  skip "destructive guard decides correctly" "jq not installed"
+fi
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
