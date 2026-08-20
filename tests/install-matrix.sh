@@ -471,8 +471,12 @@ if want overlay; then
       || e="$e; the pinned commit does not exist in this repo"
     # The seeded gate must be inert until armed. A repo that arms someone else's shell on Stop
     # just by being cloned is the thing trust-on-arm exists to prevent.
-    grep -q '.context/' "$(git -C "$T" rev-parse --git-common-dir)/info/exclude" 2>/dev/null \
-      || e="$e; .context/ was not excluded"
+    # --git-common-dir can answer with a path relative to the repo, so it has to be anchored
+    # before use. overlay.sh does this; the test did not, and read a path relative to wherever
+    # the harness happened to be standing — green locally, red on a CI checkout.
+    gcd=$(git -C "$T" rev-parse --git-common-dir)
+    case "$gcd" in /*) ;; *) gcd="$T/$gcd" ;; esac
+    grep -q '.context/' "$gcd/info/exclude" 2>/dev/null || e="$e; .context/ was not excluded"
     [ "$rc" = 0 ] && [ -z "$e" ] && ok "overlay lane writes a sandbox-ready repo" \
       || bad "overlay lane writes a sandbox-ready repo" "exit=$rc$e"
   fi
@@ -485,9 +489,23 @@ if want update; then
   if ! command -v git >/dev/null 2>&1; then
     skip "vstack update refuses unattended" "git not installed"
   else
-    U="$ROOT/upd"; mkdir -p "$U"
-    git clone -q "$SRC" "$U/repo" 2>/dev/null
-    git -C "$U/repo" reset -q --hard HEAD~1 2>/dev/null || true
+    # A purpose-made origin with two commits, rather than cloning this repo and stepping back
+    # one. CI checks out with fetch-depth 1, so HEAD~1 does not exist there: the reset failed,
+    # the clone was already up to date, `update` took its reinstall path and exited 0, and the
+    # case failed for a reason that had nothing to do with what it tests. `update` refuses long
+    # before it needs a real vstack tree, so a minimal repo is enough.
+    U="$ROOT/upd"; mkdir -p "$U/origin"
+    git -C "$U/origin" init -q
+    git -C "$U/origin" config user.email t@example.com; git -C "$U/origin" config user.name t
+    # It has to look like a vstack checkout or bin/vstack ignores VSTACK_DIR and resolves the
+    # real repo instead — which is up to date, so `update` reinstalls and exits 0, and the case
+    # silently tests the wrong repository.
+    mkdir -p "$U/origin/claude"
+    printf '{}\n' > "$U/origin/claude/settings.json"
+    printf 'one\n' > "$U/origin/f"; git -C "$U/origin" add -A; git -C "$U/origin" commit -qm one
+    printf 'two\n' > "$U/origin/f"; git -C "$U/origin" add -A; git -C "$U/origin" commit -qm two
+    git clone -q "$U/origin" "$U/repo" 2>/dev/null
+    git -C "$U/repo" reset -q --hard HEAD~1
     e=""
     before=$(git -C "$U/repo" rev-parse HEAD)
     # No TTY and no --yes: it must refuse. Assert the invariant that matters — the checkout did
