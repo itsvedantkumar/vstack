@@ -311,8 +311,9 @@ re-recording trust hashes; without a terminal it refuses instead of assuming. Th
 flag exists for automation, and anything automated enough to use it is back to trust-on-pull.
 
 **macOS first.** CI installs and exercises the hooks on Linux every push, so Linux works and
-stays working. But Conductor is macOS only, `setup-machine.sh` assumes Homebrew, and the
-launchd pieces have no systemd equivalent here.
+stays working. But Conductor is macOS only, and `setup-machine.sh` reaches for Homebrew first
+and falls back to apt, dnf or apk. Nothing here installs a scheduled job on either platform:
+`install.sh` writes no launchd plist and no systemd unit, so scheduling is yours to arrange.
 
 **The counts in this README are enforced, the prose is not.** `.claude/verify.sh` check 12
 reads every number back and fails on a mismatch. Nothing checks whether a sentence is still

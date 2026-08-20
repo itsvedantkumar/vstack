@@ -133,9 +133,19 @@ exit 0
       printf '\ntheme\n' >> claude/settings.project-keys ;;
   18) # pad the per-prompt digest past its cap
       perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
-  19) # a field the schema does not recognise; --strict rejects it
-      sed -i.t 's/"version":/"verzion":/' claude/.claude-plugin/plugin.json \
-        && rm -f claude/.claude-plugin/plugin.json.t ;;
+  19) # A schema type violation, which is what check 19 is actually for.
+      #
+      # This used to rename "version" to "verzion", and that never tested check 19 directly:
+      # it tripped check 13 (the two manifests no longer agreed on a version), and check 19
+      # only went red as a side effect of the marketplace manifest complaining about its
+      # plugin. Whether that side effect happened at all depended on the CLI version, so the
+      # row passed on a pinned local CLI and failed on CI's freshly installed one, which is
+      # a falsifiability suite reporting on something other than the check it names.
+      #
+      # keywords-as-a-string is a plain schema error: --strict rejects it, check 13 does not
+      # care because the version is untouched, and no CLI is going to start accepting it.
+      jq '.keywords = "not-an-array"' claude/.claude-plugin/plugin.json > /tmp/fx19.$$ \
+        && mv /tmp/fx19.$$ claude/.claude-plugin/plugin.json ;;
   20) # a command telling the model to run something no lane ever installs — exactly the
       # shape of the /bootstrap defect this check was written for
       printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
