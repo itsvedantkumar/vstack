@@ -1,48 +1,55 @@
 # vstack
 
-**A Claude Code setup where the skills fire on their own.** 26 skills, 8 agents, 14
-commands, and the session hook that routes a situation to the right skill without you typing a
-slash command.
+**A Claude Code setup where the skills fire on their own** — and one that can show you they do,
+rather than telling you.
 
 [![verify](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml/badge.svg)](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml)
 [![license](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-blue.svg)](LICENSE)
-[![plugin](https://img.shields.io/badge/claude%20plugin-vstack-6f42c1.svg)](#install)
+[![plugin](https://img.shields.io/badge/claude%20plugin-vstack-6f42c1.svg)](#start-here-the-skills-alone)
 
 Ask for a README and the writing skills load. Hand it a TypeScript file and the type-safety
-skill loads. Say "audit this three ways" and it fans out three subagents in one message. None
-of that needs a command, and the repo ships a test that proves it still happens.
+skill loads. Say "audit this three ways" and it fans out three subagents in one message. None of
+that needs a slash command.
+
+That claim is easy to make and most setups make it. Here it is measured: `tests/auto-trigger.sh`
+runs 12 prompts against the real model and reports which attempt each one landed on, so the day
+routing starts eroding shows up as a number rather than a feeling.
+
+The same idea runs through the rest. Every one of the 25 checks in the verification gate has a
+row in a suite that breaks what that check watches and requires the gate to go red naming it — a
+check nobody has watched fail is indistinguishable from a check that always passes. The
+installer is run into 19 throwaway home directories on Linux, macOS, Windows and Alpine on every
+push, because the only way to know an installer works is to run it and look at the files.
+
+**Two audits have been run against this repo by models other than the one that wrote it.** They
+found real defects — an uninstall that deleted config it should have restored, a gate that was
+installed and silently never ran, credentials exported into every shell. Those are fixed, each
+with a test that fails without the fix. `CHANGELOG.md` says what they were. That history is the
+honest version of "it works".
+
+## Start here: the skills alone
+
+If you want better Claude Code behaviour and nothing else, this is the whole thing. It adds
+skills, subagents, commands and the routing hook. It does not touch your shell, your
+credentials, your `~/.claude/settings.json`, or anything else on the machine.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
+claude plugin marketplace add itsvedantkumar/vstack
+claude plugin install vstack@vstack
 ```
 
-That takes a machine with nothing on it to a working setup: Homebrew, the CLI tools,
-Conductor, the Claude Code CLI, then this config.
+Ask Claude to write a README and watch `technical-writing` and `unslop` load without being
+asked. If nothing about that appeals, stop here — you have lost thirty seconds and changed
+nothing.
 
-## Install
+## The full workstation setup
 
-Three ways in, depending on how much you want.
+Everything below installs one person's whole working environment: shell environment tuning, MCP
+servers, CLI wrappers, a Conductor configuration, a destructive-command guard, and a Stop hook
+that blocks an agent from claiming work is done while verification fails. It is genuinely
+useful and it is genuinely opinionated. Read `## What this does not do` before running it.
 
-**A machine with nothing on it.** Installs Homebrew, the CLI tools, Conductor, the Claude Code
-CLI, and then this config.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
-```
-
-That line gives this repository, and whatever it points at next, immediate shell on your
-machine. If you would rather not, read it first and pin a release instead of tracking `main`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.4.0/bootstrap.sh -o bootstrap.sh
-less bootstrap.sh                       # it is 90 lines
-VSTACK_REF=v1.4.0 bash bootstrap.sh     # clone that tag, not main
-```
-
-`VSTACK_REF` pins which commit or tag gets installed. Without it the bootstrap follows `main`,
-which means a push to this repo reaches your machine the next time you run it.
-
-**The tools are already there.** Installs the config alone.
+**If the tools are already on the machine** — this installs the config alone:
 
 ```bash
 git clone https://github.com/itsvedantkumar/vstack.git
@@ -50,42 +57,34 @@ cd vstack
 ./install.sh
 ```
 
-**Only the skills.** Adds the skills, subagents, commands, and the routing hook, and touches
-nothing else on the machine.
+**On a machine with nothing on it**, the bootstrap installs the tools first. Pin a release and
+read the script before running it:
 
 ```bash
-claude plugin marketplace add itsvedantkumar/vstack
-claude plugin install vstack@vstack
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.4.0/bootstrap.sh -o bootstrap.sh
+less bootstrap.sh                       # about 100 lines
+VSTACK_REF=v1.4.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
-### What the bootstrap installs
+The unpinned one-liner is shorter and is what most people will paste:
 
-`setup-machine.sh` works in tiers and checks each tool before installing it, so a second run
-costs seconds. Run `./setup-machine.sh --check` to audit a machine without changing it.
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
+```
 
-| Tier | Tools | For |
-|---|---|---|
-| core | `git`, `jq`, `ripgrep`, `fd`, `gh`, `node`, `bun`, `uv` | agent tooling and this installer |
-| bundled | `npm`, `npx`, `pnpm`, `yarn`, `python3` | verified rather than installed: they arrive with node or the Xcode tools |
-| claude | Claude Code CLI | the agent itself |
-| conductor | Conductor Mac app | running several agents in parallel, macOS only |
-| plugins | claude-mem, typescript-lsp | memory layer and language tooling |
-| deploy | `vercel`, `wrangler` | the autonomous deploy chain |
-| security | `trivy`, `gitleaks`, `nmap`, `nuclei` | the `/security` command, add `--with-security` |
+It hands this repository — and Homebrew's, Bun's, uv's and Anthropic's installers, which it runs
+next — immediate shell on your machine, at whatever state `main` happens to be in. `VSTACK_REF`
+pins this repo to a tag you have read. It does nothing about the installers downstream. That is
+the trade, stated plainly rather than left for you to work out.
 
-Only `git` and `jq` decide the exit code. A missing `nuclei` is not a broken machine.
+On macOS it installs Homebrew, the CLI tools, Conductor and the Claude Code CLI. On Linux it
+falls back to apt, dnf or apk and skips Conductor, which is a Mac app. Windows means Git Bash or
+WSL; the installer runs there and is tested in CI, but Conductor and the zsh wrapper are not
+part of it.
 
-Two things it cannot do for you. The Xcode command line tools need a GUI prompt, so it tells
-you to run `xcode-select --install` and carries on. OWASP ZAP is a large Java app and is left
-to you.
-
-Preview any install with `./install.sh --dry-run`. It backs up every file it overwrites to
-`~/.config/agents/backups/install-<timestamp>/`, and it never overwrites `secrets.env`.
-
-Installed as a plugin, the session hook runs in `VSTACK_PROFILE=skills` mode and injects the
-routing block alone. The token, delegation, and autonomy rules are one person's operating
-policy, so a marketplace install does not get them. `install.sh` applies the full block,
-because there you asked for it.
+Nothing here schedules a job, phones home, or updates itself in the background. `vstack update`
+shows you the incoming commits and the diff of every script the gate executes, and refuses to
+proceed without a terminal.
 
 ## Three lanes, and which one reaches where
 

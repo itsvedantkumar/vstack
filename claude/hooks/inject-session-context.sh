@@ -92,8 +92,20 @@ EOF
 )
 
 # Skills profile: keep only the SKILLS block. Everything above it is operating policy.
+#
+# One line inside the block was operating policy too, and it survived the cut. "any feature or
+# change request -> run the chain" mandates four skills and a written plan for every change,
+# including a one-line fix. That is a considered choice on the machine this was written for. It
+# is not a choice a stranger made by installing a skill pack, and the README's promise that this
+# lane imposes no policy was untrue while that line shipped.
+#
+# The chain is still described, because it is genuinely good for work that warrants it. It is
+# described as a judgement rather than an instruction.
 if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
   MSG=$(printf '%s\n' "$MSG" | sed -n '/^SKILLS:/,$p')
+  MSG=$(printf '%s\n' "$MSG" | sed \
+    -e 's|^- any feature or change request -> run the chain: brainstorming, then writing-plans, then$|- a feature worth planning (multi-step, unclear shape, hard to undo) -> brainstorming, then|' \
+    -e 's|^  test-driven-development, then executing-plans\.$|  writing-plans, then test-driven-development, then executing-plans. Skip it for small,\n  obvious changes — the chain is for work where getting the shape wrong is expensive.|')
   emit "$event" "$MSG"
   exit 0
 fi
