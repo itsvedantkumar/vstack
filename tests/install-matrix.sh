@@ -19,6 +19,15 @@
 #   idempotent   The README says re-running is safe. That is a claim, so test it.
 #   uninstall    Must remove what it installed, restore what it replaced, and keep both the
 #                user's own files and anything they have edited since.
+#   existing-config  The case a real adopter is in, and the last one to get covered. Every
+#                other case starts from an empty home, which is the one situation where a
+#                merge cannot lose anything. This one seeds a lived-in ~/.claude — their own
+#                skills, agents, commands, settings keys, permissions and MCP servers — and
+#                requires all of it to survive.
+#   bootstrap    The README's headline curl command, against the published URL.
+#   marketplace  The plugin lane, installed from public GitHub into a throwaway config dir.
+#
+# The last two reach the network and skip with a reason when they cannot; the rest are offline.
 #
 # Everything happens under a temp dir. Nothing here touches the real HOME — that is the whole
 # point, and it is why this is safe to run on the machine you actually work on.
@@ -32,9 +41,13 @@ SRC=$(pwd)
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/vstack-matrix.XXXXXX")
 trap 'rm -rf "$ROOT"' EXIT
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok(){   printf 'ok    %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){  printf 'FAIL  %s\n      %s\n' "$1" "$2"; FAIL=$((FAIL+1)); }
+# Two cases reach the network and one needs the Claude CLI. Skipping is honest when the
+# prerequisite is genuinely absent; skipping silently is how a lane goes untested for months,
+# so a skip always says which prerequisite was missing.
+skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIP=$((SKIP+1)); }
 
 # assert helpers — each takes the case name so a failure says which environment broke
 count_dirs(){  find "$1" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
@@ -47,12 +60,23 @@ NHK=$(count_files "$SRC/claude/hooks" '*.sh')
 NWR=$(find "$SRC/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
 
 # A full install, asserted against the tree rather than against the installer's own summary.
-assert_install(){ # <label> <config-dir> <home>
-  lbl="$1"; cdir="$2"; h="$3"; errs=""
-  [ "$(count_dirs "$cdir/skills")"          = "$NSK" ] || errs="$errs; skills $(count_dirs "$cdir/skills")/$NSK"
-  [ "$(count_files "$cdir/agents" '*.md')"  = "$NAG" ] || errs="$errs; agents $(count_files "$cdir/agents" '*.md')/$NAG"
-  [ "$(count_files "$cdir/commands" '*.md')" = "$NCM" ] || errs="$errs; commands $(count_files "$cdir/commands" '*.md')/$NCM"
-  [ "$(count_files "$cdir/hooks" '*.sh')"   = "$NHK" ] || errs="$errs; hooks $(count_files "$cdir/hooks" '*.sh')/$NHK"
+assert_install(){ # <label> <config-dir> <home> [atleast]
+  # Counts are exact by default, which is what catches an install that scatters extra files.
+  # With `atleast` they become a floor: a home that already held the user's own skills and
+  # agents legitimately ends up with more than this repo ships, and demanding equality there
+  # reports their surviving files as a defect.
+  lbl="$1"; cdir="$2"; h="$3"; mode="${4:-exact}"; errs=""
+  cmp_count(){ # <what> <got> <want>
+    if [ "$mode" = atleast ]; then
+      [ "$2" -ge "$3" ] || errs="$errs; $1 $2/$3"
+    else
+      [ "$2" = "$3" ] || errs="$errs; $1 $2/$3"
+    fi
+  }
+  cmp_count skills   "$(count_dirs "$cdir/skills")"           "$NSK"
+  cmp_count agents   "$(count_files "$cdir/agents" '*.md')"   "$NAG"
+  cmp_count commands "$(count_files "$cdir/commands" '*.md')" "$NCM"
+  cmp_count hooks    "$(count_files "$cdir/hooks" '*.sh')"    "$NHK"
   [ "$(find "$h/.config/agents/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" = "$NWR" ] \
     || errs="$errs; wrappers missing"
   [ -f "$cdir/CLAUDE.md" ]     || errs="$errs; no CLAUDE.md"
@@ -188,7 +212,104 @@ if want refuse; then
     || bad "uninstall refuses without --yes" "exit=$rc (want 1), skills=$(count_dirs "$H/.claude/skills")"
 fi
 
+# --- installing over somebody else's existing setup ---------------------------------------------------
+# The case a real adopter is actually in, and the one nothing tested until now: every other case
+# here starts from an empty home, which is the one situation where a merge cannot lose anything.
+#
+# install.sh writes into files the user already owns — settings.json and .claude.json are merged,
+# not copied — so the question is not whether vstack lands but whether anything of theirs goes
+# missing while it does. Seed a home that looks lived-in and check every category survives.
+if want existing-config; then
+  H="$ROOT/existing"; mkdir -p "$H/.claude/skills/my-own-skill" "$H/.claude/agents" "$H/.claude/commands"
+  printf -- '---\nname: my-own-skill\ndescription: theirs, not ours\n---\nbody\n' > "$H/.claude/skills/my-own-skill/SKILL.md"
+  printf 'THEIR AGENT\n'   > "$H/.claude/agents/their-agent.md"
+  printf 'THEIR COMMAND\n' > "$H/.claude/commands/their-command.md"
+  # a settings file with their own preferences, including keys vstack also ships
+  cat > "$H/.claude/settings.json" <<'J'
+{"theirOwnKey":"keep me","theme":"dark","cleanupPeriodDays":99,
+ "permissions":{"allow":["Bash(ls:*)"]},
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"their-hook.sh"}]}]}}
+J
+  cat > "$H/.claude.json" <<'J'
+{"mcpServers":{"their-server":{"type":"stdio","command":"their-mcp","args":["--flag"]}},
+ "theirTopLevel":"keep me too"}
+J
+  out=$(HOME="$H" "$SRC/install.sh" 2>&1); rc=$?
+  e=$(assert_install existing-config "$H/.claude" "$H" atleast)
+  # their content, category by category
+  [ -f "$H/.claude/skills/my-own-skill/SKILL.md" ] || e="$e; their skill was deleted"
+  grep -q 'THEIR AGENT'   "$H/.claude/agents/their-agent.md"     2>/dev/null || e="$e; their agent was deleted"
+  grep -q 'THEIR COMMAND' "$H/.claude/commands/their-command.md" 2>/dev/null || e="$e; their command was deleted"
+  if command -v jq >/dev/null 2>&1; then
+    [ "$(jq -r '.theirOwnKey // "GONE"' "$H/.claude/settings.json")" = "keep me" ] \
+      || e="$e; their settings key was dropped"
+    [ "$(jq -r '.permissions.allow[0] // "GONE"' "$H/.claude/settings.json")" = "Bash(ls:*)" ] \
+      || e="$e; their permissions were dropped"
+    [ "$(jq -r '.mcpServers["their-server"].command // "GONE"' "$H/.claude.json")" = "their-mcp" ] \
+      || e="$e; their MCP server was dropped"
+    [ "$(jq -r '.theirTopLevel // "GONE"' "$H/.claude.json")" = "keep me too" ] \
+      || e="$e; their .claude.json top-level key was dropped"
+    # vstack's own MCP servers must arrive alongside theirs, not instead of them
+    [ "$(jq -r '.mcpServers | keys | length' "$H/.claude.json")" -ge 2 ] \
+      || e="$e; vstack's MCP servers did not merge in"
+  fi
+  # anything overwritten must be recoverable, or "we back everything up" is not true
+  bk=$(find "$H/.config/agents/backups" -name 'settings.json' -path '*files*' 2>/dev/null | head -1)
+  [ -n "$bk" ] && grep -q 'theirOwnKey' "$bk" 2>/dev/null || e="$e; their settings.json was not backed up"
+  [ "$rc" = 0 ] && [ -z "$e" ] && ok "installs over an existing setup without losing it" \
+    || bad "installs over an existing setup without losing it" "exit=$rc$e"
+fi
+
+# --- the curl bootstrap lane, against the real published URL --------------------------------------
+# The headline install command in the README, and until now the only proof it worked was a human
+# running it once. It reaches the network on purpose: the thing being tested is that the URL
+# serves, the clone succeeds, and install.sh runs from a directory nobody prepared by hand.
+if want bootstrap; then
+  if ! command -v curl >/dev/null 2>&1; then
+    skip "curl bootstrap lane" "curl not installed"
+  elif ! curl -fsSL --max-time 20 -o "$ROOT/bootstrap.sh" \
+       https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh 2>/dev/null; then
+    skip "curl bootstrap lane" "could not fetch the published bootstrap.sh (offline?)"
+  else
+    H="$ROOT/boot"; mkdir -p "$H"
+    # --skip-deps: setup-machine.sh installs packages, which is not what this case is measuring.
+    out=$(HOME="$H" VSTACK_DIR="$H/.vstack" bash "$ROOT/bootstrap.sh" --skip-deps 2>&1); rc=$?
+    e=$(assert_install bootstrap "$H/.claude" "$H")
+    [ -d "$H/.vstack/.git" ] || e="$e; bootstrap did not leave a clone at VSTACK_DIR"
+    [ "$rc" = 0 ] && [ -z "$e" ] && ok "curl bootstrap lane" || bad "curl bootstrap lane" "exit=$rc$e"
+  fi
+fi
+
+# --- the plugin marketplace lane, as a stranger ------------------------------------------------------
+# Installs from the public GitHub repo into a throwaway CLAUDE_CONFIG_DIR. This is the only lane
+# that reaches someone who never clones anything, and the only one where a malformed manifest is
+# the user's first experience rather than ours.
+if want marketplace; then
+  if ! command -v claude >/dev/null 2>&1; then
+    skip "plugin marketplace lane" "claude CLI not installed"
+  elif ! claude --version >/dev/null 2>&1; then
+    skip "plugin marketplace lane" "claude CLI present but not runnable here"
+  else
+    CFG="$ROOT/mkt"; mkdir -p "$CFG"; e=""
+    CLAUDE_CONFIG_DIR="$CFG" claude plugin marketplace add itsvedantkumar/vstack >/dev/null 2>&1 \
+      || e="$e; marketplace add failed"
+    CLAUDE_CONFIG_DIR="$CFG" claude plugin install vstack@vstack >/dev/null 2>&1 \
+      || e="$e; plugin install failed"
+    pd=$(find "$CFG" -type d -path '*vstack*/skills' 2>/dev/null | head -1)
+    if [ -z "$pd" ]; then
+      e="$e; no skills directory delivered by the plugin"
+    else
+      n=$(count_dirs "$pd")
+      [ "$n" -ge "$NSK" ] || e="$e; plugin delivered $n skills, repo has $NSK"
+      [ -f "$pd/ATTRIBUTION.md" ] || e="$e; ATTRIBUTION.md missing from the plugin payload"
+    fi
+    [ -z "$e" ] && ok "plugin marketplace lane" || bad "plugin marketplace lane" "${e#; }"
+  fi
+fi
+
 echo
-printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+printf '%d passed, %d failed' "$PASS" "$FAIL"
+[ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
+printf '\n'
 [ "$FAIL" -eq 0 ] && echo "MATRIX OK" || echo "MATRIX FAILED"
 exit "$FAIL"

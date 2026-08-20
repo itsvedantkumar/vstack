@@ -256,10 +256,13 @@ support — is written to `.zshenv` and, for bash users, to `.bashrc`. The `clau
 zsh only: it is written in zsh and cannot be sourced by bash, so on a bash machine you get the
 environment without the wrapper, and `install.sh` says so when it runs.
 
-`tests/install-matrix.sh` runs the installer into eight throwaway HOMEs and asserts the
-resulting tree: default, `CLAUDE_CONFIG_DIR`, a home path with a space, no `jq`, a bash user, a
-second run for idempotency, and both uninstall paths. It runs on Linux in CI every push. It
-never touches your real home directory, so it is safe to run on the machine you work on.
+`tests/install-matrix.sh` runs the installer into throwaway HOMEs and asserts the resulting
+tree: default, `CLAUDE_CONFIG_DIR`, a home path with a space, no `jq`, a bash user, a second run
+for idempotency, both uninstall paths, and an install over a home that already holds the user's
+own skills, agents, settings and MCP servers. Two more cases exercise the curl bootstrap and the
+plugin marketplace against the published repo, and skip with a reason when offline. It runs on
+Linux, macOS, Windows and Alpine in CI every push, and never touches your real home directory,
+so it is safe to run on the machine you work on.
 
 ## Credentials
 

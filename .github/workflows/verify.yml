@@ -71,12 +71,14 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
 
-      # Runs install.sh into eight throwaway HOMEs and asserts the resulting tree each time:
-      # a plain install, one with CLAUDE_CONFIG_DIR pointed elsewhere, one whose home path
-      # contains a space, one with jq removed from PATH, a bash user, a second run for
-      # idempotency, and the two uninstall paths. This runner is the environment the matrix
-      # exists for — bash by default, no Homebrew, the shape of a cloud VM or a container.
-      - name: Install matrix (config dir, bash, spaces, no jq, idempotency, uninstall)
+      # Runs install.sh into throwaway HOMEs and asserts the resulting tree each time: a plain
+      # install, CLAUDE_CONFIG_DIR pointed elsewhere, a home path with a space, jq removed from
+      # PATH, a bash user, a second run for idempotency, both uninstall paths, and an install
+      # over a home that already holds somebody else's skills, settings and MCP servers. Two
+      # further cases exercise the curl bootstrap and the plugin marketplace against the
+      # published repo. This runner is the environment the matrix exists for — bash by default,
+      # no Homebrew, the shape of a cloud VM or a container.
+      - name: Install matrix (all environments, plus the network lanes)
         run: ./tests/install-matrix.sh
 
       - name: install.sh, for real
@@ -175,3 +177,28 @@ jobs:
 
       - name: Run the verification gate
         run: ./.claude/verify.sh
+
+  # Alpine, because BusyBox is not GNU. Its sed, grep, find and stat take different flags, and
+  # there is no bash until you install it — which is exactly the shape of a slim container
+  # image. Nothing else in this workflow would catch a GNU-ism.
+  install-alpine:
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    steps:
+      - name: Tools a slim image does not ship
+        run: apk add --no-cache bash git jq curl findutils coreutils grep sed nodejs npm
+
+      - uses: actions/checkout@v4
+
+      - name: What this container actually has
+        run: |
+          bash --version | head -1
+          for t in jq git sed find cp chmod mktemp sha256sum shasum; do
+            printf '%-12s %s\n' "$t" "$(command -v $t || echo MISSING)"
+          done
+
+      - name: Install matrix on Alpine
+        run: bash ./tests/install-matrix.sh
+
+      - name: Run the verification gate
+        run: bash ./.claude/verify.sh
