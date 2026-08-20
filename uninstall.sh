@@ -135,24 +135,39 @@ done
 # rather than copying them, so there is no version of them that belongs solely to vstack —
 # deleting either would take the user's own configuration with it. If the backup holds a prior
 # copy, the restore pass above already put it back.
+#
+# A file only qualifies if it is still byte-identical to the copy vstack installed. Once it
+# differs, somebody edited it, and their edit is not this script's to throw away — CLAUDE.md is
+# the obvious case, since it accumulates a machine's own notes and there may be no backup
+# holding those. Changed files are kept and named, so the plan says what it is leaving and why
+# rather than deleting quietly.
 FILE_REMOVE_LIST=""
-plan_file_removal() { # <installed-path>
-  tgt="$1"
+KEPT_EDITED=""
+plan_file_removal() { # <installed-path> <repo-source-or-empty>
+  tgt="$1"; src="${2:-}"
   [ -e "$tgt" ] || return 0
   [ -L "$tgt" ] && return 0
   [ -e "$BK/files/${tgt#"$HOME"/}" ] && return 0   # backup has a prior version; restore covers it
+  if [ -n "$src" ] && [ -e "$src" ] && ! cmp -s "$src" "$tgt"; then
+    KEPT_EDITED="$KEPT_EDITED $tgt"
+    return 0
+  fi
   echo "remove   $tgt  (installed by vstack, not present in backup)"
   FILE_REMOVE_LIST="$FILE_REMOVE_LIST $tgt"
 }
-for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$HOME/.claude/hooks/$(basename "$f")"; done
-for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$HOME/.claude/agents/$(basename "$f")"; done
-for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$HOME/.claude/commands/$(basename "$f")"; done
-for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")"; done
-plan_file_removal "$HOME/.claude/CLAUDE.md"
-plan_file_removal "$HOME/.claude/statusline.sh"
-plan_file_removal "$HOME/.claude/skills/LICENSE.pstack"
-plan_file_removal "$HOME/.claude/skills/ATTRIBUTION.md"
-plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh"
+for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$HOME/.claude/hooks/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$HOME/.claude/agents/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$HOME/.claude/commands/$(basename "$f")" "$f"; done
+for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")" "$f"; done
+plan_file_removal "$HOME/.claude/CLAUDE.md"                    "$SRC/claude/CLAUDE.md"
+plan_file_removal "$HOME/.claude/statusline.sh"                "$SRC/claude/statusline.sh"
+plan_file_removal "$HOME/.claude/skills/LICENSE.pstack"        "$SRC/claude/skills/LICENSE.pstack"
+plan_file_removal "$HOME/.claude/skills/ATTRIBUTION.md"        "$SRC/claude/skills/ATTRIBUTION.md"
+plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh" "$SRC/shell/claude-parity.zsh"
+if [ -n "$KEPT_EDITED" ]; then
+  echo "keeping  files you have edited since install (not removing, no backup holds your version):"
+  for k in $KEPT_EDITED; do echo "         $k"; done
+fi
 
 if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ]; then
   echo "(backup is empty — nothing to restore)"

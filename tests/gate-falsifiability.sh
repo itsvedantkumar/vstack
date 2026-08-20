@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -64,6 +64,7 @@ files_for(){ case "$1" in
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
+  21)  printf 'install.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -90,6 +91,7 @@ label_for(){ case "$1" in
   18)  printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
+  21)  printf 'RETIRED names only retired keys' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -149,6 +151,9 @@ exit 0
   20) # a command telling the model to run something no lane ever installs — exactly the
       # shape of the /bootstrap defect this check was written for
       printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
+  21) # the exact list that was nearly shipped: Claude Code's own sandbox setting, named as if
+      # it were vstack's to delete
+      sed -i.t "s/^RETIRED='\[\]'/RETIRED='[\"sandbox\"]'/" install.sh && rm -f install.sh.t ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"

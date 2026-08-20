@@ -710,6 +710,37 @@ EOF
 [ -z "$errs" ] && ok "referenced install paths exist" \
   || bad "referenced install paths exist" "$(printf '%b' "$errs")"
 
+# --- 21. install.sh only deletes keys this repo actually retired -------------------------------
+# install.sh delpaths every key in RETIRED out of the user's live settings.json on every run.
+# That is the one genuinely destructive thing the installer does to a file it does not own, so
+# the list needs a source of truth, and it has exactly one: a key qualifies only if
+# claude/settings.json shipped it at some point and does not ship it now.
+#
+# The first RETIRED list was written from plausible-sounding names rather than from that
+# history, and three of its four entries were Claude Code's own settings — including "sandbox",
+# which would have stripped a user's native Bash sandboxing on every install. A reviewer caught
+# it before it shipped. This check is why it cannot come back.
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  retired=$(sed -n "s/^RETIRED='\(.*\)'.*/\1/p" install.sh | head -1)
+  if [ -z "$retired" ]; then
+    bad "RETIRED names only retired keys" "could not extract RETIRED from install.sh"
+  else
+    ever=$(for s in $(git log --all --format=%H -- claude/settings.json); do
+             git show "${s}:claude/settings.json" 2>/dev/null | jq -r 'keys[]?' 2>/dev/null
+           done | sort -u)
+    now=$(jq -r 'keys[]' claude/settings.json | sort -u)
+    errs=""
+    for k in $(printf '%s' "$retired" | jq -r '.[]?' 2>/dev/null); do
+      printf '%s\n' "$now"  | grep -qx "$k" && errs="$errs\n$k: still shipped in claude/settings.json, so it is not retired"
+      printf '%s\n' "$ever" | grep -qx "$k" || errs="$errs\n$k: claude/settings.json has never shipped it — not this repo's key to delete"
+    done
+    [ -z "$errs" ] && ok "RETIRED names only retired keys ($(printf '%s' "$retired" | jq -r 'length') entries)" \
+      || bad "RETIRED names only retired keys" "$(printf '%b' "$errs")"
+  fi
+else
+  skip "RETIRED names only retired keys" "jq or git not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

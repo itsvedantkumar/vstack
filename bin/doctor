@@ -122,7 +122,12 @@ if [ "${1:-}" = "--drift" ]; then
   # necessarily wrong, but nobody has decided what it is, which is exactly the state the dead
   # skillOverrides and sandbox blocks sat in.
   if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
-    USER_SCOPE='["forceLoginMethod","remote","enabledPlugins","extraKnownMarketplaces","preferredNotifChannel","permissions","skipDangerousModePermissionPrompt","statusLine","hooks","feedbackSurveyState","hasCompletedOnboarding","lastOnboardingVersion","userID","oauthAccount","customApiKeyResponses","tipsHistory","promptQueueUseCount","installMethod","autoUpdates","theme"]'
+    # Claude Code's own settings belong here even though vstack never writes them. Leaving one
+    # out pushes the reader toward the wrong remedy: doctor offers "ship it" or "retire it", and
+    # retiring a key Claude Code owns means install.sh deletes a working feature. `sandbox` is
+    # the cautionary one — it configures native Bash sandboxing, and it was very nearly added to
+    # install.sh's RETIRED list on exactly this reasoning.
+    USER_SCOPE='["forceLoginMethod","remote","enabledPlugins","extraKnownMarketplaces","preferredNotifChannel","permissions","skipDangerousModePermissionPrompt","statusLine","hooks","feedbackSurveyState","hasCompletedOnboarding","lastOnboardingVersion","userID","oauthAccount","customApiKeyResponses","tipsHistory","promptQueueUseCount","installMethod","autoUpdates","theme","sandbox","autoCompactEnabled","enabledMcpjsonServers","mcpServers","alwaysThinkingEnabled","includeCoAuthoredBy","outputStyle","attributionSettings"]'
     extra=$(jq -r --slurpfile repo "$REPO/claude/settings.json" --argjson us "$USER_SCOPE" '
       ($repo[0] | keys) as $shipped
       | keys - $shipped - $us

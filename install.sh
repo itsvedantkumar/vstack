@@ -167,13 +167,27 @@ fi
 # wholesale so overrides for deleted skills don't linger in the live file forever. Keys the
 # portable file never mentions (forceLoginMethod / remote / permissions) survive untouched.
 #
-# RETIRED is the part that used to be a lie. The comment here claimed retired keys were
-# del()ed "explicitly below" and no such code was ever written, so every key this repo has
-# ever shipped and later dropped stayed in the live file forever. It bit twice — a dead
-# skillOverrides block, then a sandbox block — and both times the fix was a manual edit on
-# one machine, which fixes nothing for anyone else. A merge that cannot delete is not a
-# merge, it is an accumulator. Add a key here when you remove it from claude/settings.json.
-RETIRED='["sandbox","skillOverridesLegacy","enabledMcpjsonServers","autoCompactEnabled"]'
+# RETIRED is the part that used to be a lie: the comment here claimed retired keys were
+# del()ed "explicitly below" and no such code was ever written, so a key this repo dropped
+# would sit in the live file forever. A merge that cannot delete is an accumulator.
+#
+# It is EMPTY, and that is the correct value today. This list may only ever name a key that
+# claude/settings.json itself once shipped and no longer does. Across all 11 revisions of that
+# file the union of its top-level keys is 27, and 27 are shipped today: this repo has never
+# retired one.
+#
+# Read that before adding anything here. The first draft of this list was invented from
+# plausible-sounding names — "sandbox", "enabledMcpjsonServers", "autoCompactEnabled" — none
+# of which this repo has ever shipped. They are Claude Code's own settings. Shipping that list
+# would have silently stripped a user's native Bash sandboxing on every install of a public
+# repo: a security feature, deleted without a word, on someone else's machine. Deleting a key
+# vstack does not own is not cleanup, it is vandalism with a changelog.
+#
+# To add one: confirm with
+#   for s in $(git log --all --format=%H -- claude/settings.json); do
+#     git show "${s}:claude/settings.json" | jq -r 'keys[]'; done | sort -u
+# that the key appears there and not in the current file. Check 21 enforces exactly that.
+RETIRED='[]'
 US="$HOME/.claude/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
 if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
