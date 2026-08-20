@@ -190,6 +190,14 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # The container runs as root against a checkout owned by another uid, so git refuses to
+      # operate on it at all. That is a property of running in a container, not of this repo,
+      # but it fails loudly and confusingly: overlay.sh dies mid-run and check 17 reports the
+      # overlay as broken. Declare the checkout safe so the gate measures the repo rather than
+      # the runner's file ownership.
+      - name: Let git operate on a checkout root does not own
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: What this container actually has
         run: |
           bash --version | head -1
