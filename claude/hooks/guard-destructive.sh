@@ -26,11 +26,28 @@
 
 set -uo pipefail
 
+# Anything that reaches the end of this script without having emitted a decision has crashed,
+# and a crash must not be silence. This shipped broken on every Linux host for exactly that
+# reason: `"$TMPDIR"*` in a case pattern, TMPDIR routinely unset there, set -u turns that into
+# a fatal error mid-script, and the hook produced no output at all — the one outcome the header
+# above promises cannot happen. macOS sets TMPDIR, so it passed locally and failed on three
+# platforms in CI.
+#
+# The trap is the structural fix rather than the one-line one: no future edit can reintroduce
+# silence, whatever it gets wrong.
+_guard_emitted=0
+_guard_trap() {
+  [ "$_guard_emitted" = 1 ] && return 0
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"[guard] the guard itself failed while inspecting this command. Approve only if you know what it does."}}\n'
+}
+trap _guard_trap EXIT
+
 emit() { # <allow|ask|deny> <reason>
+  _guard_emitted=1
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
   exit 0
 }
-allow() { printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}\n'; exit 0; }
+allow() { _guard_emitted=1; printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}\n'; exit 0; }
 
 payload=$(cat 2>/dev/null || true)
 [ -n "$payload" ] || emit ask "[guard] no tool payload to inspect — approve only if you know what this does"
@@ -119,7 +136,7 @@ case "$CMD" in
         node_modules|dist|build|target|coverage|.next|.turbo|.cache|.venv|__pycache__|.pytest_cache) continue ;;
         */node_modules|*/node_modules/*|*/dist|*/dist/*|*/build|*/build/*|*/target|*/target/*) continue ;;
         */coverage|*/coverage/*|*.next|*.next/*|*.turbo|*.turbo/*|*.cache|*.cache/*) continue ;;
-        */__pycache__|*/__pycache__/*|*.venv|*.venv/*|/tmp/*|"$TMPDIR"*) continue ;;
+        */__pycache__|*/__pycache__/*|*.venv|*.venv/*|/tmp/*|"${TMPDIR:-/nonexistent}"*) continue ;;
       esac
       _unsafe=1
     done

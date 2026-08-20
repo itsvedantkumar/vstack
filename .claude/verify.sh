@@ -841,6 +841,18 @@ if command -v jq >/dev/null; then
   g_want 'npm test'                      allow
   g_want 'git push origin feature-x'     allow
   g_want 'git commit -m "wip"'           allow
+  # The same decisions with a hostile environment. This is the case that would have caught the
+  # guard shipping broken on every Linux host: it used "$TMPDIR" in a case pattern, TMPDIR is
+  # routinely unset there, set -u made that fatal, and the hook emitted nothing at all. macOS
+  # sets TMPDIR, so it passed locally and failed on three platforms in CI.
+  for probe in 'rm -rf /:deny' 'rm -rf /etc/nginx:ask' 'rm -rf node_modules:allow'; do
+    pc=${probe%:*}; pw=${probe##*:}
+    pd=$(printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c "$pc" '$c')" \
+         | env -u TMPDIR -u HOME -u USER -u LANG bash claude/hooks/guard-destructive.sh 2>/dev/null \
+         | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
+    [ "$pd" = "$pw" ] || errs="$errs\nwith a stripped environment, '$pc' -> ${pd:-<no output>}, expected $pw"
+  done
+
   # Unparseable or absent input must never reach allow. A guard that opens on malformed input
   # has inverted its own purpose, and malformed input is exactly what an attacker sends.
   for bad in 'not json' ''; do
