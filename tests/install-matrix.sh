@@ -161,8 +161,10 @@ if want no-jq; then
   # there is no project dir, so a verbatim copy produced an install that reported success and
   # exited 127 on every hook. This case checked that the files arrived and called it a pass,
   # which is exactly the shape of a test that measures the wrong half of the claim.
-  cmd=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
-        "$H/.claude/settings.json" 2>/dev/null)
+  # jq, not python3: Alpine's slim image has no python3, and the jq-less constraint applies to
+  # install.sh's PATH, not to this harness. Reading it with a tool the container lacks turned a
+  # product assertion into an environment failure.
+  cmd=$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$H/.claude/settings.json" 2>/dev/null)
   case "$cmd" in
     *CLAUDE_PROJECT_DIR*) e="$e; hook command still points at \$CLAUDE_PROJECT_DIR" ;;
     "") e="$e; could not read the configured hook command" ;;
@@ -194,9 +196,18 @@ fi
 if want idempotent; then
   H="$ROOT/idem"; mkdir -p "$H"
   HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
-  a=$(cd "$H/.claude" && find . -type f | sort | xargs shasum 2>/dev/null | shasum)
+  # BusyBox ships sha256sum and no shasum; macOS ships shasum. Pick whichever is present, or
+  # fall back to size+path, which is enough to catch a second run rewriting the tree.
+  if command -v shasum >/dev/null 2>&1; then SUM=shasum
+  elif command -v sha256sum >/dev/null 2>&1; then SUM=sha256sum
+  else SUM=""; fi
+  tree_fingerprint(){ # <dir>
+    if [ -n "$SUM" ]; then (cd "$1" && find . -type f | sort | xargs $SUM 2>/dev/null | $SUM)
+    else (cd "$1" && find . -type f -exec ls -l {} + 2>/dev/null | awk '{print $5, $NF}' | sort); fi
+  }
+  a=$(tree_fingerprint "$H/.claude")
   HOME="$H" "$SRC/install.sh" >/dev/null 2>&1; rc=$?
-  b=$(cd "$H/.claude" && find . -type f | sort | xargs shasum 2>/dev/null | shasum)
+  b=$(tree_fingerprint "$H/.claude")
   e=""
   [ "$a" = "$b" ] || e="$e; second run changed the tree"
   [ "$(grep -c '>>> claude-parity >>>' "$H/.zshrc" 2>/dev/null)" = 1 ] || e="$e; .zshrc block duplicated"
