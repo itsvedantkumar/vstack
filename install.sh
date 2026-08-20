@@ -5,10 +5,10 @@
 # timestamped backup dir first, and it never touches secrets you already have.
 #
 # Lanes it materialises:
-#   ~/.claude/                 hooks, agents, commands, skills, settings
+#   $CLAUDE_CONFIG_DIR, or ~/.claude   hooks, agents, commands, skills, settings
 #   ~/.config/agents/bin/      CLI wrappers (deploy, headless runner, MCP shims, doctor)
 #   ~/.config/agents/shell/    zsh parity wrapper + env snippet, wired into .zshrc/.zshenv
-#   ~/.claude.json             MCP server entries (merged, never clobbered)
+#   .claude.json               MCP server entries (merged, never clobbered)
 #
 # Usage:
 #   ./install.sh                  install the config
@@ -20,6 +20,17 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Claude Code reads its user config from $CLAUDE_CONFIG_DIR when that is set, and from
+# ~/.claude otherwise. vstack hardcoded ~/.claude, so anyone running with CLAUDE_CONFIG_DIR
+# pointed elsewhere — VMs, containers, and anyone keeping separate profiles — got a complete,
+# clean-looking install into a directory Claude Code never reads. It failed silently and
+# looked like success, which is the worst way for an installer to be wrong.
+#
+# .claude.json follows the same rule: it sits inside the config dir when one is named, and
+# beside it at ~/.claude.json when it is not.
+CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON="$HOME/.claude.json"; fi
 BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
 DRY=0
 WITH_DEPS=0
@@ -52,17 +63,23 @@ HAVE_JQ=1
 command -v jq >/dev/null || { HAVE_JQ=0; echo "warn: jq not found — settings and MCP merge will be skipped (brew install jq / apt install jq)" >&2; }
 
 if [ "$DRY" = 0 ]; then
-  mkdir -p "$BK" "$HOME/.claude/hooks" "$HOME/.claude/agents" "$HOME/.claude/commands" \
-           "$HOME/.claude/skills" \
+  mkdir -p "$BK" "$CDIR/hooks" "$CDIR/agents" "$CDIR/commands" \
+           "$CDIR/skills" \
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
   chmod 700 "$HOME/.config/agents/backups"
 fi
 # Backups preserve the real path under files/ — the old flat `tr / _` names were a lossy
 # encoding that misparsed any future filename containing an underscore on restore.
 back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] || return 0
-  rel="${1#$HOME/}"
-  mkdir -p "$BK/files/$(dirname "$rel")"
-  cp "$1" "$BK/files/$rel"
+  # Paths under $HOME are stored HOME-relative so uninstall can map them back. A config dir
+  # moved outside $HOME by CLAUDE_CONFIG_DIR has no such relative form, so it is stored under
+  # files_abs/ with its full path and restored to exactly where it came from.
+  case "$1" in
+    "$HOME"/*) rel="${1#$HOME/}"; dest="$BK/files/$rel" ;;
+    *)         dest="$BK/files_abs${1}" ;;
+  esac
+  mkdir -p "$(dirname "$dest")"
+  cp "$1" "$dest"
   return 0
 }
 
@@ -84,20 +101,20 @@ if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
 fi
 
 # --- hooks / agents / commands ------------------------------------------------------------
-for f in "$SRC"/claude/hooks/*.sh;    do back "$HOME/.claude/hooks/$(basename "$f")"; run cp "$f" "$HOME/.claude/hooks/"; done
-for f in "$SRC"/claude/agents/*.md;   do back "$HOME/.claude/agents/$(basename "$f")";   run cp "$f" "$HOME/.claude/agents/";   done
-for f in "$SRC"/claude/commands/*.md; do back "$HOME/.claude/commands/$(basename "$f")"; run cp "$f" "$HOME/.claude/commands/"; done
-[ "$DRY" = 0 ] && chmod 755 "$HOME"/.claude/hooks/*.sh
+for f in "$SRC"/claude/hooks/*.sh;    do back "$CDIR/hooks/$(basename "$f")"; run cp "$f" "$CDIR/hooks/"; done
+for f in "$SRC"/claude/agents/*.md;   do back "$CDIR/agents/$(basename "$f")";   run cp "$f" "$CDIR/agents/";   done
+for f in "$SRC"/claude/commands/*.md; do back "$CDIR/commands/$(basename "$f")"; run cp "$f" "$CDIR/commands/"; done
+[ "$DRY" = 0 ] && chmod 755 "$CDIR"/hooks/*.sh
 say "installed  hooks, agents, commands"
 
 # --- global directives + statusline ---------------------------------------------------------
 # CLAUDE.md is the standing instruction file every session reads. It is backed up first: it is
 # the file most likely to have been hand-edited on a machine that has been running a while.
-back "$HOME/.claude/CLAUDE.md"
-run cp "$SRC/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
-back "$HOME/.claude/statusline.sh"
-run cp "$SRC/claude/statusline.sh" "$HOME/.claude/statusline.sh"
-[ "$DRY" = 0 ] && chmod 755 "$HOME/.claude/statusline.sh"
+back "$CDIR/CLAUDE.md"
+run cp "$SRC/claude/CLAUDE.md" "$CDIR/CLAUDE.md"
+back "$CDIR/statusline.sh"
+run cp "$SRC/claude/statusline.sh" "$CDIR/statusline.sh"
+[ "$DRY" = 0 ] && chmod 755 "$CDIR/statusline.sh"
 say "installed  CLAUDE.md, statusline.sh"
 
 # --- conductor user settings ------------------------------------------------------------------
@@ -125,18 +142,18 @@ fi
 for d in "$SRC"/claude/skills/*/; do
   s=$(basename "$d")
   [ "$DRY" = 1 ] && { say "would: install skill $s"; continue; }
-  [ -d "$HOME/.claude/skills/$s" ] && cp -R "$HOME/.claude/skills/$s" "$BK/skills_$s"
-  rm -rf "${HOME:?}/.claude/skills/$s"
+  [ -d "$CDIR/skills/$s" ] && cp -R "$CDIR/skills/$s" "$BK/skills_$s"
+  rm -rf "${CDIR:?}/skills/$s"
   # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src CONTENTS into dest,
   # not src itself, which would scatter SKILL.md and references/ across the skills root.
-  cp -R "${d%/}" "$HOME/.claude/skills/"
+  cp -R "${d%/}" "$CDIR/skills/"
 done
 # The licence and the attribution travel with the skills. Shipping LICENSE.pstack alone left
 # the installed tree claiming one origin for skills that actually come from four.
 for meta in LICENSE.pstack ATTRIBUTION.md; do
-  [ -f "$SRC/claude/skills/$meta" ] && run cp "$SRC/claude/skills/$meta" "$HOME/.claude/skills/"
+  [ -f "$SRC/claude/skills/$meta" ] && run cp "$SRC/claude/skills/$meta" "$CDIR/skills/"
 done
-[ "$DRY" = 0 ] && find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
+[ "$DRY" = 0 ] && find "$CDIR/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
 say "installed  skills ($(find "$SRC"/claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' '))"
 
 # --- agent bin ----------------------------------------------------------------------------
@@ -188,7 +205,7 @@ fi
 #     git show "${s}:claude/settings.json" | jq -r 'keys[]'; done | sort -u
 # that the key appears there and not in the current file. Check 21 enforces exactly that.
 RETIRED='[]'
-US="$HOME/.claude/settings.json"; back "$US"
+US="$CDIR/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
 if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   # No jq: never hand-merge JSON. Write the portable settings only when there is nothing
@@ -201,7 +218,7 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   fi
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
-  jq -s --arg h "$HOME/.claude/hooks" --argjson retired "$RETIRED" '
+  jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" '
     ((.[1] | del(.hooks)) as $portable
       | (.[0] * $portable)
       | .skillOverrides = ($portable.skillOverrides // {})
@@ -235,7 +252,7 @@ fi
 # --- MCP servers ---------------------------------------------------------------------------
 # Merged into the GLOBAL mcpServers map. Ours win on key collision; anything else you have
 # configured is preserved. Project-scoped servers stay yours to add (see mcp/README).
-CJ="$HOME/.claude.json"
+CJ="$CJSON"
 if [ "$HAVE_JQ" = 0 ]; then
   say "skipped    MCP merge (no jq)"
 elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
@@ -246,9 +263,9 @@ elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
      "$CJ" "$tmp.servers" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$CJ"
   rm -f "$tmp" "$tmp.servers"
-  say "merged     MCP servers into ~/.claude.json"
+  say "merged     MCP servers into $CJSON"
 else
-  say "skipped    MCP merge (no ~/.claude.json yet — run claude once, then re-run this)"
+  say "skipped    MCP merge (no $CJSON yet — run claude once, then re-run this)"
 fi
 
 # --- shell lane ----------------------------------------------------------------------------
@@ -264,7 +281,36 @@ fi
 if [ "$DRY" = 0 ] && ! grep -q 'agents/secrets.env' "$HOME/.zshenv" 2>/dev/null; then
   printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/.zshenv"
 fi
-say "installed  shell lane (.zshrc, .zshenv)"
+
+# bash gets the same environment. The wrapper does not travel — claude-parity.zsh is written
+# in zsh (whence -p, print -r, local -a) and cannot be sourced by bash — but the env snippet
+# and the secrets line are plain POSIX exports, and they are the part that actually changes
+# behaviour: the 1h prompt cache, tool concurrency, streaming, task support.
+#
+# Only zsh users got any of it, which meant a default Debian, Ubuntu or Alpine box — every
+# cloud VM and nearly every container — installed cleanly and then ran with none of it. Both
+# rc files are written when both shells are present, because a machine can have both.
+SHELL_LANES=".zshrc, .zshenv"
+if [ "$DRY" = 0 ]; then
+  for rc in .bashrc .profile; do
+    # .profile only when there is no .bashrc: writing both double-exports on login shells.
+    [ "$rc" = .profile ] && [ -f "$HOME/.bashrc" ] && continue
+    [ "$rc" = .bashrc ] || [ -f "$HOME/$rc" ] || [ -n "${BASH_VERSION:-}" ] || continue
+    back "$HOME/$rc"
+    if ! grep -q '>>> claude-parity env >>>' "$HOME/$rc" 2>/dev/null; then
+      cat "$SRC/shell/zshenv.snippet" >> "$HOME/$rc"
+      SHELL_LANES="$SHELL_LANES, $rc"
+    fi
+    if ! grep -q 'agents/secrets.env' "$HOME/$rc" 2>/dev/null; then
+      printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/$rc"
+    fi
+  done
+  case "${SHELL:-}" in
+    *zsh) ;;
+    *) say "note       the claude wrapper is zsh-only; \$SHELL is ${SHELL:-unset}, so you get the env lane without it" ;;
+  esac
+fi
+say "installed  shell lane ($SHELL_LANES)"
 
 # --- verify ----------------------------------------------------------------------------------
 say ""

@@ -19,6 +19,11 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BKROOT="$HOME/.config/agents/backups"
 SECRETS="$HOME/.config/agents/secrets.env"
 
+# Claude Code reads its user config from $CLAUDE_CONFIG_DIR when set, ~/.claude otherwise.
+# Mirrors install.sh: anything else and this operates on a directory the install never used.
+CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON="$HOME/.claude.json"; fi
+
 usage() {
   sed -n '2,16p' "$0"
 }
@@ -81,8 +86,8 @@ echo "restoring from: $BK"
 map_target() {
   name="$1"
   case "$name" in
-    claude.json) printf '%s\n' "$HOME/.claude.json" ;;
-    skills_*)    printf '%s\n' "$HOME/.claude/skills/${name#skills_}" ;;
+    claude.json) printf '%s\n' "$CJSON" ;;
+    skills_*)    printf '%s\n' "$CDIR/skills/${name#skills_}" ;;
     *)           printf '%s\n' "$HOME/$(printf '%s' "$name" | tr '_' '/')" ;;
   esac
 }
@@ -119,7 +124,7 @@ for d in "$SRC"/claude/skills/*/; do
   [ -d "$d" ] || continue
   s=$(basename "$d")
   [ -d "$BK/skills_$s" ] && continue
-  tgt="$HOME/.claude/skills/$s"
+  tgt="$CDIR/skills/$s"
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] || continue
   echo "remove   $tgt  (installed by vstack, not present in backup)"
@@ -155,14 +160,14 @@ plan_file_removal() { # <installed-path> <repo-source-or-empty>
   echo "remove   $tgt  (installed by vstack, not present in backup)"
   FILE_REMOVE_LIST="$FILE_REMOVE_LIST $tgt"
 }
-for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$HOME/.claude/hooks/$(basename "$f")" "$f"; done
-for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$HOME/.claude/agents/$(basename "$f")" "$f"; done
-for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$HOME/.claude/commands/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$CDIR/hooks/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$CDIR/agents/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$CDIR/commands/$(basename "$f")" "$f"; done
 for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")" "$f"; done
-plan_file_removal "$HOME/.claude/CLAUDE.md"                    "$SRC/claude/CLAUDE.md"
-plan_file_removal "$HOME/.claude/statusline.sh"                "$SRC/claude/statusline.sh"
-plan_file_removal "$HOME/.claude/skills/LICENSE.pstack"        "$SRC/claude/skills/LICENSE.pstack"
-plan_file_removal "$HOME/.claude/skills/ATTRIBUTION.md"        "$SRC/claude/skills/ATTRIBUTION.md"
+plan_file_removal "$CDIR/CLAUDE.md"                    "$SRC/claude/CLAUDE.md"
+plan_file_removal "$CDIR/statusline.sh"                "$SRC/claude/statusline.sh"
+plan_file_removal "$CDIR/skills/LICENSE.pstack"        "$SRC/claude/skills/LICENSE.pstack"
+plan_file_removal "$CDIR/skills/ATTRIBUTION.md"        "$SRC/claude/skills/ATTRIBUTION.md"
 plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh" "$SRC/shell/claude-parity.zsh"
 if [ -n "$KEPT_EDITED" ]; then
   echo "keeping  files you have edited since install (not removing, no backup holds your version):"
@@ -201,12 +206,12 @@ rm -f "$HOME/.config/agents/vstack-repo"
 
 # install.sh chmods hooks/bin/skill-scripts 755 after copying; match that here so restored
 # files stay executable.
-[ -d "$HOME/.claude/hooks" ] && chmod 755 "$HOME"/.claude/hooks/*.sh 2>/dev/null
+[ -d "$CDIR/hooks" ] && chmod 755 "$CDIR"/hooks/*.sh 2>/dev/null
 [ -d "$HOME/.config/agents/bin" ] && chmod 755 "$HOME"/.config/agents/bin/* 2>/dev/null
-[ -d "$HOME/.claude/skills" ] && find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
+[ -d "$CDIR/skills" ] && find "$CDIR/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
 
 for s in $REMOVE_LIST; do
-  tgt="$HOME/.claude/skills/$s"
+  tgt="$CDIR/skills/$s"
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] && rm -rf "$tgt"
 done

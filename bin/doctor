@@ -2,6 +2,11 @@
 # Health-check Claude Code setup — catches silent drift (vanished hooks/agents, missing secrets).
 set -uo pipefail
 
+# Claude Code reads its user config from $CLAUDE_CONFIG_DIR when set, ~/.claude otherwise.
+# Mirrors install.sh: anything else and this operates on a directory the install never used.
+CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON="$HOME/.claude.json"; fi
+
 # --drift: compare the INSTALLED state (~/.claude, ~/.config/agents/bin) against the vstack
 # repo checkout it came from.
 #
@@ -73,22 +78,22 @@ if [ "${1:-}" = "--drift" ]; then
   for f in "$REPO"/claude/hooks/*.sh; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
-    check_item "claude/hooks/$b" "$f" "$HOME/.claude/hooks/$b"
+    check_item "claude/hooks/$b" "$f" "$CDIR/hooks/$b"
   done
   for f in "$REPO"/claude/agents/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
-    check_item "claude/agents/$b" "$f" "$HOME/.claude/agents/$b"
+    check_item "claude/agents/$b" "$f" "$CDIR/agents/$b"
   done
   for f in "$REPO"/claude/commands/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
-    check_item "claude/commands/$b" "$f" "$HOME/.claude/commands/$b"
+    check_item "claude/commands/$b" "$f" "$CDIR/commands/$b"
   done
   for d in "$REPO"/claude/skills/*/; do
     [ -d "$d" ] || continue
     s=$(basename "$d")
-    check_item "claude/skills/$s" "${d%/}" "$HOME/.claude/skills/$s"
+    check_item "claude/skills/$s" "${d%/}" "$CDIR/skills/$s"
   done
   for f in "$REPO"/bin/*; do
     [ -e "$f" ] || continue
@@ -99,8 +104,8 @@ if [ "${1:-}" = "--drift" ]; then
   # has been running a while", and it was the one file --drift never looked at. Hand-edit it,
   # get "no drift", then lose the edit on the next update. Same for the statusline and the
   # shell lane.
-  check_item "claude/CLAUDE.md"        "$REPO/claude/CLAUDE.md"        "$HOME/.claude/CLAUDE.md"
-  check_item "claude/statusline.sh"    "$REPO/claude/statusline.sh"    "$HOME/.claude/statusline.sh"
+  check_item "claude/CLAUDE.md"        "$REPO/claude/CLAUDE.md"        "$CDIR/CLAUDE.md"
+  check_item "claude/statusline.sh"    "$REPO/claude/statusline.sh"    "$CDIR/statusline.sh"
   [ -f "$REPO/conductor/settings.managed.toml" ] && \
     check_item "conductor/settings.managed.toml" "$REPO/conductor/settings.managed.toml" "$HOME/.conductor/settings.managed.toml"
   [ -f "$REPO/shell/claude-parity.zsh" ] && \
@@ -121,7 +126,7 @@ if [ "${1:-}" = "--drift" ]; then
   # and have no business in a public repo. Anything outside both sets is unclassified — not
   # necessarily wrong, but nobody has decided what it is, which is exactly the state the dead
   # skillOverrides and sandbox blocks sat in.
-  if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
+  if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ]; then
     # Claude Code's own settings belong here even though vstack never writes them. Leaving one
     # out pushes the reader toward the wrong remedy: doctor offers "ship it" or "retire it", and
     # retiring a key Claude Code owns means install.sh deletes a working feature. `sandbox` is
@@ -131,7 +136,7 @@ if [ "${1:-}" = "--drift" ]; then
     extra=$(jq -r --slurpfile repo "$REPO/claude/settings.json" --argjson us "$USER_SCOPE" '
       ($repo[0] | keys) as $shipped
       | keys - $shipped - $us
-      | .[]' "$HOME/.claude/settings.json" 2>/dev/null)
+      | .[]' "$CDIR/settings.json" 2>/dev/null)
     if [ -n "$extra" ]; then
       echo "unclassified settings.json key(s) not shipped by the repo and not user-scope:"
       printf '          %s\n' $extra
@@ -153,7 +158,7 @@ if [ "${1:-}" = "--drift" ]; then
   # pdf, docx, pptx, xlsx) link in from elsewhere and are expected.
   RUNTIME_TOP='projects sessions session-env shell-snapshots tasks todos plans telemetry plugins cache chrome daemon downloads paste-cache jobs ide statsig backups scheduled-tasks history.jsonl stats-cache.json mcp-needs-auth-cache.json settings.json settings.local.json .credentials.json .last-update-result.json .last-cleanup .cc-writes CLAUDE.md statusline.sh hooks agents commands skills'
   stale=""
-  for p in "$HOME"/.claude/* "$HOME"/.claude/.[!.]*; do
+  for p in "$CDIR"/* "$CDIR"/.[!.]*; do
     [ -e "$p" ] || continue
     b=$(basename "$p")
     case " $RUNTIME_TOP " in *" $b "*) continue ;; esac
@@ -161,14 +166,14 @@ if [ "${1:-}" = "--drift" ]; then
   done
   for kind in hooks:'*.sh' agents:'*.md' commands:'*.md'; do
     d=${kind%%:*}; pat=${kind#*:}
-    for p in "$HOME"/.claude/"$d"/$pat; do
+    for p in "$CDIR"/"$d"/$pat; do
       [ -e "$p" ] || continue
       [ -L "$p" ] && continue
       b=$(basename "$p")
       [ -e "$REPO/claude/$d/$b" ] || stale="$stale $d/$b"
     done
   done
-  for p in "$HOME"/.claude/skills/*/; do
+  for p in "$CDIR"/skills/*/; do
     [ -d "$p" ] || continue
     s=$(basename "$p")
     [ -L "${p%/}" ] && continue
@@ -259,9 +264,9 @@ fi
 echo "── hooks ──"
 # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
 for f in $HOOKS; do
-  [ -x "$HOME/.claude/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
+  [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
 [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
-n=$(ls "$HOME/.claude/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
+n=$(ls "$CDIR/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -ge "$WANT_AGENTS" ] && ok "subagents ($n)" || bad "subagents" "$n<$WANT_AGENTS"
 echo "── secrets ──"
 [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
@@ -269,7 +274,7 @@ grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || 
 for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
 echo "── memory ──"; [ -d "$HOME/.claude-mem" ] && ok "claude-mem store" || bad "claude-mem" "missing"
-S="$HOME/.claude/settings.json"
+S="$CDIR/settings.json"
 echo "── parity ──"
 [ -z "${ANTHROPIC_API_KEY:-}" ] && ok "no ANTHROPIC_API_KEY in env" || bad "ANTHROPIC_API_KEY" "set — billing API credits, not the Max sub"
 AS=$(claude auth status 2>/dev/null)
@@ -290,7 +295,7 @@ jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true'
 jq -e '.skillListingMaxDescChars and .skillListingBudgetFraction and (.skillOverrides|length>0)' "$S" >/dev/null 2>&1 \
   && ok "context caps (skill listing)" || bad "context caps" "drifted"
 # claude-mem auto-updates and will silently revert this async flag.
-CM=$(ls -d "$HOME"/.claude/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json 2>/dev/null | tail -1)
+CM=$(ls -d "$CDIR"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json 2>/dev/null | tail -1)
 if [ -n "$CM" ]; then
   jq -e '[.hooks.UserPromptSubmit[].hooks[].async] | all' "$CM" >/dev/null 2>&1 \
     && ok "claude-mem UserPromptSubmit async" || bad "claude-mem UserPromptSubmit" "sync again (plugin updated) — re-apply"

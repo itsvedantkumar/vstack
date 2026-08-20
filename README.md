@@ -246,6 +246,21 @@ A cloud session clones a repo into a sandbox with no access to your home directo
 committed `.claude/` directory is the only config it can read. That is what `overlay.sh` is
 for. Run it in any repo you dispatch cloud work to.
 
+**`CLAUDE_CONFIG_DIR` is honoured.** Set it and the install goes there instead of `~/.claude`,
+including the hook paths written into `settings.json` and the `.claude.json` MCP entries. If
+you keep separate profiles, or run in a container that puts config somewhere else, set it
+before installing and everything follows.
+
+**Shells.** The environment lane — the 1h prompt cache, tool concurrency, streaming, task
+support — is written to `.zshenv` and, for bash users, to `.bashrc`. The `claude` wrapper is
+zsh only: it is written in zsh and cannot be sourced by bash, so on a bash machine you get the
+environment without the wrapper, and `install.sh` says so when it runs.
+
+`tests/install-matrix.sh` runs the installer into eight throwaway HOMEs and asserts the
+resulting tree: default, `CLAUDE_CONFIG_DIR`, a home path with a space, no `jq`, a bash user, a
+second run for idempotency, and both uninstall paths. It runs on Linux in CI every push. It
+never touches your real home directory, so it is safe to run on the machine you work on.
+
 ## Credentials
 
 `install.sh` copies `secrets.env.example` to `~/.config/agents/secrets.env` with mode 600 when

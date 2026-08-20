@@ -71,6 +71,14 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
 
+      # Runs install.sh into eight throwaway HOMEs and asserts the resulting tree each time:
+      # a plain install, one with CLAUDE_CONFIG_DIR pointed elsewhere, one whose home path
+      # contains a space, one with jq removed from PATH, a bash user, a second run for
+      # idempotency, and the two uninstall paths. This runner is the environment the matrix
+      # exists for — bash by default, no Homebrew, the shape of a cloud VM or a container.
+      - name: Install matrix (config dir, bash, spaces, no jq, idempotency, uninstall)
+        run: ./tests/install-matrix.sh
+
       - name: install.sh, for real
         run: ./install.sh
 
