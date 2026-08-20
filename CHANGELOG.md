@@ -6,6 +6,54 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.3.0 — 2026-08-20
+
+A pre-launch audit against two claims: that the repo and an installed machine agree both
+ways, and that a stranger with none of this machine's context can install any lane and get a
+working setup. The first largely held. The second did not, and most of this release is what
+that turned up.
+
+**Installs where Claude Code actually looks.** `install.sh` hardcoded `~/.claude`, but Claude
+Code reads `$CLAUDE_CONFIG_DIR` when it is set. Anyone with it pointed elsewhere — containers,
+VMs, separate profiles — got all 26 skills and every hook written into a directory Claude Code
+never opens, with hook paths baked to match, and a success message. `install.sh`, `uninstall.sh`
+and `doctor` now resolve it, and `.claude.json` follows it.
+
+**bash users get the environment.** The shell lane only ever wrote `.zshrc` and `.zshenv`, so a
+default Debian, Ubuntu or Alpine box — every cloud VM and nearly every container — installed
+cleanly and then ran without the 1h prompt cache, tool concurrency, streaming or task support.
+The `claude` wrapper is zsh and cannot travel; the environment can, and now does, and the
+installer says which half you are getting.
+
+**`/bootstrap` worked on exactly one machine.** It called a script that is not in this repo and
+that no lane installs; it survived locally as a pre-vstack leftover. It now uses `overlay.sh`,
+and check 20 fails on any `~/.claude` or `~/.config/agents` path named in prose that no lane
+creates.
+
+**`uninstall.sh` reverses everything it installed**, not just skills, and keeps any file you
+have edited since — naming what it kept rather than deleting quietly.
+
+**The licensing was wrong.** `LICENSE` said every skill came from pstack; 8 of 26 do not. The
+Apache 2.0 text for `impeccable` and `agent-browser` is vendored with a `NOTICE`, and
+`ATTRIBUTION.md` now installs alongside `LICENSE.pstack`.
+
+**CI stopped lying twice.** It had never validated the plugin manifests: the npm shim's native
+binary never downloaded, every `claude plugin validate` errored, and check 19 parsed output for
+a bullet character a non-TTY never prints, so it read the error as no findings. And it had never
+run on macOS at all. It now runs on Linux, macOS, Windows (Git Bash) and Alpine, all gating.
+
+**`tests/install-matrix.sh`** installs into throwaway HOMEs and asserts the resulting tree
+across eleven environments, including an install over a home that already holds someone else's
+skills, settings and MCP servers, and the curl and marketplace lanes against the published repo.
+
+**`doctor --drift`** reads `settings.json` keys back and reports files under the config dir the
+repo does not ship, separating "the repo dropped this and the delete never reached you" from
+"you wrote this" using git history.
+
+Also: personal residue removed from a README-linked doc, `component-registry` added to the
+README roster it was missing from, and several doc counts corrected that had evaded the count
+check by being spelled out as words.
+
 - Native OS-level Bash sandboxing was evaluated end to end and rejected on live evidence:
   its write boundary is the session workspace, and this setup's daily pattern is cross-repo
   writes from Conductor workspaces (editing vstack from any workspace, `install.sh` from
