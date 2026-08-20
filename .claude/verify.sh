@@ -171,7 +171,8 @@ if command -v jq >/dev/null; then
     # otherwise clobber each other's scratch files mid-check.
     md=$(mktemp -d)
     out=$(printf '{}\n' > "$md/a.json"; cp claude/settings.json "$md/b.json";
-          jq -s --arg h "/tmp/hooks" --arg n "true" "$prog" "$md/a.json" "$md/b.json" 2>&1)
+          jq -s --arg h "/tmp/hooks" --argjson retired '["probe_retired_key"]' \
+             "$prog" "$md/a.json" "$md/b.json" 2>&1)
     if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
       ok "settings merge program"
     else
@@ -266,12 +267,20 @@ if command -v jq >/dev/null; then
   if [ -z "$prog" ]; then
     errs="$errs\ncould not extract the hook rebuild program from install.sh"
   else
-    for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure SessionEnd PermissionRequest; do
+    for ev in SessionStart UserPromptSubmit PostToolUse Stop PostToolUseFailure; do
       printf '%s' "$prog" | grep -qE "^ *$ev: *\[" || errs="$errs\n$ev: missing from install.sh hook rebuild"
     done
-    # The notify hook is what reaches the phone. It is wired to five of the seven events.
-    nn=$(printf '%s' "$prog" | grep -cF 'command:$n')
-    [ "$nn" -eq 5 ] || errs="$errs\nnotify wired to $nn sites in install.sh, expected 5"
+    # The user lane wires the same five events as the project lane and nothing more. It used to
+    # wire seven, because SessionEnd and PermissionRequest existed only to reach a third-party
+    # notifier (Superset) that this setup no longer uses. Installing vstack should not staple a
+    # foreign tool's script to five hook events on a stranger's machine, so the notifier is gone
+    # and this asserts it stays gone rather than trusting the next reader to notice.
+    for dead in SessionEnd PermissionRequest; do
+      printf '%s' "$prog" | grep -qE "^ *$dead: *\[" \
+        && errs="$errs\n$dead: back in the install.sh hook rebuild — it exists only to serve a notifier this setup dropped"
+    done
+    grep -qi 'superset' install.sh \
+      && errs="$errs\ninstall.sh still references the retired Superset notifier"
   fi
 
   # Lane 3 — plugin marketplace. Deliberately narrow, and asserted as an exact set rather than

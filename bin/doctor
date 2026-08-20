@@ -106,6 +106,109 @@ if [ "${1:-}" = "--drift" ]; then
   [ -f "$REPO/shell/claude-parity.zsh" ] && \
     check_item "shell/claude-parity.zsh" "$REPO/shell/claude-parity.zsh" "$HOME/.config/agents/shell/claude-parity.zsh"
 
+  # --- settings.json keys -------------------------------------------------------------------
+  # The two blind spots below are why this whole section exists. --drift compared files it
+  # could diff byte-for-byte and quietly skipped the two surfaces that cannot be compared that
+  # way, so both rotted for months while it printed "no drift".
+  #
+  # First: ~/.claude/settings.json is a MERGE, never a copy, so it can never be diffed against
+  # the repo. install.sh had no way to delete, which meant every key vstack ever shipped and
+  # later dropped stayed in the live file forever. It happened twice. install.sh owns deletion
+  # now (see RETIRED there), but that only strips keys someone remembered to list, so this
+  # reads the live file back and names anything the repo does not ship.
+  #
+  # USER_SCOPE keys legitimately exist only on a machine: they are per-account or per-device
+  # and have no business in a public repo. Anything outside both sets is unclassified — not
+  # necessarily wrong, but nobody has decided what it is, which is exactly the state the dead
+  # skillOverrides and sandbox blocks sat in.
+  if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
+    USER_SCOPE='["forceLoginMethod","remote","enabledPlugins","extraKnownMarketplaces","preferredNotifChannel","permissions","skipDangerousModePermissionPrompt","statusLine","hooks","feedbackSurveyState","hasCompletedOnboarding","lastOnboardingVersion","userID","oauthAccount","customApiKeyResponses","tipsHistory","promptQueueUseCount","installMethod","autoUpdates","theme"]'
+    extra=$(jq -r --slurpfile repo "$REPO/claude/settings.json" --argjson us "$USER_SCOPE" '
+      ($repo[0] | keys) as $shipped
+      | keys - $shipped - $us
+      | .[]' "$HOME/.claude/settings.json" 2>/dev/null)
+    if [ -n "$extra" ]; then
+      echo "unclassified settings.json key(s) not shipped by the repo and not user-scope:"
+      printf '          %s\n' $extra
+      echo "          decide each one: add it to claude/settings.json, to RETIRED in install.sh, or to USER_SCOPE here"
+      DRIFT=1
+    fi
+  fi
+
+  # --- files the repo never shipped -----------------------------------------------------------
+  # Second blind spot: --drift only ever walked repo -> machine, so it could see a file that
+  # went missing and never a file that should not be there. A deleted orchestrate.md survived
+  # in ~/.claude for months that way, and a pre-vstack bootstrap-claude-project.sh sat in
+  # ~/.claude/scripts propping up a command that was broken for everyone else on earth.
+  #
+  # Reports only; never deletes. These are the user's files, and a health check that removes
+  # things you did not ask it to remove is worse than the drift.
+  #
+  # Symlinks are skipped on purpose: plugin- and Claude-Code-bundled skills (skill-creator,
+  # pdf, docx, pptx, xlsx) link in from elsewhere and are expected.
+  RUNTIME_TOP='projects sessions session-env shell-snapshots tasks todos plans telemetry plugins cache chrome daemon downloads paste-cache jobs ide statsig backups scheduled-tasks history.jsonl stats-cache.json mcp-needs-auth-cache.json settings.json settings.local.json .credentials.json .last-update-result.json .last-cleanup .cc-writes CLAUDE.md statusline.sh hooks agents commands skills'
+  stale=""
+  for p in "$HOME"/.claude/* "$HOME"/.claude/.[!.]*; do
+    [ -e "$p" ] || continue
+    b=$(basename "$p")
+    case " $RUNTIME_TOP " in *" $b "*) continue ;; esac
+    stale="$stale $b"
+  done
+  for kind in hooks:'*.sh' agents:'*.md' commands:'*.md'; do
+    d=${kind%%:*}; pat=${kind#*:}
+    for p in "$HOME"/.claude/"$d"/$pat; do
+      [ -e "$p" ] || continue
+      [ -L "$p" ] && continue
+      b=$(basename "$p")
+      [ -e "$REPO/claude/$d/$b" ] || stale="$stale $d/$b"
+    done
+  done
+  for p in "$HOME"/.claude/skills/*/; do
+    [ -d "$p" ] || continue
+    s=$(basename "$p")
+    [ -L "${p%/}" ] && continue
+    [ -d "$REPO/claude/skills/$s" ] || stale="$stale skills/$s"
+  done
+  # Two very different things end up in that list, and calling both "drift" would be wrong.
+  # A file the repo USED to ship and later deleted is a genuine leftover: the deletion never
+  # reached this machine, which is precisely how orchestrate.md outlived its removal. A file
+  # the repo has never had at any commit is the user's own, and a health check has no standing
+  # to call that an error. Git history is what separates them, so ask it instead of guessing.
+  if [ -n "$stale" ]; then
+    leftover=""; theirs=""
+    for b in $stale; do
+      case "$b" in
+        hooks/*|agents/*|commands/*|skills/*) rel="claude/$b" ;;
+        *)                                    rel="claude/$b" ;;
+      esac
+      # Two traps here, both of which produced a confidently wrong answer:
+      #
+      # `git log`, not `rev-list --objects`. The latter accepts a pathspec but still walks every
+      # reachable object, so it says "yes" for a path that has never existed and files all of
+      # the user's own files under "the repo dropped this".
+      #
+      # And capture the output rather than piping into `grep -q`. Under `set -o pipefail` grep
+      # exits the moment it matches, git takes SIGPIPE, and the pipeline reports 141 — on a
+      # match. Piping inverted the test: every leftover was classified as the user's own file.
+      hist=$(git -C "$REPO" log --all --oneline -- "$rel" 2>/dev/null)
+      if [ -n "$hist" ]; then
+        leftover="$leftover $b"
+      else
+        theirs="$theirs $b"
+      fi
+    done
+    if [ -n "$leftover" ]; then
+      echo "left over from a version this repo used to ship (the delete never reached this machine):"
+      printf '          %s\n' $leftover
+      echo "          safe to remove — git history shows the repo dropped them"
+      DRIFT=1
+    fi
+    if [ -n "$theirs" ]; then
+      echo "note: in ~/.claude but never shipped by this repo, so presumed yours:"
+      printf '          %s\n' $theirs
+    fi
+  fi
+
   # Behind-remote is informational only — never fail solely for being behind.
   if git -C "$REPO" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     git -C "$REPO" fetch -q 2>/dev/null || true

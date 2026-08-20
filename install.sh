@@ -165,11 +165,17 @@ fi
 # paths (user scope has no $CLAUDE_PROJECT_DIR). The portable file is authoritative for
 # every key it ships — including enabledPlugins and skillOverrides, which is replaced
 # wholesale so overrides for deleted skills don't linger in the live file forever. Keys the
-# portable file never mentions (forceLoginMethod / remote / permissions) survive untouched;
-# retired top-level keys are del()ed explicitly below.
+# portable file never mentions (forceLoginMethod / remote / permissions) survive untouched.
+#
+# RETIRED is the part that used to be a lie. The comment here claimed retired keys were
+# del()ed "explicitly below" and no such code was ever written, so every key this repo has
+# ever shipped and later dropped stayed in the live file forever. It bit twice — a dead
+# skillOverrides block, then a sandbox block — and both times the fix was a manual edit on
+# one machine, which fixes nothing for anyone else. A merge that cannot delete is not a
+# merge, it is an accumulator. Add a key here when you remove it from claude/settings.json.
+RETIRED='["sandbox","skillOverridesLegacy","enabledMcpjsonServers","autoCompactEnabled"]'
 US="$HOME/.claude/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
-NOTIFY='[ -n "$SUPERSET_HOME_DIR" ] && [ -x "$SUPERSET_HOME_DIR/hooks/notify.sh" ] && SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" || true'
 if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   # No jq: never hand-merge JSON. Write the portable settings only when there is nothing
   # to lose, otherwise leave the existing file untouched.
@@ -181,27 +187,23 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   fi
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
-  jq -s --arg h "$HOME/.claude/hooks" --arg n "$NOTIFY" '
+  jq -s --arg h "$HOME/.claude/hooks" --argjson retired "$RETIRED" '
     ((.[1] | del(.hooks)) as $portable
       | (.[0] * $portable)
-      | .skillOverrides = ($portable.skillOverrides // {}))
+      | .skillOverrides = ($portable.skillOverrides // {})
+      | delpaths([$retired[] | [.]]))
     | .hooks = {
         SessionStart: [
-          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] },
-          { hooks: [ {type:"command", command:$n} ] } ],
+          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] } ],
         UserPromptSubmit: [
           { hooks: [ {type:"command", command:($h+"/inject-session-context.sh")} ] } ],
         PostToolUse: [
           { matcher:"Edit|Write|MultiEdit",
             hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
         Stop: [
-          { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] },
-          { hooks: [ {type:"command", command:$n} ] } ],
+          { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] } ],
         PostToolUseFailure: [
-          { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] },
-          { matcher:"*", hooks: [ {type:"command", command:$n} ] } ],
-        SessionEnd:        [ { hooks: [ {type:"command", command:$n} ] } ],
-        PermissionRequest: [ { matcher:"*", hooks: [ {type:"command", command:$n} ] } ]
+          { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] } ]
       }
     | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3}
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
