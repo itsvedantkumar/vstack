@@ -25,6 +25,17 @@ REF="${VSTACK_REF:-main}"
 # not a git repo, which is a real limitation: `vstack update` needs one. Say so rather than
 # leaving someone to discover it.
 if command -v git >/dev/null 2>&1; then
+  # git is back and the existing install came from the tarball path: convert it rather than
+  # failing. Only a directory carrying our own marker is replaced, and it is moved aside rather
+  # than deleted, because "recognised as ours" is a weaker claim than "safe to destroy".
+  if [ -d "$DIR" ] && [ ! -d "$DIR/.git" ] && [ -f "$DIR/.vstack-tarball" ]; then
+    echo "bootstrap: converting the tarball install at $DIR into a git checkout"
+    mv "$DIR" "$DIR.tarball-$(date +%Y%m%d-%H%M%S)"
+  elif [ -d "$DIR" ] && [ ! -d "$DIR/.git" ]; then
+    echo "bootstrap: $DIR exists, is not a git checkout, and was not created by this script." >&2
+    echo "           move it aside and re-run, or point VSTACK_DIR somewhere else." >&2
+    exit 1
+  fi
   if [ -d "$DIR/.git" ]; then
     echo "bootstrap: updating $DIR"
     # Never discard work that is not ours. A hard reset on a dirty checkout silently deleted
@@ -47,7 +58,14 @@ if command -v git >/dev/null 2>&1; then
       || git clone -q --depth 1 "$REPO" "$DIR"
   fi
 elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
-  TARBALL="${REPO%.git}/archive/refs/heads/$REF.tar.gz"
+  # A previous tarball install leaves a directory that is not a git checkout. Re-running once
+  # git exists then tried to clone into it and died with "already exists and is not an empty
+  # directory" — the recovery the no-git path itself recommends could not run. Recognising our
+  # own tarball marker is what makes replacing it safe; anything else is left alone.
+  # /archive/<ref>.tar.gz resolves a tag or a branch. The refs/heads/ form only resolves a
+  # branch, so the fallback 404'd for exactly the value the README tells people to pin —
+  # VSTACK_REF=v1.4.0 — which is the case it most needed to serve.
+  TARBALL="${REPO%.git}/archive/$REF.tar.gz"
   echo "bootstrap: git not found — fetching the source tarball instead"
   echo "           (\`vstack update\` needs git; install it and re-run to get a real checkout)"
   tmp=$(mktemp -d)
@@ -59,6 +77,8 @@ elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
   [ -n "$src" ] || { echo "bootstrap: unexpected tarball layout" >&2; rm -rf "$tmp"; exit 1; }
   # cp the CONTENTS, and keep dotfiles: .claude/ carries the gate this repo verifies itself with.
   (cd "$src" && tar -cf - .) | (cd "$DIR" && tar -xf -)
+  # The marker is what lets a later run with git recognise this as ours and convert it.
+  printf 'installed by bootstrap.sh from %s because git was unavailable\n' "$TARBALL" > "$DIR/.vstack-tarball"
   rm -rf "$tmp"
 else
   echo "bootstrap: needs either git, or curl and tar, and this machine has none of them." >&2

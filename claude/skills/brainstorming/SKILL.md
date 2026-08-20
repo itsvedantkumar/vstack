@@ -3,6 +3,13 @@ name: brainstorming
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
 ---
 
+> **Ported here, and some of what it names is not.** This skill comes from upstream, where it
+> sits beside sibling skills this port does not vendor. Any `superpowers:<name>` or
+> `elements-of-style:<name>` reference below that does not match a skill you actually have is
+> **not available here** — do not try to invoke it. Where one is named as a required step, do
+> the work it describes directly instead, or use the closest skill that is installed. Run
+> `ls ~/.claude/skills` to see what you have.
+
 # Brainstorming Ideas Into Designs
 
 Help turn ideas into fully formed designs and specs through natural collaborative dialogue.

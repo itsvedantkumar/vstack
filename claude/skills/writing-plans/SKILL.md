@@ -3,6 +3,13 @@ name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
+> **Ported here, and some of what it names is not.** This skill comes from upstream, where it
+> sits beside sibling skills this port does not vendor. Any `superpowers:<name>` or
+> `elements-of-style:<name>` reference below that does not match a skill you actually have is
+> **not available here** — do not try to invoke it. Where one is named as a required step, do
+> the work it describes directly instead, or use the closest skill that is installed. Run
+> `ls ~/.claude/skills` to see what you have.
+
 # Writing Plans
 
 ## Overview

@@ -94,7 +94,7 @@ label_for(){ case "$1" in
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
-  22)  printf 'skills disclose scripts they do not ship' ;;
+  22)  printf 'skills disclose what they do not ship' ;;
   23)  printf 'destructive guard decides correctly' ;;
 esac }
 

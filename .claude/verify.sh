@@ -760,7 +760,7 @@ else
   skip "RETIRED names only retired keys" "jq or git not installed"
 fi
 
-# --- 22. a skill never tells the model to run a file the port does not ship --------------------
+# --- 22. a skill never tells the model to use something the port does not ship -----------------
 # The impeccable skill's body is upstream's, and it names 19 helper scripts across 42 places
 # that this port deliberately does not vendor. That is disclosed in ATTRIBUTION.md, but
 # disclosure is not the same as safety: the model reads the body, not the attribution, and one
@@ -782,7 +782,6 @@ for d in claude/skills/*/; do
     # anyone to run anything.
     refs=$(grep -hE '(^[[:space:]]*|`|node |bash |sh |python3? |\./)[A-Za-z0-9_./-]*scripts/[A-Za-z0-9_-]+\.(mjs|js|py|sh)' "$f" 2>/dev/null \
            | grep -oE '[A-Za-z0-9_./-]*scripts/[A-Za-z0-9_-]+\.(mjs|js|py|sh)' | sort -u)
-    [ -n "$refs" ] || continue
     missing=""
     while IFS= read -r r; do
       [ -n "$r" ] || continue
@@ -791,19 +790,36 @@ for d in claude/skills/*/; do
     done <<EOF
 $refs
 EOF
+    # Namespaced skill references (superpowers:writing-plans, elements-of-style:...) are the
+    # same defect wearing different clothes: a ported skill telling the model to invoke a skill
+    # that is not installed here. The model reads the body, not ATTRIBUTION.md, and a dangling
+    # `use superpowers:using-git-worktrees` is an instruction it will try to follow.
+    #
+    # Check 7 does not see these — its token pattern skips the namespace prefix — so six of them
+    # sat across three skills through every green run.
+    for sref in $(grep -hoE '\b[a-z][a-z0-9-]+:[a-z][a-z0-9-]+\b' "$f" 2>/dev/null | sort -u); do
+      ns=${sref%%:*}; nm=${sref##*:}
+      case "$ns" in http|https|file|note|warning|example|step|phase|input|output|result|goal|why|how|when|use|see|tip|nb|eg|ie) continue ;; esac
+      [ -d "claude/skills/$nm" ] && continue
+      [ -d "claude/skills/$sref" ] && continue
+      missing="$missing $sref"
+    done
     [ -n "$missing" ] || continue
     # The notice has to reach whoever is reading. It counts in the file carrying the commands,
     # or in SKILL.md, which every reader passes through first.
-    if ! grep -qiE 'unavailable here|not (included|vendored)|Not vendored here' "$f" \
-       && ! grep -qiE 'unavailable here|not (included|vendored)' "$sk"; then
-      errs="$errs\n${f#claude/skills/}: runs scripts it does not ship ($missing ) with no notice"
+    # The accepted phrasings are listed rather than guessed at. Widening this is a deliberate
+    # act: each phrase here is one a reader of the file would actually understand as "do not
+    # try to use this", not a keyword that happens to appear nearby.
+    _disc='unavailable here|not available here|not (included|vendored)|Not vendored here'
+    if ! grep -qiE "$_disc" "$f" && ! grep -qiE "$_disc" "$sk"; then
+      errs="$errs\n${f#claude/skills/}: points at things this port does not ship ($missing ) with no notice"
     fi
   done <<EOF
 $(find "$d" -type f -name '*.md' | sort)
 EOF
 done
-[ -z "$errs" ] && ok "skills disclose scripts they do not ship" \
-  || bad "skills disclose scripts they do not ship" "$(printf '%b' "$errs")"
+[ -z "$errs" ] && ok "skills disclose what they do not ship" \
+  || bad "skills disclose what they do not ship" "$(printf '%b' "$errs")"
 
 # --- 23. the destructive-command guard decides correctly ---------------------------------------
 # The guard is armed on every install and runs before every Bash command, which makes it the
