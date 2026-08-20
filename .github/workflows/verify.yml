@@ -132,3 +132,47 @@ jobs:
 
       - name: uninstall.sh --dry-run
         run: ./uninstall.sh --dry-run
+
+  # macOS is the platform this repo calls primary, and until now CI never touched it. Every
+  # macOS-only assumption — BSD sed and find, `shasum` instead of `sha256sum`, `stat -f` — was
+  # only ever exercised on the author's laptop, which is the definition of works-on-my-machine.
+  install-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install matrix on macOS
+        run: ./tests/install-matrix.sh
+
+      - name: Run the verification gate
+        run: ./.claude/verify.sh
+
+  # Windows via Git Bash, which is what `shell: bash` selects on a windows runner and what a
+  # Windows user running these scripts actually has. Native PowerShell is not a target and the
+  # README says so; this proves the Git Bash and WSL-shaped path, which is the one people use.
+  #
+  # continue-on-error until the platform is green: the job exists to report the truth about
+  # Windows on every push rather than to gate merges on a platform that was never supported.
+  # Flip it off once it passes.
+  install-windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What this runner actually has
+        run: |
+          bash --version | head -1
+          uname -s
+          for t in jq git sed find cp chmod mktemp shasum sha256sum; do
+            printf '%-12s %s\n' "$t" "$(command -v $t || echo MISSING)"
+          done
+
+      - name: Install matrix on Windows (Git Bash)
+        run: ./tests/install-matrix.sh
+
+      - name: Run the verification gate
+        run: ./.claude/verify.sh
