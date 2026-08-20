@@ -591,7 +591,27 @@ fi
 # `claude plugin validate --strict` does, and it fails on fields this repo would otherwise ship
 # misspelled — the marketplace lane is the one surface a stranger installs, so a manifest that
 # only *looks* right is the worst place for a silent defect.
+#
+# Positive control first. This check delegates its judgement to somebody else's binary, and a
+# binary that answers "fine" to everything is indistinguishable from a repo with no problems.
+# That is not hypothetical: this check printed ok on CI against a manifest deliberately broken
+# by the falsifiability suite, because `claude plugin validate` exited 0 there while the same
+# CLI version rejected the same manifest locally. The check was green and measuring nothing.
+#
+# So hand the validator a manifest that must be rejected, and if it accepts it, say the check
+# cannot measure here rather than reporting a pass on its behalf.
 if command -v claude >/dev/null 2>&1; then
+  ctl=$(mktemp -d); mkdir -p "$ctl/.claude-plugin"
+  printf '{"name":42,"version":"nope"}\n' > "$ctl/.claude-plugin/plugin.json"
+  ctl_ok=1
+  claude plugin validate --strict "$ctl" >/dev/null 2>&1 && ctl_ok=0
+  rm -rf "$ctl"
+else
+  ctl_ok=1
+fi
+if command -v claude >/dev/null 2>&1 && [ "$ctl_ok" = 0 ]; then
+  skip "plugin manifests valid" "validator accepted a manifest with name:42 — it is not validating here, so this check would only be reporting its own silence"
+elif command -v claude >/dev/null 2>&1; then
   errs=""
   # One warning is expected and correct, so it is named here rather than silenced by dropping
   # --strict: claude/CLAUDE.md is the source for the global and overlay lanes and only happens

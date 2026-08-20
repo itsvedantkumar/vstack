@@ -161,9 +161,20 @@ for id in $CHECKS; do
   # Check 19 runs `claude plugin validate`; where the CLI is absent the check itself reports a
   # skip, so its mutation cannot produce the expected FAIL. Skip visibly rather than fail
   # wrongly — CI installs the CLI, so this branch only fires on machines without it.
-  if [ "$id" = 19 ] && ! command -v claude >/dev/null 2>&1; then
-    printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
-    continue
+  # Ask the check itself whether it can measure, rather than inferring it from the CLI being on
+  # PATH. On CI the CLI was installed and `claude plugin validate` still exited 0 on a manifest
+  # it rejects locally, so this row demanded a FAIL the check could never produce and CI went
+  # red over the harness rather than the repo. Check 19 now reports a skip when its own positive
+  # control fails; honour that instead of second-guessing it.
+  if [ "$id" = 19 ]; then
+    if ! command -v claude >/dev/null 2>&1; then
+      printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
+      continue
+    fi
+    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+      printf 'skip  check %-3s not falsifiable here (validator is not validating; %s)\n' "$id" "$lbl"
+      continue
+    fi
   fi
 
   [ -n "$fs" ] && save $fs
