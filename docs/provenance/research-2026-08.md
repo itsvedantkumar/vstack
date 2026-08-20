@@ -63,7 +63,7 @@ next survey starts from verdicts instead of re-litigating.
 | Mutation-testing agent-written code (Stryker/PITest gate) | Real at Google/Meta scale; here it is per-repo test infrastructure, not setup config — belongs in a repo's own verify.sh when a repo earns it. |
 | Making `interrogate` a mandatory Stop-hook pass | A model-decision gate is exactly the flaky-gate failure this repo documented: a gate that fails half the time gets ignored. Stays a routed skill. |
 | Anthropic Compliance API | Enterprise-gated; local trails cover the need. |
-| Conductor Cloud API / mobile app | Pro-gated and "coming soon"; the Remote Control lane was chosen over it with reasons recorded in `plans/drive-conductor-work-from-my-phone-via-claude-code.md`, and nothing in this window changes that. |
+| Conductor Cloud API / mobile app | Pro-gated and "coming soon"; the Remote Control lane was chosen over it for reasons recorded separately, and nothing in this window changes that. |
 | Conductor Checkpoints | Zero-config, already on; nothing to adopt. |
 
 ## Sources

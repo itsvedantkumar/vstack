@@ -17,7 +17,7 @@ All work happens in `~/Projects/vstack` (canonical). This workspace's only irrep
 
 ## Step 1 — Salvage conductor-setup's unique content into vstack (FIRST — untracked files don't survive project deletion)
 
-Copy from `~/conductor/workspaces/conductor-setup/kabul` into vstack as **tracked** files under `docs/provenance/`:
+Copy from `~/conductor/workspaces/<repo>/<workspace>` into vstack as **tracked** files under `docs/provenance/`:
 
 - `.context/pstack-audit.md` → `docs/provenance/pstack-audit.md` — the 44-skill Fit/Benefit scoring (6,334 observations) that justifies the 18 vendored skills.
 - `.context/plans/*.md` (9 files, ~1,500 ln) → `docs/provenance/plans/` — includes the harden-vstack plan (G1–G7 defects), the two bare-metal Conductor-parity analyses, and the 3 phone/Remote-Control dispatch plans (only record of that lane's design).
@@ -48,7 +48,7 @@ Per the plan in `docs/provenance/plans/harden-vstack-*.md`:
 3. **Marketplace stranger-install** — check 19 (committed in Step 2) mechanises `claude plugin validate --strict`; additionally smoke it once from a fresh temp clone.
 4. **conductor-setup archive pointer** — `gh repo unarchive itsvedantkumar/conductor-setup --yes` → merge `optimize-conductor-claude-setup` into `main` (preserves the 69 tracked files on the default branch) → replace README top with a pointer: "Superseded by github.com/itsvedantkumar/vstack; research salvaged to vstack docs/provenance/" → push → `gh repo archive --yes`.
 5. **Installed-state drift** — re-run `~/Projects/vstack/install.sh` so `~/.config/agents/bin/doctor` matches `55b6bbd`; `bin/doctor --drift` must come back clean.
-6. **Repo hygiene** — delete the untracked Finder-duplicate junk found during exploration: 18 `"SKILL 2.md"` files in `~/Desktop/vedant.to-gh/vedant-to-gh/.claude/skills/`, `".gitkeep 2"` in `~/Desktop/odyssey/odyssey`. (Explicitly NOT running overlay.sh on the 5 repos — stale finding.)
+6. **Repo hygiene** — delete the untracked Finder-duplicate junk found during exploration: 18 `"SKILL 2.md"` files in `~/Desktop/<repo-a>/.claude/skills/`, `".gitkeep 2"` in `~/Desktop/<repo-b>`. (Explicitly NOT running overlay.sh on the 5 repos — stale finding.)
 
 ## Step 5 — Final verification (all must pass before "done")
 

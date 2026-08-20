@@ -74,7 +74,7 @@ its own.
 
 `tests/auto-trigger.sh` runs real prompts through the CLI and reports which skills fired. A
 version of the hook that dropped the routing table in favour of "the descriptions are the
-triggers" was measured against nine cases:
+triggers" was measured against 12 cases:
 
 | Hook version | Result |
 |---|---|
@@ -94,7 +94,7 @@ Choosing a skill is a model decision, so one sample proves little. An early vers
 test asserted on a single run per case and reported a failure for `blast-radius` that two
 earlier runs had passed, with the mechanism fully intact.
 
-The test now retries a miss once, controlled by `ATTEMPTS`. The property worth protecting is
+The test now retries a miss up to twice, for 3 attempts total, controlled by `ATTEMPTS`. The property worth protecting is
 that a situation routes to a skill, not that it does so on the first try. A skill that has
 genuinely stopped firing misses every attempt.
 

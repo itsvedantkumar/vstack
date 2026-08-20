@@ -7,7 +7,7 @@
 #
 # Anything here is behaviour a cloud sandbox genuinely needs, because the committed overlay is
 # the only config lane that reaches one. Anything absent is a user preference or a
-# machine-local fact. Check 16 of .claude/verify.sh fails if a key in settings.json appears in
+# machine-local fact. Check 17 of .claude/verify.sh fails if a key in settings.json appears in
 # neither this list nor the note at the bottom, so adding a key forces the decision.
 #
 # Keys vstack ships that are NOT listed here are stripped from a target repo on the next

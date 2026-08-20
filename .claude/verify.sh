@@ -108,9 +108,16 @@ scan(){ # label, ERE pattern, optional exclusion ERE
 # --- 4. nothing is pinned to the author machine ----------------------------------------------
 # The bracket class keeps this pattern from matching its own source line. Generic
 # placeholders in docs (/Users/you) are fine; a real account name is what breaks portability.
+#
+# The slash form alone was not enough. Claude Code names its transcript directories by
+# replacing every non-alphanumeric character in the cwd with a dash, so a real home path also
+# travels as -Users-<account>-..., and one of those shipped in a provenance doc through every
+# green run of this check. Desktop and Conductor workspace paths leak the same way: they name
+# the author's private repos rather than the account. All three accept <bracketed> placeholders,
+# which is how the docs legitimately talk about these paths.
 scan "no hardcoded home paths" \
-  '/Users/[A-Za-z0-9]' \
-  '/Users/(you|USER|user|username|name)\b'
+  '(/Users/[A-Za-z0-9]|-Users-[A-Za-z0-9]|~/Desktop/[A-Za-z0-9]|conductor/workspaces/[A-Za-z0-9])' \
+  '([/-]Users[/-](you|USER|user|username|name)\b|(~/Desktop|conductor/workspaces)/<)'
 
 # --- 5. no credentials committed --------------------------------------------------------------
 # Real token shapes, plus any KEY/TOKEN/SECRET/PASSWORD assigned a long opaque value. The

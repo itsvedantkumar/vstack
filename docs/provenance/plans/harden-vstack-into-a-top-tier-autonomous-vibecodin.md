@@ -51,7 +51,7 @@ This Conductor workspace (`conductor-setup`, HEAD `3e8e6eb`) is **not** the cano
 ### Token and autonomy (measured)
 
 - Fixed per-session surface **15,857 B ≈ 3,964 tokens**: skill listing 2,335 / SessionStart hook 655 / agents 401 / CLAUDE.md 308 / commands 265. Budget at 1M ctx is 16,000 tokens. **Under by 6.8×.**
-- **19 `claude-mem:*` skills = 992 tokens = 42% of the skill listing, and `skillOverrides` cannot suppress them.** Root cause read out of the shipped CLI binary (`~/.local/share/claude/versions/2.1.228`): the listing resolver short-circuits `if(e.type!=="prompt" || e.source==="plugin") return "on"` **before** `skillOverrides` is read. Confirmed three ways: (a) the binary short-circuit; (b) a perfect live split — all 4 bundled `"off"` entries are absent from the listing and all 13 bundled `"name-only"` entries appear as bare names, while all 19 plugin entries appear in full; (c) `claude/settings.json:25-62` already ships *both* candidate spellings and both are inert. **All 38 lines are dead config.**
+- **19 `claude-mem:*` skills = 992 tokens = 42% of the skill listing, and `skillOverrides` cannot suppress them.** Root cause read out of the shipped CLI binary (`~/.local/share/claude/versions/<version>`): the listing resolver short-circuits `if(e.type!=="prompt" || e.source==="plugin") return "on"` **before** `skillOverrides` is read. Confirmed three ways: (a) the binary short-circuit; (b) a perfect live split — all 4 bundled `"off"` entries are absent from the listing and all 13 bundled `"name-only"` entries appear as bare names, while all 19 plugin entries appear in full; (c) `claude/settings.json:25-62` already ships *both* candidate spellings and both are inert. **All 38 lines are dead config.**
 - `UserPromptSubmit` digest is 222 B/prompt ≈ 5,550 tokens over 100 turns — more than the session baseline, and ungated.
 - 4 agent descriptions exceed the 200-char cap (explorer 250, worker 250, design-reviewer 210, planner 210); check 3 caps skills only.
 - `conductor/settings.toml:10` `default_plan_mode = true` blocks every session on human plan approval — while `~/.claude/settings.json` sets `bypassPermissions` precisely to stop approving things.
@@ -148,7 +148,7 @@ All prose written in this phase (README, changelog, PR bodies, commit messages) 
 
 ## Definition of done
 
-Every unit committed separately with its proof in the message (the red output, then the green). CI green. `vstack test` 9/9 or better with the new cases and negative controls. `doctor` ALL GREEN, no drift. Final report: what changed, what was measured before and after, what was rejected and why, and the short list of human-only items. Memory files under `~/.claude/projects/-Users-vk-conductor-repos-conductor-setup/memory/` updated in place — `setup-intent-behavior-gaps.md` and `factory-audit-2026-08.md` are the ones this work invalidates.
+Every unit committed separately with its proof in the message (the red output, then the green). CI green. `vstack test` 9/9 or better with the new cases and negative controls. `doctor` ALL GREEN, no drift. Final report: what changed, what was measured before and after, what was rejected and why, and the short list of human-only items. Memory files under `~/.claude/projects/<project-slug>/memory/` updated in place — `setup-intent-behavior-gaps.md` and `factory-audit-2026-08.md` are the ones this work invalidates.
 
 ## Human-only items (deferred to the final report, not blocking)
 
