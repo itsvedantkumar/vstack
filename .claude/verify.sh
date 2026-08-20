@@ -289,7 +289,9 @@ if command -v jq >/dev/null; then
   # VSTACK_PROFILE=skills: those rules are one person's operating preference and have no
   # business riding along with a skill pack a stranger installed. Asserting the exact set means
   # widening this lane has to be a deliberate edit here, not a quiet drift.
-  got=$(jq -r '.hooks | keys_unsorted[]' claude/hooks/hooks.json 2>/dev/null | sort | tr '\n' ' ' | sed 's/ *$//')
+  # tr -d '\r' because the native Windows jq writes CRLF, which survived tr '\n' ' ' and made
+  # the key list compare as "SessionStart\r Stop\r" against "SessionStart Stop".
+  got=$(jq -r '.hooks | keys_unsorted[]' claude/hooks/hooks.json 2>/dev/null | tr -d '\r' | sort | tr '\n' ' ' | sed 's/ *$//')
   [ "$got" = "SessionStart Stop" ] \
     || errs="$errs\nplugin lane wires [$got], expected exactly [SessionStart Stop]"
 
@@ -447,10 +449,22 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
   for t in bash sh cat cut grep sed awk tr shasum sha256sum rm mkdir env dirname basename; do
     p=$(command -v "$t" 2>/dev/null) && ln -sf "$p" "$gd/bin/$t"
   done
-  o=$(printf '{"session_id":"vs-gate-nojq"}' \
-      | env PATH="$gd/bin" HOME="$gd/home" TMPDIR="$gd/tmp" CLAUDE_PROJECT_DIR="$gd/repo" bash "$gd/nojq.sh" 2>/dev/null)
-  printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
-    || errs="$errs\nwithout jq: a failing verify.sh did not produce a parseable decision:block"
+  # The stripped PATH is built out of symlinks, and MSYS/Git Bash does not reliably make them
+  # — without Developer Mode they silently become copies or fail outright. A sandbox that
+  # cannot run bash at all makes this assertion fail for a reason that has nothing to do with
+  # the hook, which is how Windows first reported a broken gate that was not broken.
+  #
+  # So probe the sandbox before trusting what it says. If it cannot execute, the sub-assertion
+  # names itself unmeasurable instead of reporting a defect it did not observe.
+  if [ "$(env PATH="$gd/bin" bash -c 'echo alive' 2>/dev/null)" != alive ]; then
+    nojq_note=" (no-jq path unmeasurable here: a stripped PATH of symlinks does not execute on this platform)"
+  else
+    nojq_note=""
+    o=$(printf '{"session_id":"vs-gate-nojq"}' \
+        | env PATH="$gd/bin" HOME="$gd/home" TMPDIR="$gd/tmp" CLAUDE_PROJECT_DIR="$gd/repo" bash "$gd/nojq.sh" 2>/dev/null)
+    printf '%s' "$o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
+      || errs="$errs\nwithout jq: a failing verify.sh did not produce a parseable decision:block"
+  fi
 
   # A script verify.sh executes, changed after it was trusted, must stop the gate. Trust used
   # to cover the entry point alone, so a byte-identical verify.sh sailed through while the
@@ -473,7 +487,7 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
   hp=$(grep -n '/usr/bin/jq' claude/hooks/*.sh 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' | grep -vF '[ -x /usr/bin/jq ]')
   [ -n "$hp" ] && errs="$errs\nhooks calling jq by absolute path instead of resolving it:\n$hp"
 
-  [ -z "$errs" ] && ok "stop-hook gate blocks (jq present and absent)" \
+  [ -z "$errs" ] && ok "stop-hook gate blocks (jq present and absent)${nojq_note:-}" \
     || bad "stop-hook gate blocks" "$(printf '%b' "$errs")"
 else
   skip "stop-hook gate blocks" "jq or git not installed"

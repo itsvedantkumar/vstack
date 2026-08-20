@@ -85,10 +85,12 @@ if want config-dir; then
   # Hook commands must point into the custom dir, or the hooks never fire.
   #
   # Compared by shape, not by string equality against $H. Git Bash hands paths to native
-  # Windows binaries in 8.3 short form, so jq writes C:/Users/RUNNER~1/... while the test holds
-  # C:/Users/runneradmin/... — same directory, different spelling, and a prefix match called it
-  # a failure. What actually matters is that the path lands under the custom config dir and not
-  # under a .claude the installer was told not to use.
+  # Windows binaries in 8.3 short form, so jq writes the shortened spelling of the home
+  # directory into settings.json while the test still holds the long one — same directory, two
+  # spellings, and a prefix match called it a failure. What actually matters is that the path
+  # lands under the custom config dir and not under a .claude the installer was told not to
+  # use. (Spelling the two forms out literally here is what tripped check 4, which scans
+  # tracked files for real home paths and cannot tell a comment from a config value.)
   hp=$(jq -r '.hooks.Stop[0].hooks[0].command' "$H/custom/settings.json" 2>/dev/null)
   case "$hp" in
     */custom/hooks/verify-gate.sh) ;;
