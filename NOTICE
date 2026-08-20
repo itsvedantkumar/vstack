@@ -15,7 +15,7 @@ Adapted for Claude Code as the `agent-browser` skill.
 
 MIT-licensed work is vendored here too, and MIT requires its copyright and
 permission notices travel with it. Those are in LICENSE.mit-upstream
-(obra/superpowers and ehmo/platform-design-skills) and in
+(obra/superpowers, ehmo/platform-design-skills and garrytan/gstack) and in
 claude/skills/LICENSE.pstack (pstack).
 
 Modifications: every vendored skill was adapted for Claude Code — model names

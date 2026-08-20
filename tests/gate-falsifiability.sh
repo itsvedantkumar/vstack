@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -67,6 +67,7 @@ files_for(){ case "$1" in
   21)  printf 'install.sh' ;;
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
   23)  printf 'claude/hooks/guard-destructive.sh' ;;
+  24)  printf 'claude/.claude-plugin/plugin.json' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -96,6 +97,7 @@ label_for(){ case "$1" in
   21)  printf 'RETIRED names only retired keys' ;;
   22)  printf 'skills disclose what they do not ship' ;;
   23)  printf 'destructive guard decides correctly' ;;
+  24)  printf 'declared version matches what installs' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -167,6 +169,10 @@ exit 0
       # and the ask/allow tiers keep working, so only a test of the decisions notices.
       sed -i.t 's/^if \[ "\$SIMPLE" = 1 \]; then/if false; then/' claude/hooks/guard-destructive.sh \
         && rm -f claude/hooks/guard-destructive.sh.t ;;
+  24) # claim an already-tagged version while the payload has moved on — the exact state that
+      # ships three lanes three different trees under one label
+      sed -i.t 's/"version": "[0-9.]*"/"version": "1.4.0"/' claude/.claude-plugin/plugin.json \
+        && rm -f claude/.claude-plugin/plugin.json.t ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"

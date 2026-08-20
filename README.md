@@ -30,7 +30,8 @@ honest version of "it works".
 ## Start here: the skills alone
 
 If you want better Claude Code behaviour and nothing else, this is the whole thing. It adds
-skills, subagents, commands and the routing hook. It does not touch your shell, your
+skills, subagents, commands and the routing hook, plus a Stop-hook gate that stays inert until
+you trust a repo's own `.claude/verify.sh`. It does not touch your shell, your
 credentials, your `~/.claude/settings.json`, or anything else on the machine.
 
 ```bash
@@ -102,8 +103,9 @@ nothing — no home directory config of any kind. If the skills are not committe
 that session does not have them. `bin/doctor` fails when an active repo has no overlay, and it
 finds those repos through their Conductor workspaces rather than a hardcoded list of paths.
 
-The plugin lane is deliberately the narrowest. It ships the skills, subagents, commands and the
-routing hook, and stops there. The token, delegation and autonomy rules in the other two lanes
+The plugin lane is deliberately the narrowest. It ships the skills, subagents, commands, the
+routing hook, and an opt-in Stop-hook verify gate that does nothing until a repo's
+`.claude/verify.sh` is trusted — two hooks, not one. The token, delegation and autonomy rules in the other two lanes
 are one person's operating policy and have no business arriving with a skill pack a stranger
 installed.
 

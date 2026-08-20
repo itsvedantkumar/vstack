@@ -6,6 +6,51 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.5.0 — 2026-08-20
+
+A second external review, of the improvements rather than the bugs. Its headline finding was
+that the cloud lane's central promise was inert, and it was right.
+
+**The Stop gate never ran in a cloud sandbox.** `overlay.sh` installs `.claude/verify.sh` and
+wires the hook, but `verify-gate.sh` refuses to execute a repo's gate without a machine-local
+trust entry — and a fresh sandbox has none. Installed, wired, silently skipping on every Stop,
+in the one lane that exists for cloud work. The sandbox setup line now runs `vstack trust`.
+Local protection is unchanged: an untrusted repo cloned to your laptop still runs nothing until
+you type it yourself.
+
+**Credentials are no longer exported into your shells.** `install.sh` sourced `secrets.env` into
+`.zshenv` with `set -a`, and the bash lane extended that to `.bashrc` and `.profile`. One token
+reached every child process of every shell: every script in every repo, every package
+postinstall. Every wrapper in `bin/` already loads what it needs. The installer now removes the
+line it previously wrote, and leaves any other spelling alone.
+
+**A destructive-command guard, armed by default.** vstack had no pre-execution interception at
+all, which is a strange gap for a setup that recommends `--bypass-permissions` — bypassing
+permissions is exactly what removes the prompt that would catch `rm -rf /`. Adapted from
+gstack's `careful` skill (MIT, Garry Tan) with two differences: it is always armed rather than
+opt-in per session, and its decisions are tested. Sixteen commands across deny, ask and allow,
+plus a stripped-environment run.
+
+**The pinned bootstrap worked for branches and not tags** — `archive/refs/heads/$REF` 404s for
+`VSTACK_REF=v1.4.0`, the exact value the README tells people to pin. And a no-git install could
+not be converted once git returned, which was the recovery that path itself recommends. It now
+marks its own tarball installs, converts them by moving aside rather than deleting, and refuses
+outright to touch a directory it did not create.
+
+**Skills stopped pointing at skills that are not here.** Six `superpowers:` references across
+three skills instructed the model to invoke tooling this port does not vendor. Check 7 could not
+see them — its token pattern skips the namespace prefix.
+
+**First contact leads with the narrow thing.** The plugin lane is the headline now, with an
+invitation to stop after thirty seconds. The workstation setup follows, labelled as one person's
+whole environment, with the pinned and readable path before the unpinned one-liner. The plugin
+lane also stopped mandating a four-skill chain for every change, which was operating policy in
+the one profile whose job is stripping operating policy.
+
+**New checks.** 22 extended to cover skills as well as scripts. 23 tests the guard's decisions.
+24 fails when the payload moves ahead of the version the manifests declare — which it caught on
+its first run, and which is why this release exists.
+
 ## 1.4.0 — 2026-08-20
 
 An external adversarial audit of 1.3.0 by a different model returned twelve findings and a

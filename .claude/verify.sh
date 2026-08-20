@@ -881,6 +881,36 @@ else
   skip "destructive guard decides correctly" "jq not installed"
 fi
 
+# --- 24. the declared version describes what actually installs -------------------------------
+# Three lanes install three different trees, and only one of them is pinned. `VSTACK_REF=v1.4.0`
+# gets the tag; the unpinned bootstrap and the plugin marketplace both take the default branch.
+# So when the payload moves ahead of the tag while the manifests still name it, a stranger
+# installs something that is not the version it claims to be — and the changelog describes a
+# different artefact than the one they got.
+#
+# The rule is narrow on purpose: it does not demand that HEAD always be a release. It only
+# demands that if a tag exists with the version the manifests declare, the installable payload
+# is identical to it. Between releases you simply bump the version, and the check goes quiet
+# until that version is tagged.
+if command -v git >/dev/null && command -v jq >/dev/null; then
+  mv_=$(jq -r '.version' claude/.claude-plugin/plugin.json 2>/dev/null)
+  if [ -z "$mv_" ]; then
+    bad "declared version matches what installs" "could not read the version from the plugin manifest"
+  elif ! git rev-parse -q --verify "refs/tags/v$mv_" >/dev/null 2>&1; then
+    ok "declared version matches what installs (v$mv_ not yet tagged)"
+  else
+    # Everything a lane actually delivers. Docs, tests and CI are deliberately excluded: they
+    # change without changing what a stranger receives.
+    drift=$(git diff --name-only "v$mv_..HEAD" -- claude/ mcp/ bin/ shell/ conductor/ \
+              install.sh bootstrap.sh overlay.sh uninstall.sh setup-machine.sh 2>/dev/null)
+    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_)" \
+      || bad "declared version matches what installs" \
+             "$(printf 'the manifests say v%s but the payload has moved since that tag:\n%s\nbump the version and changelog it, or the plugin and unpinned lanes ship something v%s never described' "$mv_" "$(printf '%s' "$drift" | sed 's/^/  /' | head -10)" "$mv_")"
+  fi
+else
+  skip "declared version matches what installs" "git or jq not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
