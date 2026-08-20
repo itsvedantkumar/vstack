@@ -26,6 +26,13 @@ planning and implementation chain.
 
 Source: [obra/superpowers](https://github.com/obra/superpowers), MIT.
 
+## Also adapted from Superpowers: a subagent rule, not a skill
+
+`claude/agents/debugger.md` carries a three-failed-fixes stop rule and
+anti-rationalization red flags adapted from obra/superpowers systematic-debugging
+(MIT). This lives in a subagent, not a skill, so it does not add to the skill count
+above and does not change the "2 original" arithmetic in the first line of this file.
+
 ## From Impeccable (1)
 
 `impeccable` — design-director quality bar for frontend work: typography, motion, spacing,

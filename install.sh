@@ -131,7 +131,11 @@ for d in "$SRC"/claude/skills/*/; do
   # not src itself, which would scatter SKILL.md and references/ across the skills root.
   cp -R "${d%/}" "$HOME/.claude/skills/"
 done
-[ -f "$SRC/claude/skills/LICENSE.pstack" ] && run cp "$SRC/claude/skills/LICENSE.pstack" "$HOME/.claude/skills/"
+# The licence and the attribution travel with the skills. Shipping LICENSE.pstack alone left
+# the installed tree claiming one origin for skills that actually come from four.
+for meta in LICENSE.pstack ATTRIBUTION.md; do
+  [ -f "$SRC/claude/skills/$meta" ] && run cp "$SRC/claude/skills/$meta" "$HOME/.claude/skills/"
+done
 [ "$DRY" = 0 ] && find "$HOME/.claude/skills" -name "*.sh" -exec chmod 755 {} + 2>/dev/null
 say "installed  skills ($(find "$SRC"/claude/skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' '))"
 

@@ -1,0 +1,12 @@
+vstack includes the following software licensed under the Apache License, Version 2.0.
+The full license text is at LICENSE.apache-2.0.
+
+impeccable
+Copyright (c) Paul Bakaus
+https://github.com/pbakaus/impeccable
+Adapted for Claude Code as the `impeccable` skill.
+
+agent-browser
+Copyright (c) Vercel Labs
+https://github.com/vercel-labs/agent-browser
+Adapted for Claude Code as the `agent-browser` skill.

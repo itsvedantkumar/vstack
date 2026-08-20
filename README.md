@@ -136,7 +136,7 @@ matching `ls` per directory.
 
 ## The skills
 
-Thirteen workflow skills, each triggered by a situation rather than a command.
+14 workflow skills, each triggered by a situation rather than a command.
 
 | Skill | Fires when |
 |---|---|
@@ -153,6 +153,7 @@ Thirteen workflow skills, each triggered by a situation rather than a command.
 | `ui-iterate` | editing UI files when a dev server runs: screenshot, critique, fix before declaring done |
 | `agent-browser` | screenshotting or driving a dev server when the shared Chrome is unavailable or contended |
 | `impeccable` | building or polishing UI where visual quality matters: typography, motion, spacing, design modes |
+| `component-registry` | about to hand-write a UI component in a React/Tailwind repo |
 
 Eight principles load when the moment matches and apply a rule rather than run a procedure.
 
@@ -324,7 +325,7 @@ true.
 - [MCP servers](mcp/README.md), what ships globally and how to scope one to a project
 - [The auto-trigger test](tests/README.md), how to run and extend it, and how the gate proves
   each of its own checks can fail
-- [Why these skills](docs/skill-selection.md), the fit-and-benefit audit of all 44 pstack
+- [Why these skills](docs/provenance/pstack-audit.md), the fit-and-benefit audit of all 44 pstack
   skills that decided which 18 were worth porting
 - [Changelog](CHANGELOG.md), with the measurements behind each release
 
@@ -334,7 +335,7 @@ true.
 [Superpowers](https://github.com/obra/superpowers), 1 from
 [Impeccable](https://github.com/pbakaus/impeccable) by Paul Bakaus (Apache 2.0), 1 from
 [agent-browser](https://github.com/vercel-labs/agent-browser) by Vercel Labs (Apache 2.0),
-and 1 is original to this repo (`ui-iterate`).
+and 2 are original to this repo (`ui-iterate` and `component-registry`).
 Porting adapted them to Claude Code: Cursor model names mapped to Anthropic ones, `Task` calls to
 the `Agent` tool, and cloud-only parameters to local execution. Per-skill sources and licenses are
 in [ATTRIBUTION.md](claude/skills/ATTRIBUTION.md).
