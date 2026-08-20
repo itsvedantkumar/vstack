@@ -270,7 +270,28 @@ n=$(ls "$CDIR/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -ge "$WANT_AGENTS" ] && ok "subagents ($n)" || bad "subagents" "$n<$WANT_AGENTS"
 echo "── secrets ──"
 [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
-grep -q 'secrets.env' "$HOME/.zshenv" 2>/dev/null && ok "sourced in .zshenv" || bad "zshenv source" "not sourced"
+# Asserts the opposite of what it used to. Sourcing secrets.env from a shell rc exports every
+# credential to every child process of every shell; the wrappers in bin/ load what they need
+# themselves. An install that puts it back is a regression, so this fails on finding it.
+# Two different things can put this line in an rc file, and they deserve different answers.
+# The `set -a` form is the one install.sh used to write: if it is back, that is a regression in
+# this repo and it fails. Any other spelling is a line the user wrote themselves — still a real
+# exposure worth naming, but not this tool's to fail over or to delete.
+_amb_ours=""; _amb_theirs=""
+for _rc in .zshenv .zshrc .bashrc .profile; do
+  [ -f "$HOME/$_rc" ] || continue
+  if grep -q 'set -a && \. "$HOME/.config/agents/secrets.env" && set +a' "$HOME/$_rc" 2>/dev/null; then
+    _amb_ours="$_amb_ours $_rc"
+  elif grep -q 'agents/secrets.env' "$HOME/$_rc" 2>/dev/null; then
+    _amb_theirs="$_amb_theirs $_rc"
+  fi
+done
+if [ -n "$_amb_ours" ]; then
+  bad "credentials exported to shells" "vstack's own export is back in:$_amb_ours — re-run ./install.sh, which removes it"
+else
+  ok "vstack exports no credentials to shells"
+fi
+[ -n "$_amb_theirs" ] && p "your own secrets sourcing" "note:$_amb_theirs sources secrets.env, so every child process of those shells sees your tokens. The wrappers in ~/.config/agents/bin load what they need on their own, so this line is probably not needed."
 for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
 echo "── memory ──"; [ -d "$HOME/.claude-mem" ] && ok "claude-mem store" || bad "claude-mem" "missing"

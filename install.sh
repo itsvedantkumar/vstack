@@ -350,9 +350,35 @@ back "$HOME/.zshenv"
 if [ "$DRY" = 0 ] && ! grep -q '>>> claude-parity env >>>' "$HOME/.zshenv" 2>/dev/null; then
   cat "$SRC/shell/zshenv.snippet" >> "$HOME/.zshenv"
 fi
-if [ "$DRY" = 0 ] && ! grep -q 'agents/secrets.env' "$HOME/.zshenv" 2>/dev/null; then
-  printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/.zshenv"
+# Credentials are NOT exported into your shells, and any earlier line that did is removed.
+#
+# Leaving it behind would mean the fix only reached new machines while every existing install
+# kept leaking. vstack wrote that line, so vstack takes it out — matched exactly, backed up
+# first, and only ever the form this installer produced. A line you wrote yourself that happens
+# to mention secrets.env is not touched.
+if [ "$DRY" = 0 ]; then
+  for rc in .zshenv .zshrc .bashrc .profile; do
+    [ -f "$HOME/$rc" ] || continue
+    grep -q 'set -a && \. "$HOME/.config/agents/secrets.env" && set +a' "$HOME/$rc" 2>/dev/null || continue
+    back "$HOME/$rc"
+    tmp=$(mktemp)
+    grep -vF '[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a' "$HOME/$rc" > "$tmp" && cat "$tmp" > "$HOME/$rc"
+    rm -f "$tmp"
+    say "removed    credential export from ~/$rc (wrappers load their own; backup in $BK)"
+  done
 fi
+
+# Credentials are NOT exported into your shells.
+#
+# This used to source secrets.env with `set -a` into .zshenv, and then — when the bash lane was
+# added — into .bashrc and .profile too, which widened it rather than fixing it. The effect was
+# that filling in a Cloudflare token handed it to every child process of every shell: every
+# script in every repo you cd into, every package postinstall, every tool you try once.
+#
+# Nothing needed it. Every wrapper in bin/ already loads secrets.env itself (see
+# bin/cloudflare-mcp), which is the correct scope: the process that needs the credential reads
+# it, and nothing else sees it. The parity block above stays, because those are CLAUDE_* tuning
+# variables, not secrets.
 
 # bash gets the same environment. The wrapper does not travel — claude-parity.zsh is written
 # in zsh (whence -p, print -r, local -a) and cannot be sourced by bash — but the env snippet
@@ -372,9 +398,6 @@ if [ "$DRY" = 0 ]; then
     if ! grep -q '>>> claude-parity env >>>' "$HOME/$rc" 2>/dev/null; then
       cat "$SRC/shell/zshenv.snippet" >> "$HOME/$rc"
       SHELL_LANES="$SHELL_LANES, $rc"
-    fi
-    if ! grep -q 'agents/secrets.env' "$HOME/$rc" 2>/dev/null; then
-      printf '\n[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a\n' >> "$HOME/$rc"
     fi
   done
   case "${SHELL:-}" in

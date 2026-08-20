@@ -124,8 +124,20 @@ else
 # Cloud workspaces start from a bare Linux sandbox with no ~/.claude, so pull vstack in.
 # Pinned to a reviewed commit so a compromised repo/account cannot push code into every
 # sandbox at once — bump the SHA deliberately when updating vstack.
+#
+# `vstack trust` arms this repo's .claude/verify.sh for the Stop-hook gate. Without it the
+# gate installs and does nothing: verify-gate.sh refuses to execute a repo's verify.sh unless
+# a machine-local trust entry matches its hash, and a fresh sandbox has no such entry. The
+# gate was inert in the one lane that exists for cloud work — installed, wired, and silently
+# skipping on every Stop.
+#
+# Arming it here rather than in verify-gate.sh keeps the local protection intact. Cloning an
+# untrusted repo onto your laptop still runs nothing until you type `vstack trust` yourself.
+# This line is different: it lives in a file you committed, in a disposable sandbox, for a
+# repo you deliberately dispatched work to. That is the consent, and it is visible in the diff.
+#
 # Add this repo's own install step (npm ci, uv sync, ...) to the end of this line.
-setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/__PIN__/bootstrap.sh | bash"
+setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/__PIN__/bootstrap.sh | bash && \"$HOME/.config/agents/bin/vstack\" trust"
 run_mode = "concurrent"
 
 [scripts.run.verify]

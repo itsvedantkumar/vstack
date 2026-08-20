@@ -185,7 +185,11 @@ if want bash-only; then
   out=$(HOME="$H" SHELL=/bin/bash "$SRC/install.sh" 2>&1); rc=$?
   e=""
   grep -q 'ENABLE_PROMPT_CACHING_1H' "$H/.bashrc" 2>/dev/null || e="$e; env snippet missing from .bashrc"
-  grep -q 'agents/secrets.env'       "$H/.bashrc" 2>/dev/null || e="$e; secrets not sourced in .bashrc"
+  # Deliberately the opposite of what this used to assert. The env snippet must reach bash —
+  # that is the tuning that changes behaviour — but credentials must not, because sourcing
+  # secrets.env from an rc file hands every token to every child process of every shell. The
+  # wrappers in bin/ load what they need themselves.
+  grep -q 'agents/secrets.env'       "$H/.bashrc" 2>/dev/null && e="$e; .bashrc exports credentials to every shell"
   printf '%s' "$out" | grep -q 'zsh-only' || e="$e; did not say the wrapper is zsh-only"
   [ "$rc" = 0 ] && [ -z "$e" ] && ok "bash user gets the env lane" || bad "bash user gets the env lane" "exit=$rc$e"
 fi
@@ -556,6 +560,72 @@ if want recover; then
   recover_probe bad-settings  'printf "{\"broken\": " > "$H"/.claude/settings.json'
   [ -z "$e" ] && ok "re-running converges from a damaged install" \
     || bad "re-running converges from a damaged install" "${e#; }"
+fi
+
+# --- the cloud lane's gate must actually gate --------------------------------------------------
+# The overlay case above proves the files land. It did not prove the gate works, and it did not:
+# verify-gate.sh refuses to execute a repo's verify.sh without a machine-local trust entry, and
+# a fresh sandbox has none. So the Stop gate was installed, wired, and silently skipping on every
+# Stop — inert in the one lane that exists for cloud work.
+#
+# This walks the whole sandbox sequence: overlay a repo, install vstack into an empty HOME the
+# way the pinned setup line does, run the trust step that line now performs, break the repo's
+# gate, and require the Stop hook to block. Asserting the decision, not the file list, is the
+# difference between testing that something is installed and testing that it works.
+if want cloud-gate; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "cloud sandbox gate blocks" "git or jq not installed"
+  else
+    T="$ROOT/cloud"; H="$ROOT/cloud-home"; mkdir -p "$T/repo" "$H"
+    git -C "$T/repo" init -q
+    git -C "$T/repo" config user.email t@example.com; git -C "$T/repo" config user.name t
+    printf 'x\n' > "$T/repo/f"; git -C "$T/repo" add -A; git -C "$T/repo" commit -qm init
+    "$SRC/overlay.sh" "$T/repo" >/dev/null 2>&1
+    e=""
+    # TOML escapes the quotes, so the line reads ...bin/vstack\" trust. Match on the command
+    # rather than a quoted fragment.
+    grep -qE 'bin/vstack.*trust' "$T/repo/.conductor/settings.toml" 2>/dev/null \
+      || e="$e; the sandbox setup line does not arm trust"
+    # the sandbox: empty HOME, vstack installed by the pinned bootstrap, then the trust step
+    HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+    printf '#!/usr/bin/env bash\necho "seeded failure"\nexit 1\n' > "$T/repo/.claude/verify.sh"
+    chmod +x "$T/repo/.claude/verify.sh"
+    # before arming, it must skip — that is the local protection working as designed
+    # TMPDIR is scoped to this run. verify-gate.sh caps repeated blocks per session id in a
+    # counter file under TMPDIR, so a test that reuses an id eventually gets a silent exit 0 —
+    # the loop cap doing its job, read as the gate having stopped working.
+    mkdir -p "$ROOT/cloud-tmp"
+    d0=$(printf '{"session_id":"c0"}' | env HOME="$H" TMPDIR="$ROOT/cloud-tmp" CLAUDE_PROJECT_DIR="$T/repo" \
+         bash "$SRC/claude/hooks/verify-gate.sh" 2>/dev/null | jq -r '.decision // "none"' 2>/dev/null)
+    [ "$d0" = none ] || e="$e; an unarmed repo's gate ran without trust (decision=$d0)"
+    ( cd "$T/repo" && HOME="$H" "$H/.config/agents/bin/vstack" trust >/dev/null 2>&1 )
+    d1=$(printf '{"session_id":"c1"}' | env HOME="$H" TMPDIR="$ROOT/cloud-tmp" CLAUDE_PROJECT_DIR="$T/repo" \
+         bash "$SRC/claude/hooks/verify-gate.sh" 2>/dev/null | jq -r '.decision // "none"' 2>/dev/null)
+    [ "$d1" = block ] || e="$e; after arming, a failing gate did not block (decision=$d1)"
+    [ -z "$e" ] && ok "cloud sandbox gate blocks after the setup line arms it" \
+      || bad "cloud sandbox gate blocks after the setup line arms it" "${e#; }"
+  fi
+fi
+
+# --- credentials must not be ambient ------------------------------------------------------------
+# Filling in one token used to hand it to every child process of every shell: every script in
+# every repo, every package postinstall, every tool you try once. The bash lane made it worse by
+# adding .bashrc and .profile to the list. Every wrapper in bin/ already loads what it needs.
+if want no-ambient-secrets; then
+  H="$ROOT/amb"; mkdir -p "$H"
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  e=""
+  for rc in .zshenv .zshrc .bashrc .profile; do
+    [ -f "$H/$rc" ] || continue
+    grep -q 'agents/secrets.env' "$H/$rc" 2>/dev/null && e="$e; $rc exports secrets to every shell"
+  done
+  # the tuning variables are not secrets and must still be there
+  grep -q 'ENABLE_PROMPT_CACHING_1H' "$H/.zshenv" 2>/dev/null || e="$e; the parity env block went missing"
+  # and the wrapper must still be able to reach them itself
+  grep -q 'secrets.env' "$H/.config/agents/bin/cloudflare-mcp" 2>/dev/null \
+    || e="$e; the wrapper no longer loads its own credentials"
+  [ -z "$e" ] && ok "credentials are not exported into shells" \
+    || bad "credentials are not exported into shells" "${e#; }"
 fi
 
 echo
