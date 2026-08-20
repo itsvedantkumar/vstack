@@ -11,8 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The gate needs jq for the JSON checks and the install dry run. plutil does not exist
-      # on Linux, so the launchd check skips itself and says so.
+      # The gate needs jq for the JSON checks and the install dry run.
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
 
@@ -111,8 +110,60 @@ jobs:
       # further cases exercise the curl bootstrap and the plugin marketplace against the
       # published repo. This runner is the environment the matrix exists for — bash by default,
       # no Homebrew, the shape of a cloud VM or a container.
+      - name: Install Claude Code CLI
+        run: |
+          set -u
+          # The npm package is a shim; the real binary arrives as a platform-specific optional
+          # dependency. Installing the shim alone produced a false green for as long as this
+          # step existed: the optional dep never landed, every `claude plugin validate` exited
+          # with "native binary not installed", and check 19's old output parsing read that
+          # error as "no findings" and printed ok. CI validated these manifests exactly zero
+          # times before this was found.
+          #
+          # The reason the optional dep never landed is worth naming, because it will recur:
+          # the shim pins its platform deps to its own version, and the platform packages are
+          # published on a lag. At the time of writing the shim was 2.1.237 and linux-x64 was
+          # 2.1.236, so npm resolved nothing and said nothing. Ask for the platform package by
+          # name at whatever version is actually published, and use the binary it ships — it is
+          # self-contained and needs no shim.
+          npm install -g @anthropic-ai/claude-code || true
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  PKG=linux-x64 ;;
+            Linux-aarch64) PKG=linux-arm64 ;;
+            Darwin-arm64)  PKG=darwin-arm64 ;;
+            Darwin-x86_64) PKG=darwin-x64 ;;
+            *)             PKG="" ;;
+          esac
+          if [ -n "$PKG" ]; then
+            PREFIX="$RUNNER_TEMP/ccbin"
+            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG" || true
+            BIN="$PREFIX/node_modules/@anthropic-ai/claude-code-$PKG/claude"
+            if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
+              sudo ln -sf "$BIN" /usr/local/bin/claude
+            fi
+          fi
+          # Report rather than fail. Check 19 runs its own two-way control and skips with a
+          # reason when the validator is unusable, so an unavailable CLI degrades to a visible
+          # skip in the gate output instead of a red run over something this repo does not own.
+          claude --version || echo "::warning::claude CLI unusable on this runner; check 19 will skip"
+
       - name: Install matrix (all environments, plus the network lanes)
         run: ./tests/install-matrix.sh
+
+      # The marketplace case is allowed to skip when there is no CLI, which meant it skipped in
+      # every job: the CLI was installed only in the verify job, and the matrix ran only in the
+      # others. One of the three advertised install lanes was therefore unproven while every
+      # required check stayed green. The CLI is installed above on purpose, so a skip here is a
+      # regression, not an environment fact.
+      - name: The marketplace lane actually ran
+        run: |
+          ./tests/install-matrix.sh marketplace > "$RUNNER_TEMP/mkt.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/mkt.txt"
+          if grep -q '^skip  plugin marketplace lane' "$RUNNER_TEMP/mkt.txt"; then
+            echo "marketplace case skipped on a runner where the CLI was installed on purpose"
+            exit 1
+          fi
+          grep -q '^ok    plugin marketplace lane' "$RUNNER_TEMP/mkt.txt"
 
       - name: install.sh, for real
         run: ./install.sh

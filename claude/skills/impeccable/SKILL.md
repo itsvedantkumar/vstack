@@ -12,7 +12,7 @@ Core principles:
 
 ## Setup
 
-1. This vendored copy ships the playbooks only — upstream's `scripts/` (including `context.mjs`) is deliberately not included, so skip any `node .../scripts/...` step here or in the references. Instead, gather the same context by hand once per session: read `PRODUCT.md` and `DESIGN.md` if the project has them, plus the reference playbook matching the surface you are working on (and `reference/ios.md`/`reference/android.md` for native platforms).
+1. This vendored copy ships the playbooks only — upstream's `scripts/` (including `context.mjs`) is deliberately not included. **Every `node .../scripts/*.mjs` step in this skill and its references is unavailable here: the file does not exist and the command will fail. Never run one; do the described work directly instead.** That makes `pin`/`unpin`, the `hooks` detector, `doctor`'s automated fixes and `live`'s capture loop manual or unavailable in this port — say so plainly rather than attempting them. Instead, gather the same context by hand once per session: read `PRODUCT.md` and `DESIGN.md` if the project has them, plus the reference playbook matching the surface you are working on (and `reference/ios.md`/`reference/android.md` for native platforms).
 2. Before acting, load the one playbook that owns the request: the Commands table's reference for an explicit or clearly implied sub-command, or [reference/new-work.md](reference/new-work.md) for a new surface or replacement visual world. Then inspect the target and at least one representative source of incumbent visual truth (tokens, theme, CSS, component, or asset) before editing.
 3. After analysis and direction are resolved, load [reference/craft-floor.md](reference/craft-floor.md) immediately before editing UI. It carries the quality floor, the absolute bans, and the reflexes no detector catches. Do not load it for planning-only work.
 
@@ -70,7 +70,7 @@ Routing:
 
 After init writes PRODUCT.md, resume without rerunning `context.mjs`; init loads the native platform reference itself when the platform it recorded is `ios`, `android`, or `adaptive`.
 
-**Pin / Unpin:** `node .claude/skills/impeccable/scripts/pin.mjs <pin|unpin> <command>` creates or removes a standalone `/<command>` shortcut. Report the script's result concisely; relay stderr verbatim on error.
+**Pin / Unpin:** upstream does this with `scripts/pin.mjs`, which this port does not vendor. Tell the user the shortcut cannot be created here and point them at upstream if they want it.
 
 **Hooks:** `/impeccable hooks <on|off|status|ignore-rule|ignore-file|ignore-value|reset>` manages the design detector hook for this project (auto-runs the detector after UI file edits and surfaces findings). Load [reference/hooks.md](reference/hooks.md) when the user invokes it with any argument.
 

@@ -5,7 +5,7 @@ commands, and the session hook that routes a situation to the right skill withou
 slash command.
 
 [![verify](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml/badge.svg)](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-blue.svg)](LICENSE)
 [![plugin](https://img.shields.io/badge/claude%20plugin-vstack-6f42c1.svg)](#install)
 
 Ask for a README and the writing skills load. Hand it a TypeScript file and the type-safety
@@ -330,8 +330,10 @@ flag exists for automation, and anything automated enough to use it is back to t
 
 **macOS, Linux and Windows all run in CI on every push.** The install matrix runs on
 `ubuntu-latest`, `macos-latest` and `windows-latest`, and Linux additionally installs for real
-and fires the hooks. Windows means Git Bash or WSL, which is what `shell: bash` selects on a
-Windows runner and what a Windows user of these scripts actually has. Native PowerShell is not
+and fires the hooks. Windows means Git Bash: that is what `shell: bash` selects on a Windows runner, and it is what
+CI actually exercises. WSL is Linux and the Linux jobs cover that shape, but no job runs inside
+WSL itself and none tests a drive letter other than C:, so treat those as untested rather than
+supported. Native PowerShell is not
 a target: everything here is a shell script and none of it is being ported.
 
 Two things are still macOS-only, and neither is the installer. Conductor is a Mac app, so the

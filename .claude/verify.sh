@@ -279,8 +279,13 @@ if command -v jq >/dev/null; then
       printf '%s' "$prog" | grep -qE "^ *$dead: *\[" \
         && errs="$errs\n$dead: back in the install.sh hook rebuild — it exists only to serve a notifier this setup dropped"
     done
-    grep -qi 'superset' install.sh \
-      && errs="$errs\ninstall.sh still references the retired Superset notifier"
+    # Test for the wiring, not for the word. The first version of this grepped install.sh for
+    # "superset" and then failed on the jq filter whose whole job is to strip legacy notifier
+    # entries out of a user's existing settings — the guard fired on the code that removes the
+    # thing it was guarding against. What must not come back is a notifier command being
+    # constructed and attached to hook events.
+    grep -qE '^[[:space:]]*NOTIFY=|command:\$n\b' install.sh \
+      && errs="$errs\ninstall.sh wires a notifier command into the hook rebuild again"
   fi
 
   # Lane 3 — plugin marketplace. Deliberately narrow, and asserted as an exact set rather than
@@ -754,6 +759,51 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
 else
   skip "RETIRED names only retired keys" "jq or git not installed"
 fi
+
+# --- 22. a skill never tells the model to run a file the port does not ship --------------------
+# The impeccable skill's body is upstream's, and it names 19 helper scripts across 42 places
+# that this port deliberately does not vendor. That is disclosed in ATTRIBUTION.md, but
+# disclosure is not the same as safety: the model reads the body, not the attribution, and one
+# line was still a flat imperative to execute a missing file. Check 20 covers ~/.claude paths
+# in prose; nothing looked inside a skill at the scripts it tells you to run.
+#
+# The rule is not "never reference a script you do not ship" — a faithful port of someone
+# else's playbook will mention their tooling. It is that a skill doing so must say, in its own
+# body, that those steps are unavailable. A reader of the skill has to learn it from the skill.
+errs=""
+for d in claude/skills/*/; do
+  sk="$d/SKILL.md"; [ -f "$sk" ] || continue
+  name=$(basename "$d")
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # Command-shaped references only: at the start of a line, in backticks, or after an
+    # interpreter. A skill that merely names a script as an example — show-me-your-work's
+    # sample decision log cites one as illustrative evidence, and says so — is not telling
+    # anyone to run anything.
+    refs=$(grep -hE '(^[[:space:]]*|`|node |bash |sh |python3? |\./)[A-Za-z0-9_./-]*scripts/[A-Za-z0-9_-]+\.(mjs|js|py|sh)' "$f" 2>/dev/null \
+           | grep -oE '[A-Za-z0-9_./-]*scripts/[A-Za-z0-9_-]+\.(mjs|js|py|sh)' | sort -u)
+    [ -n "$refs" ] || continue
+    missing=""
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      base=${r##*scripts/}
+      [ -e "$d/scripts/$base" ] || missing="$missing $base"
+    done <<EOF
+$refs
+EOF
+    [ -n "$missing" ] || continue
+    # The notice has to reach whoever is reading. It counts in the file carrying the commands,
+    # or in SKILL.md, which every reader passes through first.
+    if ! grep -qiE 'unavailable here|not (included|vendored)|Not vendored here' "$f" \
+       && ! grep -qiE 'unavailable here|not (included|vendored)' "$sk"; then
+      errs="$errs\n${f#claude/skills/}: runs scripts it does not ship ($missing ) with no notice"
+    fi
+  done <<EOF
+$(find "$d" -type f -name '*.md' | sort)
+EOF
+done
+[ -z "$errs" ] && ok "skills disclose scripts they do not ship" \
+  || bad "skills disclose scripts they do not ship" "$(printf '%b' "$errs")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check

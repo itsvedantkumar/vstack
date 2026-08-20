@@ -330,12 +330,23 @@ note "== summary"
 
 # Only the tools vstack cannot work without decide the exit code. A missing nuclei is not a
 # broken machine; a missing jq or git is.
-REQUIRED="git jq"
+#
+# `claude` belongs on that list and was not on it, which made this report success for a machine
+# that cannot run the product at all. bootstrap.sh treats a zero exit as "tools are fine" and
+# carries on to modify config and shell startup files, so a stranger could be told everything
+# worked and then find there is no agent to run. The README promises a working setup including
+# the CLI; this is the check that has to mean it.
+REQUIRED="git jq claude"
 missing=""
 for r in $REQUIRED; do command -v "$r" >/dev/null 2>&1 || missing="$missing $r"; done
 if [ -n "$missing" ] && [ "$DRY" = 0 ]; then
   note ""
   note "REQUIRED TOOLS MISSING:$missing"
+  case "$missing" in
+    *claude*) note "  the Claude Code CLI is the product this configures; without it the install"
+              note "  would leave you config for an agent you cannot run."
+              note "  install: npm install -g @anthropic-ai/claude-code" ;;
+  esac
   exit 1
 fi
 

@@ -31,7 +31,13 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # beside it at ~/.claude.json when it is not.
 CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON="$HOME/.claude.json"; fi
-BK="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
+# Second-resolution timestamps collide, and mkdir -p is happy to reuse the directory. Two
+# installs in the same second therefore shared one backup, and the second run overwrote the
+# first run's copies with files vstack had just installed — destroying the only record of what
+# the user had before. Automation, retries and CI hit this easily. Claim the directory
+# exclusively and step to a suffix when it is taken.
+BK_BASE="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
+BK="$BK_BASE"
 DRY=0
 WITH_DEPS=0
 BYPASS=0
@@ -63,7 +69,18 @@ HAVE_JQ=1
 command -v jq >/dev/null || { HAVE_JQ=0; echo "warn: jq not found — settings and MCP merge will be skipped (brew install jq / apt install jq)" >&2; }
 
 if [ "$DRY" = 0 ]; then
-  mkdir -p "$BK" "$CDIR/hooks" "$CDIR/agents" "$CDIR/commands" \
+  # Claim the backup directory exclusively. `mkdir -p` is happy to reuse one, and the timestamp
+  # only has second resolution, so two installs in the same second shared a directory and the
+  # second overwrote the first's copies with files vstack had just installed — destroying the
+  # only record of what the user had before. Automation and retries hit this easily.
+  mkdir -p "$(dirname "$BK_BASE")"
+  bn=1
+  until mkdir "$BK" 2>/dev/null; do
+    BK="$BK_BASE-$bn"
+    bn=$((bn+1))
+    [ "$bn" -gt 500 ] && { echo "error: cannot create a backup dir under $(dirname "$BK_BASE")" >&2; exit 1; }
+  done
+  mkdir -p "$CDIR/hooks" "$CDIR/agents" "$CDIR/commands" \
            "$CDIR/skills" \
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
   chmod 700 "$HOME/.config/agents/backups"
@@ -211,32 +228,67 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   # No jq: never hand-merge JSON. Write the portable settings only when there is nothing
   # to lose, otherwise leave the existing file untouched.
   if [ ! -s "$US" ] || [ "$(cat "$US")" = "{}" ]; then
-    cp "$SRC/claude/settings.json" "$US"
-    say "wrote      ~/.claude/settings.json (no jq — hook paths stay relative)"
+    # Rewrite the hook paths on the way in. The shipped file addresses hooks as
+    # $CLAUDE_PROJECT_DIR/.claude/hooks/... because that is correct for the overlay lane, where
+    # the hooks live in the repo. At user scope there is no project dir, so copying the file
+    # verbatim produced an install that reported success and wired every hook to a path that
+    # does not exist — exit 127 on every session start, every stop, every tool failure. The
+    # gate, the routing and the formatter were all inert, on exactly the jq-less sandboxes this
+    # branch exists to support.
+    #
+    # It is a textual substitution rather than a JSON edit, which is the only honest option
+    # without jq, and it is safe here because the target is a file this repo controls.
+    sed "s|\$CLAUDE_PROJECT_DIR/.claude/hooks|$CDIR/hooks|g" \
+      "$SRC/claude/settings.json" > "$US"
+    say "wrote      $US (no jq — hook paths rewritten to $CDIR/hooks; no statusline, no MCP merge)"
   else
     say "skipped    settings merge (no jq — existing settings left untouched)"
   fi
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
+  # Hooks and skillOverrides are merged by ownership, not replaced wholesale.
+  #
+  # Replacing them was silent destruction. A user with a Notification hook, a PreToolUse policy
+  # or security hook, or a skillOverride for a skill of their own lost every one of them on
+  # install — no prompt, no mention in the output, just a backup they had no reason to know they
+  # needed. The wholesale replace existed to stop overrides for deleted skills lingering
+  # forever, which is a real problem, but the cure removed configuration this repo does not own.
+  #
+  # Ownership is decided by what a hook command points at: anything under this install's hooks
+  # directory is ours to rebuild, and anything else is theirs to keep. Legacy notifier entries
+  # are dropped by name, since the integration they served is gone.
+  #
+  # skillOverrides merge with ours winning on collision. A stale entry naming a skill nobody
+  # ships is inert — Claude Code ignores it — and losing a user's override is not.
   jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" '
     ((.[1] | del(.hooks)) as $portable
+      | (.[0].hooks // {}) as $userhooks
+      | (.[0].skillOverrides // {}) as $userso
+      | {
+          SessionStart: [
+            { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] } ],
+          UserPromptSubmit: [
+            { hooks: [ {type:"command", command:($h+"/inject-session-context.sh")} ] } ],
+          PostToolUse: [
+            { matcher:"Edit|Write|MultiEdit",
+              hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
+          Stop: [
+            { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] } ],
+          PostToolUseFailure: [
+            { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] } ]
+        } as $ours
+      | ($userhooks
+          | with_entries(.value |= map(select(
+              [.hooks[]?.command]
+              | map(test($h; "x") or test("SUPERSET_HOME_DIR"))
+              | any | not )))
+          | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
-      | .skillOverrides = ($portable.skillOverrides // {})
-      | delpaths([$retired[] | [.]]))
-    | .hooks = {
-        SessionStart: [
-          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh"), statusMessage:"context"} ] } ],
-        UserPromptSubmit: [
-          { hooks: [ {type:"command", command:($h+"/inject-session-context.sh")} ] } ],
-        PostToolUse: [
-          { matcher:"Edit|Write|MultiEdit",
-            hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
-        Stop: [
-          { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] } ],
-        PostToolUseFailure: [
-          { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] } ]
-      }
-    | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3}
+      | .skillOverrides = ($userso + ($portable.skillOverrides // {}))
+      | delpaths([$retired[] | [.]])
+      | .hooks = (reduce ($ours | to_entries[]) as $e
+                   ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
+      | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3})
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
   if [ "$BYPASS" = 1 ]; then

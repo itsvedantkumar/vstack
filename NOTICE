@@ -10,3 +10,16 @@ agent-browser
 Copyright (c) Vercel Labs
 https://github.com/vercel-labs/agent-browser
 Adapted for Claude Code as the `agent-browser` skill.
+
+--------------------------------------------------------------------------------
+
+MIT-licensed work is vendored here too, and MIT requires its copyright and
+permission notices travel with it. Those are in LICENSE.mit-upstream
+(obra/superpowers and ehmo/platform-design-skills) and in
+claude/skills/LICENSE.pstack (pstack).
+
+Modifications: every vendored skill was adapted for Claude Code — model names
+mapped to Anthropic's, `Task` calls to the `Agent` tool, cloud-only parameters to
+local execution, and frontmatter trimmed to this repo's name + description
+convention. The impeccable skill vendors SKILL.md and its reference files only,
+without the upstream repo's slash commands, subagents or helper scripts.

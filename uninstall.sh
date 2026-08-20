@@ -99,10 +99,23 @@ restore_pairs() {
       printf '%s|%s\n' "$f" "$HOME/${f#$BK/files/}"
     done
   fi
+  # files_abs/ holds anything install.sh backed up from outside $HOME — which is everything
+  # under a CLAUDE_CONFIG_DIR pointed elsewhere. It records the full path, so it restores to
+  # the exact path it came from rather than being reinterpreted as HOME-relative.
+  #
+  # This was missing, and the omission was worse than a no-op: the loop below treated files_abs
+  # as a legacy flat name, mapped it under $HOME, and the removal pass then deleted the live
+  # external file. An external-config uninstall destroyed the user's CLAUDE.md and left the only
+  # copy in a tree they had no reason to look in.
+  if [ -d "$BK/files_abs" ]; then
+    find "$BK/files_abs" -type f | while IFS= read -r f; do
+      printf '%s|%s\n' "$f" "${f#$BK/files_abs}"
+    done
+  fi
   for e in "$BK"/*; do
     [ -e "$e" ] || continue
     n=$(basename "$e")
-    [ "$n" = "files" ] && continue
+    case "$n" in files|files_abs) continue ;; esac
     printf '%s|%s\n' "$e" "$(map_target "$n")"
   done
 }
@@ -152,13 +165,25 @@ plan_file_removal() { # <installed-path> <repo-source-or-empty>
   tgt="$1"; src="${2:-}"
   [ -e "$tgt" ] || return 0
   [ -L "$tgt" ] && return 0
-  [ -e "$BK/files/${tgt#"$HOME"/}" ] && return 0   # backup has a prior version; restore covers it
+  # Backup lookup follows the same split install.sh used when writing: HOME-relative under
+  # files/, full path under files_abs/. Checking only the first meant an external config file
+  # never looked backed up, so it was classified as removable and deleted.
+  case "$tgt" in
+    "$HOME"/*) [ -e "$BK/files/${tgt#"$HOME"/}" ] && return 0 ;;
+    *)         [ -e "$BK/files_abs$tgt" ] && return 0 ;;
+  esac
   if [ -n "$src" ] && [ -e "$src" ] && ! cmp -s "$src" "$tgt"; then
-    KEPT_EDITED="$KEPT_EDITED $tgt"
+    KEPT_EDITED="$KEPT_EDITED$tgt
+"
     return 0
   fi
   echo "remove   $tgt  (installed by vstack, not present in backup)"
-  FILE_REMOVE_LIST="$FILE_REMOVE_LIST $tgt"
+  # Newline-delimited, not space-delimited. These hold absolute paths, and a home directory
+  # with a space in it split every one of them into fragments that matched nothing — so an
+  # uninstall under such a home removed the skills and left every hook, command, agent and
+  # wrapper in place while printing "restore complete".
+  FILE_REMOVE_LIST="$FILE_REMOVE_LIST$tgt
+"
 }
 for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$CDIR/hooks/$(basename "$f")" "$f"; done
 for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$CDIR/agents/$(basename "$f")" "$f"; done
@@ -171,7 +196,7 @@ plan_file_removal "$CDIR/skills/ATTRIBUTION.md"        "$SRC/claude/skills/ATTRI
 plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh" "$SRC/shell/claude-parity.zsh"
 if [ -n "$KEPT_EDITED" ]; then
   echo "keeping  files you have edited since install (not removing, no backup holds your version):"
-  for k in $KEPT_EDITED; do echo "         $k"; done
+  printf '%s' "$KEPT_EDITED" | while IFS= read -r k; do [ -n "$k" ] && echo "         $k"; done
 fi
 
 if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ]; then
@@ -215,7 +240,8 @@ for s in $REMOVE_LIST; do
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] && rm -rf "$tgt"
 done
-for tgt in $FILE_REMOVE_LIST; do
+printf '%s' "$FILE_REMOVE_LIST" | while IFS= read -r tgt; do
+  [ -n "$tgt" ] || continue
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] && rm -f "$tgt"
 done

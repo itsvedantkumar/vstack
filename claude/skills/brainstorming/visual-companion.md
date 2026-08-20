@@ -30,6 +30,12 @@ The server watches a directory for HTML files and serves the newest one to the b
 
 **Content fragments vs full documents:** If your HTML file starts with `<!DOCTYPE` or `<html`, the server serves it as-is (just injects the helper script). Otherwise, the server automatically wraps your content in the frame template — adding the header, CSS theme, connection status, and all interactive infrastructure. **Write content fragments by default.** Only write full documents when you need complete control over the page.
 
+> **Not vendored here.** This port ships the playbook only; upstream's `scripts/` directory —
+> `start-server.sh`, `stop-server.sh`, `helper.js` — is not included, so every command below
+> that invokes one is unavailable and will fail. Treat this file as a description of the
+> companion's behaviour, not as steps to run. Offer the user the equivalent by hand (write the
+> HTML, serve it with any static server they already have) or point them at upstream.
+
 ## Starting a Session
 
 ```bash

@@ -129,7 +129,16 @@ if want spaces; then
   H="$ROOT/home with spaces"; mkdir -p "$H"
   out=$(HOME="$H" "$SRC/install.sh" 2>&1); rc=$?
   e=$(assert_install spaces "$H/.claude" "$H")
-  [ "$rc" = 0 ] && [ -z "$e" ] && ok "space in \$HOME" || bad "space in \$HOME" "exit=$rc$e"
+  # Install and uninstall were separate cases, so a home path with a space was only ever proven
+  # to install. It did not uninstall: the removal lists held absolute paths joined by spaces,
+  # every one split into fragments matching nothing, and the run removed the skills, left every
+  # hook, command, agent and wrapper in place, and printed "restore complete".
+  HOME="$H" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
+  for leftover in hooks/verify-gate.sh commands/ship.md agents/worker.md; do
+    [ -e "$H/.claude/$leftover" ] && e="$e; uninstall left $leftover behind"
+  done
+  [ -e "$H/.config/agents/bin/vstack" ] && e="$e; uninstall left the bin wrappers behind"
+  [ "$rc" = 0 ] && [ -z "$e" ] && ok "space in \$HOME (install and uninstall)" || bad "space in \$HOME" "exit=$rc$e"
 fi
 
 # --- no jq ---------------------------------------------------------------------------------------
@@ -147,7 +156,23 @@ if want no-jq; then
   [ "$(count_dirs "$H/.claude/skills")" = "$NSK" ] || e="$e; skills not installed without jq"
   [ "$(count_files "$H/.claude/hooks" '*.sh')" = "$NHK" ] || e="$e; hooks not installed without jq"
   printf '%s' "$out" | grep -q 'jq not found' || e="$e; did not warn about missing jq"
-  [ "$rc" = 0 ] && [ -z "$e" ] && ok "no jq (degrades, warns)" || bad "no jq" "exit=$rc$e"
+  # Copying the hook files is not the same as wiring them. The shipped settings.json addresses
+  # hooks as $CLAUDE_PROJECT_DIR/... because that is right for the overlay lane; at user scope
+  # there is no project dir, so a verbatim copy produced an install that reported success and
+  # exited 127 on every hook. This case checked that the files arrived and called it a pass,
+  # which is exactly the shape of a test that measures the wrong half of the claim.
+  cmd=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
+        "$H/.claude/settings.json" 2>/dev/null)
+  case "$cmd" in
+    *CLAUDE_PROJECT_DIR*) e="$e; hook command still points at \$CLAUDE_PROJECT_DIR" ;;
+    "") e="$e; could not read the configured hook command" ;;
+    *) proj=$(mktemp -d)
+       hout=$(printf '{"hook_event_name":"SessionStart"}' | HOME="$H" CLAUDE_PROJECT_DIR="$proj" bash -c "$cmd" 2>&1); hrc=$?
+       [ "$hrc" = 0 ] || e="$e; configured hook exits $hrc when run"
+       [ -n "$hout" ] || e="$e; configured hook produced no output"
+       rm -rf "$proj" ;;
+  esac
+  [ "$rc" = 0 ] && [ -z "$e" ] && ok "no jq (degrades, warns, hooks still fire)" || bad "no jq" "exit=$rc$e"
 fi
 
 # --- a bash user ----------------------------------------------------------------------------------
@@ -228,7 +253,10 @@ if want existing-config; then
   cat > "$H/.claude/settings.json" <<'J'
 {"theirOwnKey":"keep me","theme":"dark","cleanupPeriodDays":99,
  "permissions":{"allow":["Bash(ls:*)"]},
- "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"their-hook.sh"}]}]}}
+ "skillOverrides":{"my-private-skill":"off"},
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"their-hook.sh"}]}],
+          "Notification":[{"hooks":[{"type":"command","command":"/usr/bin/true"}]}],
+          "Stop":[{"hooks":[{"type":"command","command":"/their/own-stop.sh"}]}]}}
 J
   cat > "$H/.claude.json" <<'J'
 {"mcpServers":{"their-server":{"type":"stdio","command":"their-mcp","args":["--flag"]}},
@@ -252,6 +280,21 @@ J
     # vstack's own MCP servers must arrive alongside theirs, not instead of them
     [ "$(jq -r '.mcpServers | keys | length' "$H/.claude.json")" -ge 2 ] \
       || e="$e; vstack's MCP servers did not merge in"
+    # The half this test used to seed and then never look at. install.sh replaced .hooks and
+    # .skillOverrides wholesale, so a user's notification, policy or security hooks and their
+    # own skill controls were destroyed on install — and this case printed ok while doing it.
+    [ "$(jq -r '.skillOverrides["my-private-skill"] // "GONE"' "$H/.claude/settings.json")" = "off" ] \
+      || e="$e; their skillOverride was replaced"
+    [ "$(jq -r '.skillOverrides | keys | length' "$H/.claude/settings.json")" -gt 17 ] \
+      || e="$e; vstack's own overrides did not merge in alongside theirs"
+    [ "$(jq -r 'if .hooks.Notification then "kept" else "GONE" end' "$H/.claude/settings.json")" = kept ] \
+      || e="$e; their Notification hook was removed"
+    [ "$(jq -r '.hooks.PreToolUse[0].hooks[0].command // "GONE"' "$H/.claude/settings.json")" = "their-hook.sh" ] \
+      || e="$e; their PreToolUse hook was removed"
+    [ -n "$(jq -r '[.hooks.Stop[].hooks[].command] | map(select(test("own-stop"))) | .[0] // ""' "$H/.claude/settings.json")" ] \
+      || e="$e; their Stop hook was removed"
+    [ -n "$(jq -r '[.hooks.Stop[].hooks[].command] | map(select(test("verify-gate"))) | .[0] // ""' "$H/.claude/settings.json")" ] \
+      || e="$e; vstack's own Stop hook is missing"
   fi
   # anything overwritten must be recoverable, or "we back everything up" is not true
   bk=$(find "$H/.config/agents/backups" -name 'settings.json' -path '*files*' 2>/dev/null | head -1)
@@ -304,6 +347,69 @@ if want marketplace; then
       [ -f "$pd/ATTRIBUTION.md" ] || e="$e; ATTRIBUTION.md missing from the plugin payload"
     fi
     [ -z "$e" ] && ok "plugin marketplace lane" || bad "plugin marketplace lane" "${e#; }"
+  fi
+fi
+
+# --- uninstalling an external config dir ----------------------------------------------------------
+# With CLAUDE_CONFIG_DIR outside $HOME there is no home-relative form for those paths, so
+# install.sh records them under files_abs/ with their full path. uninstall.sh did not read that
+# directory at all: it treated it as a legacy flat name, mapped it under $HOME, and then
+# classified the live external files as vstack's to delete. An uninstall destroyed the user's
+# real CLAUDE.md and left the only copy somewhere they had no reason to look.
+if want external-uninstall; then
+  H="$ROOT/extun"; C="$ROOT/extun-cfg"; mkdir -p "$H" "$C"
+  printf 'ORIGINAL EXTERNAL CLAUDE\n' > "$C/CLAUDE.md"
+  printf '{"userOnly":"keep"}\n'      > "$C/settings.json"
+  HOME="$H" CLAUDE_CONFIG_DIR="$C" "$SRC/install.sh" >/dev/null 2>&1
+  HOME="$H" CLAUDE_CONFIG_DIR="$C" "$SRC/uninstall.sh" --yes >/dev/null 2>&1; rc=$?
+  e=""
+  grep -q 'ORIGINAL EXTERNAL CLAUDE' "$C/CLAUDE.md" 2>/dev/null \
+    || e="$e; the original CLAUDE.md was not restored to its own path"
+  grep -q 'userOnly' "$C/settings.json" 2>/dev/null \
+    || e="$e; the original settings.json was not restored"
+  [ -e "$C/hooks/verify-gate.sh" ] && e="$e; vstack hooks left in the external config dir"
+  [ "$rc" = 0 ] && [ -z "$e" ] && ok "external config dir restores to its own path" \
+    || bad "external config dir restores to its own path" "exit=$rc$e"
+fi
+
+# --- two installs in the same second ---------------------------------------------------------------
+# Backup directories are named to the second and were created with mkdir -p, which happily
+# reuses one. The second run then overwrote the first run's copies with files vstack had just
+# installed, destroying the only record of what was there before. Retries and automation hit
+# this without trying.
+if want backup-collision; then
+  H="$ROOT/bkcol"; mkdir -p "$H/.claude"
+  printf 'ORIGINAL USER CLAUDE\n' > "$H/.claude/CLAUDE.md"
+  SHIM="$ROOT/date-shim"; mkdir -p "$SHIM"
+  printf '#!/bin/sh\nif [ "$1" = "+%%Y%%m%%d-%%H%%M%%S" ]; then echo 20260101-000000; else exec /bin/date "$@"; fi\n' > "$SHIM/date"
+  chmod +x "$SHIM/date"
+  PATH="$SHIM:$PATH" HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  PATH="$SHIM:$PATH" HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  e=""
+  n=$(find "$H/.config/agents/backups" -maxdepth 1 -type d -name 'install-*' 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -ge 2 ] || e="$e; two same-second installs produced $n backup dir(s)"
+  grep -q 'ORIGINAL USER CLAUDE' "$H/.config/agents/backups/install-20260101-000000/files/.claude/CLAUDE.md" 2>/dev/null \
+    || e="$e; the first run's backup was overwritten by the second"
+  [ -z "$e" ] && ok "same-second installs keep separate backups" \
+    || bad "same-second installs keep separate backups" "${e#; }"
+fi
+
+# --- bootstrap refuses to discard local work ---------------------------------------------------------
+# The documented rerun did `git reset --hard`, so anyone who had edited the managed checkout —
+# or pointed VSTACK_DIR at a checkout with work in it — lost tracked changes with no warning,
+# bypassing the review that `vstack update` performs.
+if want bootstrap-dirty; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "bootstrap refuses a dirty checkout" "git not installed"
+  else
+    H="$ROOT/btd"; V="$H/.vstack"; mkdir -p "$H"
+    git clone -q "$SRC" "$V" 2>/dev/null
+    printf '\nLOCAL USER EDIT\n' >> "$V/README.md"
+    HOME="$H" VSTACK_DIR="$V" bash "$SRC/bootstrap.sh" --skip-deps >/dev/null 2>&1; rc=$?
+    e=""
+    [ "$rc" = 0 ] && e="$e; bootstrap proceeded over a dirty checkout instead of refusing"
+    grep -q 'LOCAL USER EDIT' "$V/README.md" 2>/dev/null || e="$e; the local edit was discarded"
+    [ -z "$e" ] && ok "bootstrap refuses a dirty checkout" || bad "bootstrap refuses a dirty checkout" "${e#; }"
   fi
 fi
 

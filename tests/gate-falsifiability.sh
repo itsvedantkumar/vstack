@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -65,6 +65,7 @@ files_for(){ case "$1" in
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
+  22)  printf 'claude/skills/swarm/SKILL.md' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -92,6 +93,7 @@ label_for(){ case "$1" in
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
+  22)  printf 'skills disclose scripts they do not ship' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -119,8 +121,10 @@ exit 7
   9b) printf '\nexit 4\n' >> overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
   11) # drop the PostToolUse key while PostToolUseFailure stays: the exact shape the old
-      # substring grep could not see
-      perl -0pi -e 's/^        PostToolUse: \[\n.*?\n.*?\n//m' install.sh ;;
+      # substring grep could not see. Indentation-tolerant on purpose — this row silently
+      # stopped mutating anything when the merge program was reindented, and a mutation that
+      # lands nowhere reports the check as unfalsifiable while proving nothing about it.
+      perl -0pi -e 's/^[ ]*PostToolUse: \[\n.*?\n.*?\n//m' install.sh ;;
   12) sed -i.t 's/| Commands | [0-9]* |/| Commands | 99 |/' README.md && rm -f README.md.t ;;
   13) sed -i.t 's/"version": "[^"]*"/"version": "9.9.9"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
@@ -154,6 +158,9 @@ exit 0
   21) # the exact list that was nearly shipped: Claude Code's own sandbox setting, named as if
       # it were vstack's to delete
       sed -i.t "s/^RETIRED='\[\]'/RETIRED='[\"sandbox\"]'/" install.sh && rm -f install.sh.t ;;
+  22) # a skill telling the model to run a helper the port does not vendor, with no notice —
+      # the shape that shipped in impeccable and in brainstorming's visual companion
+      printf '\n```bash\nnode scripts/not-vendored-probe.mjs --run\n```\n' >> claude/skills/swarm/SKILL.md ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"
