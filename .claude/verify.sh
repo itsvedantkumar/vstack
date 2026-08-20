@@ -595,6 +595,64 @@ else
   skip "plugin manifests valid" "claude CLI not installed"
 fi
 
+# --- 20. every installed path named in prose is one install.sh actually creates ----------------
+# The `/bootstrap` command told the model to run `~/.claude/scripts/bootstrap-claude-project.sh`.
+# No such script was ever in this repo and install.sh never wrote one. It worked on the author's
+# machine only because a pre-vstack copy happened to survive there, so the command was broken for
+# every other human on earth and nothing noticed for months.
+#
+# This is the same defect class as the stale `orchestrate.md` — prose and installed tree
+# disagreeing — just pointing the other way. Check 12 counts things; nothing read the paths back.
+# A referenced path either maps to something in this repo that install.sh copies, or it is
+# runtime state; anything else is a promise the installer does not keep.
+# Every ~ below is single-quoted on purpose. An unquoted tilde in a `case` pattern or a `${x#...}`
+# prefix is expanded to $HOME before the match, so the first draft of this check compared
+# "~/.claude/CLAUDE.md" against "/Users/<me>/.claude/CLAUDE.md", matched nothing, and reported
+# every path in the repo as unmapped. The check was loud and completely wrong.
+runtime_path(){ # paths that exist at runtime but are created by Claude Code or by use, not install
+  case "$1" in
+    '~/.claude'|'~/.claude.json'|'~/.claude/settings.json'|'~/.claude/settings.local.json') return 0 ;;
+    '~/.claude/projects'*|'~/.claude/plugins'*|'~/.claude/sessions'*|'~/.claude/tasks'*|'~/.claude/plans'*) return 0 ;;
+    '~/.claude/shell-snapshots'/*|'~/.claude/history.jsonl'|'~/.claude/scheduled-tasks'*|'~/.claude/.credentials.json') return 0 ;;
+    '~/.config/agents'|'~/.config/agents/secrets.env'|'~/.config/agents/verify-trust') return 0 ;;
+    '~/.config/agents/vstack-repo'|'~/.config/agents/backups'*|'~/.config/agents/logs'*|'~/.config/agents/bg'*|'~/.config/agents/doctor.log') return 0 ;;
+    '~/.conductor'|'~/.conductor/settings.toml'|'~/.conductor/settings.managed.toml') return 0 ;;
+    # the shipped directories themselves, referenced bare ("installs to ~/.claude/skills/")
+    '~/.claude/hooks'|'~/.claude/agents'|'~/.claude/commands'|'~/.claude/skills') return 0 ;;
+    '~/.config/agents/bin'|'~/.config/agents/shell') return 0 ;;
+  esac
+  return 1
+}
+src_for(){ # installed path -> the repo file install.sh copies there, or empty if unmapped
+  case "$1" in
+    '~/.claude/hooks/'*)        printf 'claude/hooks/%s'    "${1#'~/.claude/hooks/'}" ;;
+    '~/.claude/agents/'*)       printf 'claude/agents/%s'   "${1#'~/.claude/agents/'}" ;;
+    '~/.claude/commands/'*)     printf 'claude/commands/%s' "${1#'~/.claude/commands/'}" ;;
+    '~/.claude/skills/'*)       printf 'claude/skills/%s'   "${1#'~/.claude/skills/'}" ;;
+    '~/.claude/CLAUDE.md')      printf 'claude/CLAUDE.md' ;;
+    '~/.claude/statusline.sh')  printf 'claude/statusline.sh' ;;
+    '~/.config/agents/bin/'*)   printf 'bin/%s'   "${1#'~/.config/agents/bin/'}" ;;
+    '~/.config/agents/shell/'*) printf 'shell/%s' "${1#'~/.config/agents/shell/'}" ;;
+  esac
+}
+errs=""
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  runtime_path "$ref" && continue
+  src=$(src_for "$ref")
+  if [ -z "$src" ]; then
+    errs="$errs\n$ref: no install.sh rule puts anything there"
+  elif [ ! -e "$src" ]; then
+    errs="$errs\n$ref: install.sh would copy $src, which does not exist in this repo"
+  fi
+done <<EOF
+$(grep -rhoE '~/\.(claude|config/agents|conductor)[A-Za-z0-9._/-]*' \
+    README.md claude/commands claude/agents claude/skills 2>/dev/null \
+  | sed 's#[.,:;)`"]*$##; s#/$##' | sort -u)
+EOF
+[ -z "$errs" ] && ok "referenced install paths exist" \
+  || bad "referenced install paths exist" "$(printf '%b' "$errs")"
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -63,6 +63,7 @@ files_for(){ case "$1" in
   17)  printf 'claude/settings.project-keys' ;;
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
+  20)  printf 'claude/commands/test.md' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -88,6 +89,7 @@ label_for(){ case "$1" in
   17)  printf 'overlay ships project keys only' ;;
   18)  printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
+  20)  printf 'referenced install paths exist' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -134,6 +136,9 @@ exit 0
   19) # a field the schema does not recognise; --strict rejects it
       sed -i.t 's/"version":/"verzion":/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
+  20) # a command telling the model to run something no lane ever installs — exactly the
+      # shape of the /bootstrap defect this check was written for
+      printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"
