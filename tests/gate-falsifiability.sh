@@ -190,6 +190,16 @@ for id in $CHECKS; do
   # it rejects locally, so this row demanded a FAIL the check could never produce and CI went
   # red over the harness rather than the repo. Check 19 now reports a skip when its own positive
   # control fails; honour that instead of second-guessing it.
+  # Same shape as 19: the check can legitimately decline to measure, so ask it rather than
+  # assuming. Without tags there is nothing for it to compare, and demanding a FAIL it cannot
+  # produce turns a correct skip into a red build.
+  if [ "$id" = 24 ]; then
+    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+      printf 'skip  check %-3s not falsifiable here (no tags to compare against; %s)\n' "$id" "$lbl"
+      continue
+    fi
+  fi
+
   if [ "$id" = 19 ]; then
     if ! command -v claude >/dev/null 2>&1; then
       printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"

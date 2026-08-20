@@ -896,6 +896,11 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   mv_=$(jq -r '.version' claude/.claude-plugin/plugin.json 2>/dev/null)
   if [ -z "$mv_" ]; then
     bad "declared version matches what installs" "could not read the version from the plugin manifest"
+  elif [ -z "$(git tag -l 2>/dev/null | head -1)" ]; then
+    # No tags at all means a shallow or tagless checkout, not a repo with no releases. Saying
+    # "ok" there would make this check green on CI while measuring nothing — which is the exact
+    # failure mode it was written to prevent, reproduced inside itself.
+    skip "declared version matches what installs" "no tags in this checkout (shallow clone?), so there is nothing to compare against"
   elif ! git rev-parse -q --verify "refs/tags/v$mv_" >/dev/null 2>&1; then
     ok "declared version matches what installs (v$mv_ not yet tagged)"
   else

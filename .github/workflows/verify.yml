@@ -9,7 +9,13 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth 0 because check 24 compares the installable payload against the tag whose
+      # version the manifests declare, and the default shallow checkout carries no tags at all.
+      # Without this the check cannot measure and skips, which is honest but proves nothing on
+      # the one machine that gates every push.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # The gate needs jq for the JSON checks and the install dry run.
       - name: Install jq
