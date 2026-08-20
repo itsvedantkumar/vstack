@@ -30,6 +30,18 @@ CLI, and then this config.
 curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/main/bootstrap.sh | bash
 ```
 
+That line gives this repository, and whatever it points at next, immediate shell on your
+machine. If you would rather not, read it first and pin a release instead of tracking `main`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.4.0/bootstrap.sh -o bootstrap.sh
+less bootstrap.sh                       # it is 90 lines
+VSTACK_REF=v1.4.0 bash bootstrap.sh     # clone that tag, not main
+```
+
+`VSTACK_REF` pins which commit or tag gets installed. Without it the bootstrap follows `main`,
+which means a push to this repo reaches your machine the next time you run it.
+
 **The tools are already there.** Installs the config alone.
 
 ```bash
@@ -322,6 +334,15 @@ recovers it. [docs/how-skills-fire.md](docs/how-skills-fire.md) has the measurem
 executable in someone else's repo running automatically on every Stop is a handout of code
 execution — but it does mean the gate is inert until you arm it, and needs re-arming after you
 edit it.
+
+**`curl | bash` is a real trust decision, and pinning is the only mitigation offered.** The
+one-liner runs whatever `main` holds at the moment you run it, then `setup-machine.sh` runs
+Homebrew's, Bun's, uv's and Anthropic's installers, each fetched the same way. Nothing here is
+digest-pinned or signature-verified, so a compromise of this account, of DNS or TLS in front of
+any of those hosts, or of any chained installer becomes shell on your machine. `VSTACK_REF`
+pins this repo to a tag you have read; it does nothing for the installers downstream. The
+cloud-sandbox lane is pinned by default because a compromise there would reach every workspace
+at once — `overlay.sh` writes a specific reviewed commit into `.conductor/settings.toml`.
 
 **`vstack update --yes` skips the review.** An interactive update fetches, shows the incoming
 commits and the full diff of every script the gate executes, and asks before merging and
