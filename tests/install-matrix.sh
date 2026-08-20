@@ -82,9 +82,19 @@ if want config-dir; then
   e=$(assert_install config-dir "$H/custom" "$H")
   # and nothing may land in the directory Claude Code is NOT reading
   [ -d "$H/.claude" ] && e="$e; stray ~/.claude created"
-  # hook commands must point into the custom dir, or the hooks never fire
+  # Hook commands must point into the custom dir, or the hooks never fire.
+  #
+  # Compared by shape, not by string equality against $H. Git Bash hands paths to native
+  # Windows binaries in 8.3 short form, so jq writes C:/Users/RUNNER~1/... while the test holds
+  # C:/Users/runneradmin/... — same directory, different spelling, and a prefix match called it
+  # a failure. What actually matters is that the path lands under the custom config dir and not
+  # under a .claude the installer was told not to use.
   hp=$(jq -r '.hooks.Stop[0].hooks[0].command' "$H/custom/settings.json" 2>/dev/null)
-  case "$hp" in "$H/custom/hooks/"*) ;; *) e="$e; Stop hook points at $hp" ;; esac
+  case "$hp" in
+    */custom/hooks/verify-gate.sh) ;;
+    *) e="$e; Stop hook points at $hp" ;;
+  esac
+  case "$hp" in *.claude/hooks/*) e="$e; Stop hook still points into ~/.claude" ;; esac
   [ "$rc" = 0 ] && [ -z "$e" ] && ok "CLAUDE_CONFIG_DIR honoured" || bad "CLAUDE_CONFIG_DIR honoured" "exit=$rc$e"
 fi
 
