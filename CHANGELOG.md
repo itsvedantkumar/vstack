@@ -4,6 +4,42 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.2.0 — 2026-08-20
+
+Phases 3 and 4 of the hardening plan: a researched adoption pass, the update path made
+reviewable, and the incubator repo merged in and archived with a pointer.
+
+- New skill `component-registry` (26 total): pull vetted primitives from shadcn-compatible
+  registries before hand-writing UI components, with a routing line and a strict auto-trigger
+  case. The survey behind it — four research agents over skill packs, design tooling,
+  Conductor features, and hook patterns, with every adoption, deferral, and rejection reasoned
+  — is `docs/provenance/research-2026-08.md`.
+- `debugger` subagent: three-failed-fixes stop rule and anti-rationalization red flags,
+  adapted from obra/superpowers systematic-debugging (MIT).
+- `interrogate` and `review` now post findings as inline Conductor diff comments
+  (`mcp__conductor__DiffComment`) when running in a workspace, so verdicts land in the Checks
+  panel next to the merge decision. `claude/CLAUDE.md` notes that open todos block Conductor's
+  merge button.
+- Overlay `.conductor/settings.toml` template documents `scripts.archive`,
+  `[environment_variables]`, and `.worktreeinclude`.
+- `vstack update` now fetches, shows the incoming commits and the full diff of every script
+  the gate executes, and asks before merging and re-recording trust hashes; `--yes` for
+  automation, refusal without a terminal.
+- Check 19: both plugin manifests now pass `claude plugin validate --strict` on every gate
+  run, with the one known benign warning (`CLAUDE.md` at the plugin root) named and pinned.
+  The falsifiability suite proves it bites by corrupting a manifest key; where the claude CLI
+  is absent it skips visibly instead of failing wrongly, and CI installs the CLI so the check
+  runs for real there.
+- CI derives expected install counts from the repo tree instead of hardcoding them — the
+  literal `25` failed the first green tree that added a skill.
+- `agent-browser` skill: documents which browser tool to reach for when (claude-in-chrome vs
+  headless agent-browser), the Node 24 floor, and WCAG 2a/2aa checks via axe-core.
+- `ui-iterate` skill: the self-critique loop now measures instead of eyeballing — pixel-diff
+  against a baseline screenshot at a fixed viewport (`--threshold 0.02`, `networkidle`).
+- README: source-by-surface matrix (what local, Conductor, Remote Control, and cloud sessions
+  can each read) and the two env vars that silently break Remote Control. Design history from
+  the conductor-setup incubator is preserved under `docs/provenance/`.
+
 ## 1.1.0 — 2026-08-20
 
 An audit of the verification machinery, prompted by a simple question: does the gate that says
