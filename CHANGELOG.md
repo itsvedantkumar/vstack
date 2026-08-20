@@ -6,6 +6,11 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+- Native OS-level Bash sandboxing was evaluated end to end and rejected on live evidence:
+  its write boundary is the session workspace, and this setup's daily pattern is cross-repo
+  writes from Conductor workspaces (editing vstack from any workspace, `install.sh` from
+  agent Bash). The full trail, including what a scratch test proved and what only a live
+  trial could, is in `docs/provenance/research-2026-08.md`.
 - Conductor gets the same "edit the repo, never the GUI" treatment as `~/.claude`:
   `conductor/settings.managed.toml` pins model, fast mode, and plan mode at Conductor's
   highest-precedence layer; install.sh always overwrites it and `doctor --drift` compares it.

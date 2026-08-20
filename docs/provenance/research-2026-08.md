@@ -23,9 +23,16 @@ next survey starts from verdicts instead of re-litigating.
   plan-mode call: `conductor/settings.managed.toml` pins models/fastMode/plan-mode, install.sh
   always overwrites the installed copy, and `doctor --drift` compares it. Plan mode stays
   available per session; the global toggle is pinned false with the rationale in the file.
-- **Claude Code native sandboxed Bash** (OS-level Seatbelt/bubblewrap enforcement under the
-  hooks, which are advisory by design). Real and free, but flipping it machine-wide untested
-  could break the hooks and wrappers this setup depends on. Evaluate in a scratch repo first.
+- **Claude Code native sandboxed Bash — adopted, then reverted the same hour, on live
+  evidence.** The scratch-HOME evaluation looked adoptable: hooks run outside the Bash
+  sandbox (Stop gate unaffected), workspace writes work, `$HOME`/`~/.claude` kernel-denied,
+  `gh` carved out via `excludedCommands: ["gh *"]` (syntax proven; bare `"gh"` does not
+  match subcommands). Enabling it live then showed the disqualifier the scratch test could
+  not: the write boundary is the *session workspace*, and this setup's daily pattern is
+  cross-repo writes from Conductor workspaces — editing vstack from any workspace, running
+  `install.sh` from agent Bash (`~/.claude` deny is unliftable), `/tmp` logging. Every
+  running session inherited the friction mid-flight. Re-evaluate if the sandbox ever gains
+  a machine-level allowWrite for chosen repos, or if the cross-repo pattern changes.
 - **Prompt-injection output scanning** (dwarvesf/claude-guardrails concept; scan fetched
   content for injected instructions). The repos surveyed are thin (32–262 stars, no
   false-positive data); the concept only enters vstack the way everything else did — rebuilt
