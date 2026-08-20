@@ -126,7 +126,35 @@ for d in "$SRC"/claude/skills/*/; do
   REMOVE_LIST="$REMOVE_LIST $s"
 done
 
-if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ]; then
+# Same rule, applied to everything else this repo copies in. It only ever ran for skills, so
+# uninstalling a fresh install left 8 agents, 14 commands, 4 hooks and 7 wrappers sitting in
+# ~/.claude with nothing to say where they came from: the backup held no prior version to
+# restore over them, and only skills had a branch that removed what the backup lacked.
+#
+# settings.json and .claude.json are deliberately not in this list. install.sh MERGES those
+# rather than copying them, so there is no version of them that belongs solely to vstack —
+# deleting either would take the user's own configuration with it. If the backup holds a prior
+# copy, the restore pass above already put it back.
+FILE_REMOVE_LIST=""
+plan_file_removal() { # <installed-path>
+  tgt="$1"
+  [ -e "$tgt" ] || return 0
+  [ -L "$tgt" ] && return 0
+  [ -e "$BK/files/${tgt#"$HOME"/}" ] && return 0   # backup has a prior version; restore covers it
+  echo "remove   $tgt  (installed by vstack, not present in backup)"
+  FILE_REMOVE_LIST="$FILE_REMOVE_LIST $tgt"
+}
+for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$HOME/.claude/hooks/$(basename "$f")"; done
+for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$HOME/.claude/agents/$(basename "$f")"; done
+for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$HOME/.claude/commands/$(basename "$f")"; done
+for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")"; done
+plan_file_removal "$HOME/.claude/CLAUDE.md"
+plan_file_removal "$HOME/.claude/statusline.sh"
+plan_file_removal "$HOME/.claude/skills/LICENSE.pstack"
+plan_file_removal "$HOME/.claude/skills/ATTRIBUTION.md"
+plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh"
+
+if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ]; then
   echo "(backup is empty — nothing to restore)"
 fi
 
@@ -166,6 +194,10 @@ for s in $REMOVE_LIST; do
   tgt="$HOME/.claude/skills/$s"
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] && rm -rf "$tgt"
+done
+for tgt in $FILE_REMOVE_LIST; do
+  [ -L "$tgt" ] && continue
+  [ -e "$tgt" ] && rm -f "$tgt"
 done
 
 echo "restore complete."

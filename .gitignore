@@ -3,3 +3,6 @@
 .DS_Store
 secrets.env
 .gh-token.cache
+
+# Local audit trails: decision logs carry machine detail and are not launch material.
+.audit/
