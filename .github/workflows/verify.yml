@@ -151,12 +151,11 @@ jobs:
   # Windows user running these scripts actually has. Native PowerShell is not a target and the
   # README says so; this proves the Git Bash and WSL-shaped path, which is the one people use.
   #
-  # continue-on-error until the platform is green: the job exists to report the truth about
-  # Windows on every push rather than to gate merges on a platform that was never supported.
-  # Flip it off once it passes.
+  # It gates like every other platform. It started as continue-on-error because Windows had
+  # never been supported and the job existed to report the truth rather than block merges; it
+  # went green in three commits, so the crutch is gone.
   install-windows:
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
