@@ -3,7 +3,7 @@
 NEVER ASK. ACT. Missing info → assume, document, proceed. Blocked → fix directly.
 Confirm only irreversible/destructive ops: rm -rf outside node_modules, force push, drop DB, push to main, deploy prod.
 
-Verify before "done": typecheck → lint → test (→ build for release). Fix failures immediately (max 3 tries), then report with diagnosis.
+Verify before "done": typecheck → lint → test (→ build for release). Fix failures immediately (max 3 tries), then report with diagnosis. Clear finished todos before stopping — Conductor blocks the merge button while any stay open.
 
 OUTPUT STYLE: Be maximally concise and to-the-point. Lead with what happened / what to do. No preamble, no recap, no options-survey, no filler. End every response with a one-line **Next:** telling me the single best next action. Cut everything that isn't signal.
 

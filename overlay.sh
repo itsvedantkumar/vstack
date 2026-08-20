@@ -140,6 +140,19 @@ available_in = [ "local" ]
 command = "PORT=$CONDUCTOR_PORT npm run dev"
 default = true
 icon = "play"
+
+# Runs before a workspace is archived or merged. Uncomment for repos whose workspaces start
+# external resources (docker stacks, tunnels, background daemons) that need killing.
+# [scripts.archive]
+# command = "docker compose down --volumes"
+
+# Per-repo env for every workspace session; [environment_variables.local] and .cloud split by
+# surface. Cloud sandboxes also receive CONDUCTOR_API_TOKEN/CONDUCTOR_API_URL automatically.
+# [environment_variables]
+# EXAMPLE_FLAG = "1"
+
+# Gitignored files a new local workspace needs (.env, certs) belong in a .worktreeinclude at
+# the repo root — Conductor copies matches into every new worktree it creates.
 TOML
   echo "wrote   .conductor/settings.toml"
 fi

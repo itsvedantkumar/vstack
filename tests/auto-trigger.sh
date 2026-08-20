@@ -332,6 +332,15 @@ run_case \
   "ui-iterate" \
   "setup_styled"
 
+# The prompt states the plan is already approved so the planning chain has no reason to fire;
+# what is under test is the narrower reflex "about to hand-write a UI component -> check the
+# registries first".
+run_case \
+  "component-registry-combobox" \
+  "The plan is approved: this React + Tailwind app gets an accessible multi-select combobox. Write the component now." \
+  "component-registry" \
+  "setup_webapp"
+
 run_case \
   "idempotent-cron" \
   "Write a cron job that syncs this directory to S3 every hour, with retries on failure." \

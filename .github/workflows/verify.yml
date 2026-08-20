@@ -16,6 +16,11 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
 
+      # Check 19 runs `claude plugin validate --strict`; without the CLI it skips, and the
+      # falsifiability suite skips its case 19 with it. Install it so CI proves the real thing.
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Run the verification gate
         run: ./.claude/verify.sh
 
@@ -48,15 +53,20 @@ jobs:
       - name: The installed tree matches the repo
         run: ./bin/doctor --drift
 
+      # Expected counts are derived from the repo at run time, not hardcoded — a literal here
+      # went stale the first time a skill was added and failed a green tree.
       - name: Everything landed
         run: |
           set -e
           count() { ls -d $1 2>/dev/null | wc -l | tr -d ' '; }
-          for spec in "$HOME/.claude/skills/*/:25" "$HOME/.claude/agents/*.md:8" \
-                      "$HOME/.claude/commands/*.md:14" "$HOME/.claude/hooks/*.sh:4"; do
-            pat="${spec%:*}"; want="${spec##*:}"; got=$(count "$pat")
-            [ "$got" = "$want" ] || { echo "$pat: got $got, expected $want"; exit 1; }
-            echo "ok  $pat -> $got"
+          for spec in "$HOME/.claude/skills/*/:claude/skills/*/" \
+                      "$HOME/.claude/agents/*.md:claude/agents/*.md" \
+                      "$HOME/.claude/commands/*.md:claude/commands/*.md" \
+                      "$HOME/.claude/hooks/*.sh:claude/hooks/*.sh"; do
+            pat="${spec%:*}"; src="${spec##*:}"
+            got=$(count "$pat"); want=$(count "$src")
+            [ "$got" = "$want" ] && [ "$want" != 0 ] || { echo "$pat: got $got, repo has $want"; exit 1; }
+            echo "ok  $pat -> $got (repo: $want)"
           done
           test -x "$HOME/.claude/hooks/verify-gate.sh"
 

@@ -116,6 +116,13 @@ For each finding include: which reviewer(s) and lens(es) raised it, the category
 ### Agreement map and blind spots
 Where reviewers converged, where they diverged, and what the pattern means. Then, explicitly: which lenses came back empty, and whether that is a clean bill of health or an untested area. Close with a one-line reminder that all reviewers were Anthropic models and share blind spots, so this verdict bounds *known* risk, not total risk.
 
+## Where the verdict lands
+
+In a Conductor workspace (`CONDUCTOR_WORKSPACE_PATH` is set), also post each Act-on and
+Consider finding as an inline `mcp__conductor__DiffComment` at its file:line — that puts the
+verdict in the Checks panel next to the diff, where the merge decision happens. Do not post
+to GitHub unless asked.
+
 ## After the verdict
 
 Stop. The user decides what to fix. If they ask you to apply findings, treat that as a normal change — plan it, make it, verify it. Re-running `interrogate` on your own fixes is legitimate and often catches a bad patch.

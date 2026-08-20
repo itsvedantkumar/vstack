@@ -570,6 +570,31 @@ else
   skip "injected context bounded" "jq not installed"
 fi
 
+# --- 19. the plugin manifests pass Claude Code's own validator ---------------------------------
+# Checks 2 and 13 confirm the manifests parse and agree on a version. Neither knows the schema.
+# `claude plugin validate --strict` does, and it fails on fields this repo would otherwise ship
+# misspelled — the marketplace lane is the one surface a stranger installs, so a manifest that
+# only *looks* right is the worst place for a silent defect.
+if command -v claude >/dev/null 2>&1; then
+  errs=""
+  # One warning is expected and correct, so it is named here rather than silenced by dropping
+  # --strict: claude/CLAUDE.md is the source for the global and overlay lanes and only happens
+  # to sit inside the plugin source directory. The plugin lane deliberately does not load it —
+  # that policy belongs to this machine, not to a stranger's install. Every other warning or
+  # error is real and fails.
+  KNOWN='CLAUDE.md at the plugin root'
+  for m in . claude; do
+    if ! out=$(claude plugin validate --strict "$m" 2>&1); then
+      unknown=$(printf '%s' "$out" | grep '❯' | grep -vF "$KNOWN")
+      [ -n "$unknown" ] && errs="$errs\n$m:\n$unknown"
+    fi
+  done
+  [ -z "$errs" ] && ok "plugin manifests valid (claude plugin validate --strict)" \
+    || bad "plugin manifests valid" "$(printf '%b' "$errs")"
+else
+  skip "plugin manifests valid" "claude CLI not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

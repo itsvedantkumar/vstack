@@ -70,4 +70,29 @@ npx agent-browser --session "$SESSION" close
 
 More commands (`wait --text`, `hover`, `press`, `scroll`, `diff screenshot`, auth/state):
 `npx agent-browser --help`, or `npx agent-browser skills get core` for the full workflow
-guide served by the installed CLI.
+guide served by the installed CLI. `skills get dogfood` is an adversarial exploratory-QA pass,
+which complements a design review of a surface you already know about.
+
+## Which browser tool, and when
+
+Two browser lanes exist here and they must not fight over the same Chrome.
+
+**claude-in-chrome** drives your real, logged-in browser. Use it when the session needs your
+cookies, an authenticated app, or you want to watch what happens.
+
+**agent-browser** runs its own headless Chrome. Use it whenever the shared browser would be
+contended or is unavailable: parallel Conductor workspaces, background runs, anything
+unattended. Always pass `--session <workspace>` and `--pin-tab`, which is what keeps two
+workspaces from adopting each other's tabs.
+
+Requires Node 24 or newer. On an older Node the CLI still runs but npm prints an engine
+warning; if a command behaves strangely, check the Node version before debugging further.
+
+## Accessibility, without hand-rolling it
+
+```bash
+npx agent-browser --session "$SESSION" a11y --tags wcag2a,wcag2aa
+```
+
+Runs axe-core in-page, offline and CSP-safe, scoped by selector and aware of iframes. Prefer it
+to writing WCAG checks by hand in a review.

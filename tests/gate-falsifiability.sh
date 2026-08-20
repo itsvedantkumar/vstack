@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -62,6 +62,7 @@ files_for(){ case "$1" in
   16)  printf 'tests/gate-falsifiability.sh' ;;
   17)  printf 'claude/settings.project-keys' ;;
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
+  19)  printf 'claude/.claude-plugin/plugin.json' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -86,6 +87,7 @@ label_for(){ case "$1" in
   16)  printf 'falsifiability coverage' ;;
   17)  printf 'overlay ships project keys only' ;;
   18)  printf 'injected context bounded' ;;
+  19)  printf 'plugin manifests valid' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -129,6 +131,9 @@ exit 0
       printf '\ntheme\n' >> claude/settings.project-keys ;;
   18) # pad the per-prompt digest past its cap
       perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
+  19) # a field the schema does not recognise; --strict rejects it
+      sed -i.t 's/"version":/"verzion":/' claude/.claude-plugin/plugin.json \
+        && rm -f claude/.claude-plugin/plugin.json.t ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"
@@ -137,6 +142,15 @@ echo
 for id in $CHECKS; do
   fs=$(files_for "$id")
   lbl=$(label_for "$id")
+
+  # Check 19 runs `claude plugin validate`; where the CLI is absent the check itself reports a
+  # skip, so its mutation cannot produce the expected FAIL. Skip visibly rather than fail
+  # wrongly — CI installs the CLI, so this branch only fires on machines without it.
+  if [ "$id" = 19 ] && ! command -v claude >/dev/null 2>&1; then
+    printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
+    continue
+  fi
+
   [ -n "$fs" ] && save $fs
 
   if [ "$id" = 0 ]; then

@@ -1,6 +1,6 @@
 # Skill attribution
 
-vstack ships 25 skills from five sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 1 from Vercel Labs, and 1 original to this repo.
+vstack ships 26 skills from five sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 1 from Vercel Labs, and 2 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 
@@ -67,13 +67,17 @@ upstream's README (Quick Start, Commands, Sessions), trims the frontmatter to vs
 | `vercel-deploy` | The `vercel` CLI does the same work with fewer tokens. |
 | `spaceship`, `security-threat-model` | Not used. |
 
-## Original (1)
+## Original (2)
 
 `ui-iterate` — screenshot and critique cycle for UI files.
+
+`component-registry` — pull vetted primitives from shadcn-compatible registries before
+hand-writing UI components. Original text; the registry protocol it teaches is
+[ui.shadcn.com/docs/registry](https://ui.shadcn.com/docs/registry) (MIT).
 
 Source: this repo, MIT.
 
 ## Which skills are active
 
-All 25. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
+All 26. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.

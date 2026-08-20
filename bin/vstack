@@ -9,7 +9,7 @@ usage() {
 usage: vstack <command> [args...]
 
 commands:
-  update              git pull the vstack repo, then run its install.sh
+  update [--yes]      fetch, show what changes the scripts the gate executes, confirm, install
   install [args...]   run the repo's install.sh (args passed through, e.g. --dry-run)
   doctor [args...]    run ~/.config/agents/bin/doctor (args passed through, e.g. --drift)
   overlay <repo>       run the repo's overlay.sh against <repo>
@@ -63,7 +63,41 @@ REPO=$(resolve_vstack_repo) || {
 
 case "$CMD" in
   update)
-    git -C "$REPO" pull && "$REPO/install.sh"
+    # This used to be `git pull && install.sh`, which re-recorded the trust hashes for
+    # whatever arrived — the one unattended path where new code got trusted sight unseen.
+    # Now: fetch, show the incoming commits and the full diff of every script the gate
+    # executes, and ask. Without a terminal, refuse rather than assume; --yes is the
+    # explicit escape hatch for automation.
+    YES=0
+    for a in "$@"; do case "$a" in --yes|-y) YES=1 ;; esac; done
+    git -C "$REPO" fetch || exit 1
+    upstream=$(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
+      || upstream=origin/main
+    if [ -z "$(git -C "$REPO" rev-list -n 1 "HEAD..$upstream" 2>/dev/null)" ]; then
+      echo "vstack update: already up to date with $upstream; reinstalling to clear drift"
+      exec "$REPO/install.sh"
+    fi
+    echo "incoming from $upstream:"
+    git -C "$REPO" log --oneline "HEAD..$upstream"
+    TRUSTED="install.sh overlay.sh uninstall.sh bootstrap.sh .claude/verify.sh"
+    if git -C "$REPO" diff --quiet "HEAD..$upstream" -- $TRUSTED; then
+      echo "(no changes to the scripts the gate executes)"
+    else
+      echo
+      echo "changes to scripts the gate executes and will re-trust:"
+      git -C "$REPO" diff "HEAD..$upstream" -- $TRUSTED
+    fi
+    if [ "$YES" -ne 1 ]; then
+      if [ -t 0 ]; then
+        printf 'apply and re-record trust hashes? [y/N] '
+        read -r ans
+        case "$ans" in y|Y|yes|YES) ;; *) echo "vstack update: aborted, nothing changed"; exit 1 ;; esac
+      else
+        echo "vstack update: no terminal to confirm on; re-run with --yes to accept unseen" >&2
+        exit 1
+      fi
+    fi
+    git -C "$REPO" merge --ff-only "$upstream" && "$REPO/install.sh"
     ;;
   install)
     "$REPO/install.sh" "$@"

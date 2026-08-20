@@ -72,6 +72,7 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
 - work splits into independent parts, or "in parallel"/"at once"/"try N ways" -> swarm.
 - shipping a risky change or a diff you do not trust -> blast-radius. Merging auth, payments,
   or agent-written code with no second reviewer -> interrogate.
+- about to write a UI component from scratch in a React/Tailwind repo -> component-registry.
 - repo has no scripted proof it works -> create-verification-skill (it writes the
   .claude/verify.sh the Stop hook runs). That gate stale -> maintain-verification-skill.
 - work runs unattended/overnight, or you are told someone reviews it later -> start

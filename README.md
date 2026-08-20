@@ -1,6 +1,6 @@
 # vstack
 
-**A Claude Code setup where the skills fire on their own.** 25 skills, 8 agents, 14
+**A Claude Code setup where the skills fire on their own.** 26 skills, 8 agents, 14
 commands, and the session hook that routes a situation to the right skill without you typing a
 slash command.
 
@@ -96,11 +96,34 @@ routing hook, and stops there. The token, delegation and autonomy rules in the o
 are one person's operating policy and have no business arriving with a skill pack a stranger
 installed.
 
+### Remote Control and the phone
+
+The lanes say where config lands; sessions differ in what they can read from there:
+
+| Source | Local terminal | Conductor | Remote Control | Cloud session / routine (phone) |
+|---|:--:|:--:|:--:|:--:|
+| `~/.claude/**` (user scope) | ✅ | ✅ | ✅ runs on your Mac | ❌ sandbox has no `~/.claude` |
+| `~/.zshenv` exports | ✅ | ✅ | ✅ | ❌ |
+| `shell/claude-parity.zsh` wrapper | ✅ | n/a | ❌ never goes through your zsh | ❌ |
+| committed `.claude/` overlay | ✅ | ✅ | ✅ | ✅ the only source a sandbox sees |
+
+Two environment variables look like harmless telemetry switches and silently kill the Remote
+Control column: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and `DISABLE_GROWTHBOOK` both gate
+feature-flag evaluation, which Remote Control needs to register. With either set,
+`claude doctor` reports "Remote Control rollout could not be verified" and phone dispatch
+stops working. `bin/doctor` fails when the first is set.
+
+Which settings keys may enter the overlay at all is decided in
+[`claude/settings.project-keys`](claude/settings.project-keys), which records why each key
+earns its place and names the ones deliberately kept in user scope. Hook commands in the
+overlay use `$CLAUDE_PROJECT_DIR`-relative paths on purpose: an absolute `/Users/...` path
+exits 127 on every hook event inside a sandbox.
+
 ## What you get
 
 | Component | Count | Installs to |
 |---|---|---|
-| Skills | 25 | `~/.claude/skills/` |
+| Skills | 26 | `~/.claude/skills/` |
 | Subagents | 8 | `~/.claude/agents/` |
 | Commands | 14 | `~/.claude/commands/` |
 | Hooks | 4 | `~/.claude/hooks/` |
@@ -189,7 +212,7 @@ To add the same gate to another repo, ask Claude for verification there and the
 ## Day-to-day
 
 ```bash
-vstack update            # pull the repo, reinstall
+vstack update            # fetch, review the incoming script diff, confirm, reinstall
 vstack doctor            # health check
 vstack doctor --drift    # has anything been edited in place?
 vstack overlay <repo>    # commit the config into another repo
@@ -281,10 +304,10 @@ executable in someone else's repo running automatically on every Stop is a hando
 execution — but it does mean the gate is inert until you arm it, and needs re-arming after you
 edit it.
 
-**`vstack update` re-trusts what it pulls.** It is `git pull && install.sh`, and the install
-records the new hashes without showing you a diff first. Trust covers the scripts the gate
-executes, so a swapped `install.sh` is caught between updates, but the update path itself is
-still trust-on-pull.
+**`vstack update --yes` skips the review.** An interactive update fetches, shows the incoming
+commits and the full diff of every script the gate executes, and asks before merging and
+re-recording trust hashes; without a terminal it refuses instead of assuming. The `--yes`
+flag exists for automation, and anything automated enough to use it is back to trust-on-pull.
 
 **macOS first.** CI installs and exercises the hooks on Linux every push, so Linux works and
 stays working. But Conductor is macOS only, `setup-machine.sh` assumes Homebrew, and the

@@ -40,8 +40,27 @@ plausible ones. Run it after every meaningful UI change, before declaring the ta
 4. **Fix the worst thing, re-shoot.** One issue at a time, most severe first. Re-screenshot
    the affected width after each fix. Repeat until step 3 finds no majors.
 
-5. **Show the evidence.** The final message includes what the screenshots showed and what
-   changed because of them. For gated repos, save the final captures to
+5. **Measure the change, do not eyeball it.** Comparing two screenshots by looking at them
+   misses exactly the regressions that matter: the 4px shift on a width you were not focused
+   on. Keep the pre-change capture as a baseline and diff against it:
+
+   ```bash
+   npx agent-browser diff screenshot --baseline .context/ui-evidence/before-1440.png \
+     --threshold 0.02 -o .context/ui-evidence/diff-1440.png
+   ```
+
+   It reports a mismatch percentage and writes a PNG with the changed pixels highlighted. Run
+   it on the widths you did *not* intend to change — a non-zero mismatch there is an unintended
+   regression, and that is the whole point. `diff snapshot` compares the accessibility tree
+   instead, which is less flaky than pixels for structural changes.
+
+   Two things make pixel diffs trustworthy rather than noisy: a fixed viewport
+   (`agent-browser set viewport 1440 900`) and waiting for the network to settle
+   (`agent-browser wait --load networkidle`) before every capture. Without both, you are
+   diffing animation frames.
+
+6. **Show the evidence.** The final message includes what the screenshots showed, the mismatch
+   percentages, and what changed because of them. For gated repos, save the final captures to
    `.context/ui-evidence/` so verify.sh or a reviewer can see the loop actually ran.
 
 ## When NOT to use
