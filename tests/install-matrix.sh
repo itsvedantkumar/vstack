@@ -424,6 +424,90 @@ if want bootstrap-dirty; then
   fi
 fi
 
+# --- the overlay lane, end to end ----------------------------------------------------------------
+# The fourth lane, and the only one that reaches a cloud sandbox, had no case here. Checks 9b and
+# 17 exercise its settings merge and prove it strips personal keys, but nothing overlaid into a
+# fresh repo and looked at what came out. That is the lane where a mistake lands in somebody
+# else's repository and gets committed.
+if want overlay; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "overlay lane" "git not installed"
+  else
+    T="$ROOT/ovl"; mkdir -p "$T"
+    git -C "$T" init -q 2>/dev/null
+    git -C "$T" config user.email t@example.com; git -C "$T" config user.name t
+    printf 'x\n' > "$T/file.txt"; git -C "$T" add -A; git -C "$T" commit -qm init
+    out=$("$SRC/overlay.sh" "$T" 2>&1); rc=$?
+    e=""
+    for f in .claude/settings.json .claude/CLAUDE.md .claude/statusline.sh .claude/verify.sh \
+             .claude/hooks/verify-gate.sh .conductor/settings.toml CLAUDE.md; do
+      [ -e "$T/$f" ] || e="$e; missing $f"
+    done
+    [ "$(count_dirs "$T/.claude/skills")" = "$NSK" ] || e="$e; skills $(count_dirs "$T/.claude/skills")/$NSK"
+    if command -v jq >/dev/null 2>&1; then
+      # A cloud sandbox has no $HOME config, so every hook command must resolve through the
+      # project. An absolute path here is the machine that ran overlay leaking into a repo.
+      hooks=$(jq -r '[.hooks[]?[]?.hooks[]?.command] | join(" ")' "$T/.claude/settings.json" 2>/dev/null)
+      case "$hooks" in
+        *'$CLAUDE_PROJECT_DIR'*) ;;
+        *) e="$e; hook commands are not project-relative: $hooks" ;;
+      esac
+      case "$hooks" in
+        */Users/*|*/home/*) e="$e; an absolute home path leaked into the overlaid settings" ;;
+      esac
+      # Personal keys must not travel into someone else's repo. Check 17 asserts this too; it is
+      # cheap to assert on the real artifact rather than only on a synthetic one.
+      for k in forceLoginMethod theme preferredNotifChannel remote; do
+        [ "$(jq -r --arg k "$k" 'has($k)' "$T/.claude/settings.json")" = false ] \
+          || e="$e; personal key $k was written into the target repo"
+      done
+    fi
+    # The sandbox setup line pins a commit rather than tracking main, which is the whole point:
+    # a compromised main must not reach every workspace at once.
+    pin=$(grep -oE '/vstack/[0-9a-f]{40}/bootstrap.sh' "$T/.conductor/settings.toml" 2>/dev/null | head -1)
+    [ -n "$pin" ] || e="$e; .conductor/settings.toml does not pin a 40-char commit"
+    sha=${pin#/vstack/}; sha=${sha%/bootstrap.sh}
+    [ -n "$sha" ] && git -C "$SRC" cat-file -e "$sha^{commit}" 2>/dev/null \
+      || e="$e; the pinned commit does not exist in this repo"
+    # The seeded gate must be inert until armed. A repo that arms someone else's shell on Stop
+    # just by being cloned is the thing trust-on-arm exists to prevent.
+    grep -q '.context/' "$(git -C "$T" rev-parse --git-common-dir)/info/exclude" 2>/dev/null \
+      || e="$e; .context/ was not excluded"
+    [ "$rc" = 0 ] && [ -z "$e" ] && ok "overlay lane writes a sandbox-ready repo" \
+      || bad "overlay lane writes a sandbox-ready repo" "exit=$rc$e"
+  fi
+fi
+
+# --- vstack update refuses to trust new code unattended ---------------------------------------------
+# `update` re-records the trust hashes for whatever it pulls, so it is the one unattended path
+# where new code gets trusted. Without a terminal it must refuse rather than assume.
+if want update; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "vstack update refuses unattended" "git not installed"
+  else
+    U="$ROOT/upd"; mkdir -p "$U"
+    git clone -q "$SRC" "$U/repo" 2>/dev/null
+    git -C "$U/repo" reset -q --hard HEAD~1 2>/dev/null || true
+    e=""
+    before=$(git -C "$U/repo" rev-parse HEAD)
+    # No TTY and no --yes: it must refuse. Assert the invariant that matters — the checkout did
+    # not move — rather than only a non-zero exit. A non-zero exit passes when the command fails
+    # for some unrelated reason, which is how a test ends up green while measuring nothing.
+    # Run the working-tree script against the cloned checkout, not the clone's own copy.
+    # `git clone` takes the committed HEAD, so invoking "$U/repo/bin/vstack" would test the last
+    # commit rather than the change under review — and would make this case unfalsifiable, which
+    # is how I discovered it: mutating bin/vstack changed nothing.
+    out=$(HOME="$U" VSTACK_DIR="$U/repo" "$SRC/bin/vstack" update < /dev/null 2>&1); rc=$?
+    after=$(git -C "$U/repo" rev-parse HEAD)
+    [ "$before" = "$after" ] || e="$e; the checkout advanced without confirmation"
+    [ "$rc" = 0 ] && e="$e; exited 0 with no terminal and no --yes"
+    printf '%s' "$out" | grep -qiE 'terminal|--yes|aborted' || e="$e; refusal did not say why"
+    # And it must have shown what it was about to trust before refusing.
+    printf '%s' "$out" | grep -qi 'incoming' || e="$e; refused without showing the incoming commits"
+    [ -z "$e" ] && ok "vstack update refuses unattended" || bad "vstack update refuses unattended" "${e#; }"
+  fi
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
