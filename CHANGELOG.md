@@ -6,6 +6,62 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.4.0 — 2026-08-20
+
+An external adversarial audit of 1.3.0 by a different model returned twelve findings and a
+NO-GO. Seven were reproducible; all seven were real, and two of them were bugs introduced by
+the audit that shipped 1.3.0. This release fixes every one.
+
+**Three ways a user could lose configuration they owned.**
+
+- Uninstalling with `CLAUDE_CONFIG_DIR` outside `$HOME` deleted the live `CLAUDE.md` instead of
+  restoring it. `install.sh` records those paths under `files_abs/` because they have no
+  home-relative form, and `uninstall.sh` never read that directory — it treated it as a legacy
+  flat name and then classified the real external files as removable.
+- Installing over a lived-in config destroyed the user's hooks and `skillOverrides`, because the
+  merge replaced both maps wholesale. Ownership decides now: a hook command pointing into this
+  install's hooks directory is vstack's to rebuild, anything else is the user's to keep, and
+  overrides merge with vstack winning only on collision.
+- Uninstalling under a home path containing a space removed the skills and left every hook,
+  command, agent and wrapper in place while printing "restore complete". The removal lists
+  joined absolute paths with spaces; they are newline-delimited now.
+
+**The no-jq install was inert.** It reported success and wired every hook to
+`$CLAUDE_PROJECT_DIR/.claude/hooks/...`, which does not exist at user scope — exit 127 on every
+session start, stop and tool failure, on exactly the sandboxes that path exists to serve. Hook
+paths are rewritten to the real config dir, and the matrix now executes the configured command
+rather than checking the files were copied.
+
+**The headline bootstrap required git before it could install git.** On a fresh Mac git arrives
+with the Xcode command line tools, the prerequisite it claims to remove. It falls back to the
+source tarball using curl and tar, states that the result is not a git checkout and what that
+costs, and names the install command per platform when it has neither. It also hard-reset a
+dirty checkout, silently discarding tracked edits; it refuses now unless `VSTACK_FORCE=1`.
+
+**Backups could overwrite each other.** Directories are named to the second and were created
+with `mkdir -p`, so two installs in the same second shared one and the second overwrote the
+first's only copy of the user's files.
+
+**`setup-machine.sh --check` exited 0 with the Claude CLI missing**, so bootstrap carried on and
+modified config and shell startup files for an agent that could not run.
+
+**Upstream MIT notices are vendored.** MIT requires the copyright and permission notice travel
+with the work; neither obra/superpowers nor ehmo/platform-design-skills had one here. Both are
+in `LICENSE.mit-upstream`, fetched from source. The badge reads MIT + Apache-2.0.
+
+**New: check 22** — a skill may reference tooling this port does not vendor, but it has to say
+so in the file doing the referencing. It immediately found an instance the audit missed:
+brainstorming's visual companion told the model to run three scripts that are not here.
+
+**CI covers the last unproven lane.** The plugin marketplace case ran only in jobs without the
+Claude CLI, so it skipped everywhere while every check stayed green. It runs for real now, and
+the job fails if it regresses to skipping.
+
+Two meta-fixes worth naming: check 11's guard against the retired notifier grepped for the word
+and fired on the code that removes it, and check 11's falsifiability probe had silently stopped
+mutating anything when the merge program was reindented — a mutation that lands nowhere reports
+a check as unfalsifiable while proving nothing about it.
+
 ## 1.3.0 — 2026-08-20
 
 A pre-launch audit against two claims: that the repo and an installed machine agree both
