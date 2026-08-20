@@ -70,6 +70,8 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
 - any prose you write (docs, README, PR body, commit msg) -> unslop; docs/RFC/README ->
   technical-writing. Reading/writing/reviewing .ts/.tsx -> typescript-best-practices.
 - work splits into independent parts, or "in parallel"/"at once"/"try N ways" -> swarm.
+  Deterministic pipelines (stages, loops, verify passes) -> the native Workflow tool, not
+  chained Agent calls.
 - shipping a risky change or a diff you do not trust -> blast-radius. Merging auth, payments,
   or agent-written code with no second reviewer -> interrogate.
 - about to write a UI component from scratch in a React/Tailwind repo -> component-registry.

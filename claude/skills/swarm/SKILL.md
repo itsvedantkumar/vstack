@@ -27,6 +27,15 @@ message: [Agent(brief 1)] → result → message: [Agent(brief 2)] → result �
 
 Before you send the fan-out turn, count your tool uses. If the count is less than N, stop and rewrite the message. **N briefs, N tool uses, one message.** No exceptions for "let me just check the first one works" — sending a probe agent first and the rest after is the serial loop again.
 
+## When a swarm is the wrong tool
+
+A swarm is one model-driven fan-out: N independent briefs, one aggregation. When the shape is
+a *pipeline* — items flowing through stages, loops that run until dry, verify passes gating
+each stage, or more arms than you can aggregate in one turn — use the native **Workflow**
+tool instead. It runs the orchestration deterministically (script-defined `pipeline()`/
+`parallel()`, per-agent models and schemas) where a hand-rolled chain of Agent calls would
+drift, serialize, or lose arms. Swarm for one burst; Workflow for a machine.
+
 ## Start
 
 Open a todolist with one entry per phase before launching anything.

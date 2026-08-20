@@ -4,6 +4,13 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## Unreleased
+
+- Orchestration audit closed its one gap: `swarm` and the session digest now route
+  deterministic multi-stage pipelines to the native Workflow tool (proven live: 2 parallel
+  agents, 1.8 s, both probes returned) instead of hand-rolled Agent chains. The homegrown
+  `orchestrate` command remains deleted; the stale installed copy died with the drift fix.
+
 ## 1.2.0 — 2026-08-20
 
 Phases 3 and 4 of the hardening plan: a researched adoption pass, the update path made
