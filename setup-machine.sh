@@ -3,7 +3,8 @@
 # nothing. Idempotent: every tool is checked before it is installed, so a second run is a
 # fast no-op rather than a reinstall.
 #
-#   ./setup-machine.sh                 core + claude + deploy tiers
+#   ./setup-machine.sh                 core + claude
+#   ./setup-machine.sh --with-deploy   also vercel and wrangler
 #   ./setup-machine.sh --with-security also trivy, gitleaks, nmap, nuclei
 #   ./setup-machine.sh --check         report what is present, install nothing
 #   ./setup-machine.sh --dry-run       print what would be installed
@@ -14,16 +15,22 @@
 #                                                          with node or the Xcode tools
 #   claude    the Claude Code CLI itself
 #   conductor the Conductor Mac app, several agents in parallel (macOS only)
-#   deploy    vercel, wrangler                          — the autonomous deploy chain
+#   deploy    vercel, wrangler                          — opt-in. Someone who wants better
+#                                                          Claude behaviour does not need this
+#                                                          author's deployment stack, and
+#                                                          installing it by default made a
+#                                                          personal toolchain look like a
+#                                                          requirement of the product.
 #   security  trivy, gitleaks, nmap, nuclei             — the /security command
 #
 # This script installs software. It never removes any, and it never touches your dotfiles.
 set -uo pipefail
 
-WITH_SECURITY=0; CHECK=0; DRY=0; APT_UPDATED=0
+WITH_SECURITY=0; WITH_DEPLOY=0; CHECK=0; DRY=0; APT_UPDATED=0
 for a in "$@"; do
   case "$a" in
     --with-security) WITH_SECURITY=1 ;;
+    --with-deploy)   WITH_DEPLOY=1 ;;
     --check)         CHECK=1 ;;
     --dry-run)       DRY=1 ;;
     -h|--help)       sed -n '2,20p' "$0"; exit 0 ;;
@@ -307,9 +314,13 @@ else
 fi
 
 note ""
+if [ "$WITH_DEPLOY" = 1 ]; then
 note "== deploy"
 ensure_npm vercel   vercel
 ensure_npm wrangler wrangler
+else
+note "== deploy (skipped — pass --with-deploy for vercel and wrangler)"
+fi
 
 if [ "$WITH_SECURITY" = 1 ]; then
   note ""

@@ -1,0 +1,64 @@
+{
+  "_comment": [
+    "Ground truth for the review evals. Each fixture declares the defects deliberately planted",
+    "in it and the decoys that must NOT be reported. Line numbers are 1-indexed and refer to",
+    "the file as committed; a finding counts as a hit if it lands within `tolerance` lines of",
+    "the planted line, because a reviewer naming the function rather than the exact statement",
+    "has still found the bug.",
+    "",
+    "Decoys matter as much as the planted defects. A reviewer that reports everything has",
+    "perfect recall and is worthless, and the failure mode of an eager model is noise rather",
+    "than blindness. clean.py has no planted defects at all: every finding there is a false",
+    "positive, which is the only way to measure precision without ambiguity."
+  ],
+  "tolerance": 3,
+  "fixtures": [
+    {
+      "file": "sql-injection.py",
+      "planted": [
+        {
+          "line": 5,
+          "category": "security",
+          "what": "username is concatenated into the SQL string, so any quote in it changes the query"
+        }
+      ],
+      "decoys": [
+        { "line": 10, "why_not_a_bug": "the role value is bound as a parameter; the concatenation is of a constant empty string" },
+        { "line": 15, "why_not_a_bug": "string concatenation into a log label is not injection" }
+      ]
+    },
+    {
+      "file": "off-by-one.py",
+      "planted": [
+        {
+          "line": 5,
+          "category": "correctness",
+          "what": "range stops at len-size, so a trailing partial chunk is silently dropped"
+        }
+      ],
+      "decoys": [
+        { "line": 11, "why_not_a_bug": "negative slicing is guarded by n > 0 and behaves correctly" }
+      ]
+    },
+    {
+      "file": "leak.py",
+      "planted": [
+        {
+          "line": 5,
+          "category": "resource-leak",
+          "what": "the file handle is not closed when the ValueError is raised; only the happy path closes it"
+        }
+      ],
+      "decoys": [
+        { "line": 13, "why_not_a_bug": "the with-statement closes the handle on every path" }
+      ]
+    },
+    {
+      "file": "clean.py",
+      "planted": [],
+      "decoys": [
+        { "line": 0, "why_not_a_bug": "this file is correct throughout; any finding at all is a false positive" }
+      ]
+    }
+  ]
+}

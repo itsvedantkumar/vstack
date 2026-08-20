@@ -1,9 +1,32 @@
 #!/bin/sh
+# cloudflare-mcp — thin wrapper around a locally-built Cloudflare MCP server.
+#
+# This one is the author's, and it is not vendored: the server itself lives in a separate
+# checkout. Nothing in this repo builds it, so on anyone else's machine the path below does not
+# exist. It used to exec straight into it and die with a raw "Cannot find module", which reads
+# like vstack is broken rather than like an optional integration is simply not set up.
+#
+# Point CLOUDFLARE_MCP_DIST at your own build if you have one. Otherwise this is inert, and the
+# only cost is the line in .claude.json.
 set -eu
+
 if [ -f "$HOME/.config/agents/secrets.env" ]; then
   . "$HOME/.config/agents/secrets.env"
-else
-  echo "cloudflare-mcp: missing $HOME/.config/agents/secrets.env" >&2
-  exit 1
 fi
-exec node "${CLOUDFLARE_MCP_DIST:-$HOME/Projects/cloudflare-mcp/dist/index.js}"
+
+DIST="${CLOUDFLARE_MCP_DIST:-$HOME/Projects/cloudflare-mcp/dist/index.js}"
+
+if [ ! -f "$DIST" ]; then
+  echo "cloudflare-mcp: not set up on this machine, so this server is doing nothing." >&2
+  echo "  expected a built server at: $DIST" >&2
+  echo "  set CLOUDFLARE_MCP_DIST to your own build, or remove the cloudflare-mcp entry" >&2
+  echo "  from ~/.claude.json if you do not use Cloudflare. vstack does not ship this server." >&2
+  exit 0
+fi
+
+if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  echo "cloudflare-mcp: CLOUDFLARE_API_TOKEN is not set in ~/.config/agents/secrets.env" >&2
+  exit 0
+fi
+
+exec node "$DIST"
