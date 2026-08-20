@@ -6,6 +6,11 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+- Conductor gets the same "edit the repo, never the GUI" treatment as `~/.claude`:
+  `conductor/settings.managed.toml` pins model, fast mode, and plan mode at Conductor's
+  highest-precedence layer; install.sh always overwrites it and `doctor --drift` compares it.
+  Plan mode is pinned off globally (per-session plan mode still works) — the rationale lives
+  in the file.
 - Orchestration audit closed its one gap: `swarm` and the session digest now route
   deterministic multi-stage pipelines to the native Workflow tool (proven live: 2 parallel
   agents, 1.8 s, both probes returned) instead of hand-rolled Agent chains. The homegrown

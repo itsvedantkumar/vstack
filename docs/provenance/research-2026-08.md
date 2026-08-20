@@ -19,11 +19,10 @@ next survey starts from verdicts instead of re-litigating.
 
 ## Deferred, with the blocker named
 
-- **`~/.conductor/settings.managed.toml`** (pin models/fastMode/plan-mode above the Settings
-  UI, extending "edit vstack, never the GUI" to Conductor itself). Deferred because the live
-  `~/.conductor/settings.toml` has `default_plan_mode = true` against the repo's tracked
-  `false` — a deliberate human choice a managed file would silently override. Needs the user
-  to pick a value first; then it is a small `install.sh` step.
+- ~~`~/.conductor/settings.managed.toml`~~ **Adopted 2026-08-20** once the user made the
+  plan-mode call: `conductor/settings.managed.toml` pins models/fastMode/plan-mode, install.sh
+  always overwrites the installed copy, and `doctor --drift` compares it. Plan mode stays
+  available per session; the global toggle is pinned false with the rationale in the file.
 - **Claude Code native sandboxed Bash** (OS-level Seatbelt/bubblewrap enforcement under the
   hooks, which are advisory by design). Real and free, but flipping it machine-wide untested
   could break the hooks and wrappers this setup depends on. Evaluate in a scratch repo first.

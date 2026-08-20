@@ -101,6 +101,8 @@ if [ "${1:-}" = "--drift" ]; then
   # shell lane.
   check_item "claude/CLAUDE.md"        "$REPO/claude/CLAUDE.md"        "$HOME/.claude/CLAUDE.md"
   check_item "claude/statusline.sh"    "$REPO/claude/statusline.sh"    "$HOME/.claude/statusline.sh"
+  [ -f "$REPO/conductor/settings.managed.toml" ] && \
+    check_item "conductor/settings.managed.toml" "$REPO/conductor/settings.managed.toml" "$HOME/.conductor/settings.managed.toml"
   [ -f "$REPO/shell/claude-parity.zsh" ] && \
     check_item "shell/claude-parity.zsh" "$REPO/shell/claude-parity.zsh" "$HOME/.config/agents/shell/claude-parity.zsh"
 

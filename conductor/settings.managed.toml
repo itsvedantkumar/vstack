@@ -1,0 +1,17 @@
+# Conductor's highest-precedence settings layer. Installed to ~/.conductor/settings.managed.toml
+# and ALWAYS overwritten by install.sh — that is the point: these three keys are pinned by this
+# repo, and the matching Settings-UI toggles go inert, the same way ~/.claude is never
+# hand-edited. Everything not pinned here stays a normal per-person preference in
+# ~/.conductor/settings.toml.
+#
+# default_plan_mode is pinned false deliberately (decided 2026-08-20): plan mode is an
+# unconditional prior, while the planning skills fire on the situations that warrant them and
+# tests/auto-trigger.sh measures that. The safety net for a bad change is the Stop-hook verify
+# gate plus worktree isolation. Plan mode per session (shift+tab) still works when a change
+# genuinely needs it. To change any pin: edit this file in vstack, run install.sh.
+"$schema" = "https://conductor.build/schemas/settings.schema.json"
+
+[models]
+default = "opus-5"
+default_fast_mode = true
+default_plan_mode = false

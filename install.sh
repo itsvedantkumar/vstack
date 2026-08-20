@@ -110,6 +110,14 @@ else
   say "kept       existing ~/.conductor/settings.toml"
 fi
 
+# The managed layer is different: it exists to pin model/fastMode/plan-mode above the Settings
+# UI, so it is ALWAYS overwritten — a managed file that install leaves alone is just a second
+# preferences file. The pins and their rationale live in conductor/settings.managed.toml.
+if [ -f "$SRC/conductor/settings.managed.toml" ]; then
+  [ "$DRY" = 0 ] && { mkdir -p "$HOME/.conductor"; cp "$SRC/conductor/settings.managed.toml" "$HOME/.conductor/settings.managed.toml"; }
+  say "pinned     ~/.conductor/settings.managed.toml (models, fast mode, plan mode)"
+fi
+
 # --- skills -------------------------------------------------------------------------------
 # Whole-dir replace per skill: they carry references/ and scripts/ subtrees, so a file-by-file
 # copy would leave stale files behind after an upstream removal. Only touches skills this repo
