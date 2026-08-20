@@ -600,17 +600,30 @@ fi
 #
 # So hand the validator a manifest that must be rejected, and if it accepts it, say the check
 # cannot measure here rather than reporting a pass on its behalf.
+# The control runs both ways, because each direction catches a different lie. A validator that
+# rejects everything looks identical to a broken repo: on CI the `claude` shim was on PATH while
+# its native binary was missing, so every invocation exited non-zero with an installation error
+# and nothing here could tell that apart from a genuinely bad manifest. A validator that accepts
+# everything looks identical to a healthy one. Require it to accept a good manifest AND reject a
+# bad one before believing a word it says about this repo's.
+ctl_state=usable
 if command -v claude >/dev/null 2>&1; then
-  ctl=$(mktemp -d); mkdir -p "$ctl/.claude-plugin"
-  printf '{"name":42,"version":"nope"}\n' > "$ctl/.claude-plugin/plugin.json"
-  ctl_ok=1
-  claude plugin validate --strict "$ctl" >/dev/null 2>&1 && ctl_ok=0
+  ctl=$(mktemp -d)
+  mkdir -p "$ctl/good/.claude-plugin" "$ctl/bad/.claude-plugin"
+  # The good manifest carries author too: without it --strict warns about missing attribution
+  # and the control fails itself, which reads exactly like a broken validator.
+  printf '{"name":"probe","version":"0.0.1","description":"control","author":{"name":"control"}}\n' \
+    > "$ctl/good/.claude-plugin/plugin.json"
+  printf '{"name":42,"version":"nope"}\n'                               > "$ctl/bad/.claude-plugin/plugin.json"
+  if ! ctl_out=$(claude plugin validate --strict "$ctl/good" 2>&1); then
+    ctl_state="cannot run: $(printf '%s' "$ctl_out" | grep -v '^$' | head -1)"
+  elif claude plugin validate --strict "$ctl/bad" >/dev/null 2>&1; then
+    ctl_state="accepts anything: it passed a manifest with name:42"
+  fi
   rm -rf "$ctl"
-else
-  ctl_ok=1
 fi
-if command -v claude >/dev/null 2>&1 && [ "$ctl_ok" = 0 ]; then
-  skip "plugin manifests valid" "validator accepted a manifest with name:42 — it is not validating here, so this check would only be reporting its own silence"
+if command -v claude >/dev/null 2>&1 && [ "$ctl_state" != usable ]; then
+  skip "plugin manifests valid" "validator $ctl_state — reporting its answer would be reporting its own silence"
 elif command -v claude >/dev/null 2>&1; then
   errs=""
   # Exactly one warning is expected: claude/CLAUDE.md is the source for the global and overlay

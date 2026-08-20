@@ -16,10 +16,23 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
 
-      # Check 19 runs `claude plugin validate --strict`; without the CLI it skips, and the
+      # Check 19 runs `claude plugin validate --strict`; without a working CLI it skips, and the
       # falsifiability suite skips its case 19 with it. Install it so CI proves the real thing.
+      #
+      # `npm install -g` alone was not enough and produced a false green for as long as the step
+      # has existed. The npm package is a shim that fetches a platform-native binary in its
+      # postinstall; that did not land here, so every `claude plugin validate` exited non-zero
+      # with "claude native binary not installed" — and check 19's old output parsing read that
+      # error as no findings and printed ok. CI has never once validated these manifests.
+      #
+      # So install it, then prove the binary answers before trusting the step. `claude
+      # --version` failing here is a setup failure and should stop the run, not be discovered
+      # later as a check that silently measures nothing.
       - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" || true
+          claude --version
 
       - name: Run the verification gate
         run: ./.claude/verify.sh
