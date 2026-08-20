@@ -508,6 +508,38 @@ if want update; then
   fi
 fi
 
+# --- recovering from a half-finished or damaged install ------------------------------------------
+# install.sh is not transactional: a crash, a full disk, or a kill mid-run leaves a partial tree.
+# The claim that re-running is safe has to hold from a damaged state, not only a clean one.
+#
+# The corrupt-settings case is the one that was actually broken. jq printed a raw parse error,
+# the merge silently did nothing, the file stayed unreadable, and install.sh exited with jq's
+# status — leaving everything else installed and a settings file Claude Code cannot read, with
+# nothing saying which of those had happened.
+if want recover; then
+  e=""
+  recover_probe(){ # <label> <damage-command>
+    H="$ROOT/rec-$1"; mkdir -p "$H"
+    HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+    eval "$2"
+    HOME="$H" "$SRC/install.sh" >/dev/null 2>&1; rrc=$?
+    [ "$rrc" = 0 ] || e="$e; $1: re-run exited $rrc"
+    [ "$(count_dirs "$H/.claude/skills")" = "$NSK" ]        || e="$e; $1: skills did not converge"
+    [ "$(count_files "$H/.claude/hooks" '*.sh')" = "$NHK" ] || e="$e; $1: hooks did not converge"
+    [ -f "$H/.config/agents/bin/vstack" ]                   || e="$e; $1: wrappers did not converge"
+    if command -v jq >/dev/null 2>&1; then
+      jq -e . "$H/.claude/settings.json" >/dev/null 2>&1 || e="$e; $1: settings.json is not valid JSON"
+    fi
+  }
+  recover_probe skills-gone   'rm -rf "$H"/.claude/skills/swarm "$H"/.claude/skills/unslop'
+  recover_probe hooks-gone    'rm -f "$H"/.claude/hooks/*.sh'
+  recover_probe wrappers-gone 'rm -f "$H"/.config/agents/bin/*'
+  recover_probe half-skill    'rm -f "$H"/.claude/skills/swarm/SKILL.md'
+  recover_probe bad-settings  'printf "{\"broken\": " > "$H"/.claude/settings.json'
+  [ -z "$e" ] && ok "re-running converges from a damaged install" \
+    || bad "re-running converges from a damaged install" "${e#; }"
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"

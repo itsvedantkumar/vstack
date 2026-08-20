@@ -224,6 +224,23 @@ fi
 RETIRED='[]'
 US="$CDIR/settings.json"; back "$US"
 [ -f "$US" ] || { [ "$DRY" = 0 ] && echo '{}' > "$US"; }
+
+# A settings.json that does not parse is not a merge problem, it is a broken file. It happens:
+# a crash or a full disk mid-write, or a hand edit that dropped a brace. Until now the merge
+# just failed — jq printed a raw parse error, the file stayed corrupt, install.sh exited with
+# jq's status, and the user was left with everything else installed and a settings file Claude
+# Code cannot read at all. Nothing said which of those things had happened.
+#
+# The backup was already taken above, so the honest move is to say so loudly and start from a
+# known-good file. Keeping an unparseable one helps nobody: Claude Code cannot read it either.
+if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 1 ] && [ -s "$US" ]; then
+  if ! jq -e . "$US" >/dev/null 2>&1; then
+    say "WARNING    $US did not parse as JSON and has been replaced."
+    say "           your copy is safe at $BK/files/${US#"$HOME"/}"
+    say "           re-apply anything you need from it by hand."
+    echo '{}' > "$US"
+  fi
+fi
 if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   # No jq: never hand-merge JSON. Write the portable settings only when there is nothing
   # to lose, otherwise leave the existing file untouched.
