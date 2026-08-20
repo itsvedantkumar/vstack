@@ -23,8 +23,14 @@
         }
       ],
       "decoys": [
-        { "line": 10, "why_not_a_bug": "the role value is bound as a parameter; the concatenation is of a constant empty string" },
-        { "line": 15, "why_not_a_bug": "string concatenation into a log label is not injection" }
+        {
+          "line": 10,
+          "why_not_a_bug": "the role value is bound as a parameter; the concatenation is of a constant empty string"
+        },
+        {
+          "line": 15,
+          "why_not_a_bug": "string concatenation into a log label is not injection"
+        }
       ]
     },
     {
@@ -37,7 +43,10 @@
         }
       ],
       "decoys": [
-        { "line": 11, "why_not_a_bug": "negative slicing is guarded by n > 0 and behaves correctly" }
+        {
+          "line": 11,
+          "why_not_a_bug": "negative slicing is guarded by n > 0 and behaves correctly"
+        }
       ]
     },
     {
@@ -50,14 +59,84 @@
         }
       ],
       "decoys": [
-        { "line": 13, "why_not_a_bug": "the with-statement closes the handle on every path" }
+        {
+          "line": 13,
+          "why_not_a_bug": "the with-statement closes the handle on every path"
+        }
       ]
     },
     {
       "file": "clean.py",
       "planted": [],
       "decoys": [
-        { "line": 0, "why_not_a_bug": "this file is correct throughout; any finding at all is a false positive" }
+        {
+          "line": 0,
+          "why_not_a_bug": "this file is correct throughout; any finding at all is a false positive"
+        }
+      ]
+    },
+    {
+      "file": "auth-bypass.py",
+      "planted": [
+        {
+          "line": 3,
+          "category": "security",
+          "what": "`or \"superuser\"` is always truthy, so every caller is treated as admin"
+        }
+      ],
+      "decoys": [
+        {
+          "line": 9,
+          "why_not_a_bug": "a correct membership test that resembles the bug above"
+        }
+      ]
+    },
+    {
+      "file": "race.py",
+      "planted": [
+        {
+          "line": 5,
+          "category": "correctness",
+          "what": "check-then-act: two workers can both pass the exists() check and both claim the job"
+        }
+      ],
+      "decoys": [
+        {
+          "line": 13,
+          "why_not_a_bug": "O_CREAT|O_EXCL makes this claim atomic and correct"
+        }
+      ]
+    },
+    {
+      "file": "unbounded.py",
+      "planted": [
+        {
+          "line": 4,
+          "category": "correctness",
+          "what": "the limit parameter is never applied, so hostile input is read without bound"
+        }
+      ],
+      "decoys": [
+        {
+          "line": 10,
+          "why_not_a_bug": "a correctly bounded take"
+        }
+      ]
+    },
+    {
+      "file": "integer.py",
+      "planted": [
+        {
+          "line": 3,
+          "category": "correctness",
+          "what": "division by len(values) raises ZeroDivisionError on empty input"
+        }
+      ],
+      "decoys": [
+        {
+          "line": 7,
+          "why_not_a_bug": "guarded division, correct"
+        }
       ]
     }
   ]
