@@ -6,6 +6,28 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.6.0 — 2026-08-21
+
+**A review benchmark, and its result: no difference.** `tests/evals/` sends an identical prompt
+under three arms — Claude Code's built-ins alone, plus vstack's skills, plus gstack's — against
+fixtures with planted defects and decoys that look suspicious and are correct. Every arm loads
+skills the same way, so the only variable is which skills are present. 60 model calls returned
+11/15, 11/15 and 10/15 with zero false positives each. No configuration beat the baseline.
+
+The explanation is in the validity column: zero skill invocations across all sixty runs. A
+single-file defect review does not route to a skill in any of these harnesses — vstack reviews
+through a subagent, gstack through a slash command — so this measured skills that were present
+and idle. `tests/evals/RESULTS.md` publishes the numbers, the reason, and two methodology
+failures that both flattered this repository before being caught.
+
+**The deploy tier is opt-in.** `setup-machine.sh` installed vercel and wrangler by default,
+which made one author's deployment stack look like a requirement of the product. It is behind
+`--with-deploy` now, and the default install is smaller.
+
+**`bin/cloudflare-mcp` explains itself instead of crashing.** It points at a server this repo
+does not vendor, so on anyone else's machine it died with a raw "Cannot find module" that read
+like vstack was broken. It now says what is missing, what to set, and exits cleanly.
+
 ## 1.5.0 — 2026-08-20
 
 A second external review, of the improvements rather than the bugs. Its headline finding was
