@@ -38,7 +38,9 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 SRC=$(pwd)
 
-ROOT=$(mktemp -d "${TMPDIR:-/tmp}/vstack-matrix.XXXXXX")
+# Canonicalised: macOS $TMPDIR ends in a slash, so the raw path can carry a double slash that
+# cd+pwd elsewhere normalises away, and comparisons between the two spellings silently fail.
+ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/vstack-matrix.XXXXXX")" && pwd)
 trap 'rm -rf "$ROOT"' EXIT
 
 PASS=0; FAIL=0; SKIP=0

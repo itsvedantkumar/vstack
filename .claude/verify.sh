@@ -598,8 +598,19 @@ if command -v jq >/dev/null; then
   chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)" 512
   chk "session baseline"       "$(probe SessionStart '' '')"    4096
   chk "skills profile"         "$(probe SessionStart skills 1)" 2560
+  # The README publishes these byte counts as the cost column of its comparison table. A number
+  # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
+  # keeps finding in its own docs — so the published figures are read back and compared.
+  _full=$(probe SessionStart '' '')
+  _sk=$(probe SessionStart skills 1)
+  if [ -f README.md ] && grep -q 'B full / .* B plugin' README.md; then
+    _quoted=$(grep -oE '[0-9]+ B full / [0-9]+ B plugin' README.md | head -1)
+    _want="$_full B full / $_sk B plugin"
+    [ "$_quoted" = "$_want" ] \
+      || errs="$errs\nREADME quotes '$_quoted' for the per-session cost; the live figure is '$_want'"
+  fi
   [ -z "$errs" ] \
-    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $(probe SessionStart '' '') B)" \
+    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
     || bad "injected context bounded" "$(printf '%b' "$errs")"
 else
   skip "injected context bounded" "jq not installed"

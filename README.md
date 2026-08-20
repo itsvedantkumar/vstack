@@ -203,6 +203,39 @@ start.
 which skills fired. Strip the routing block and cases fail, which is how you know the test is
 worth having. [docs/how-skills-fire.md](docs/how-skills-fire.md) has the measurements.
 
+## What this does that an unconfigured setup does not
+
+Most setups in this space claim to make you better and none of them show it, because the claim
+is usually about outcomes and outcomes depend far more on you and your problem than on any
+config. So here is the narrower thing that can actually be checked — which mechanisms exist, and
+what they decide when fired with identical input:
+
+```
+$ tests/compare-baseline.sh
+
+scenario                             bare                vstack
+agent claims done, tests fail        nothing intervenes  block
+rm -rf / from an agent               runs                deny
+git push --force origin main         runs                deny
+git reset --hard, uncommitted work   runs                ask
+rm -rf node_modules (routine)        runs                allow
+untrusted repo's gate on Stop        no gate at all      did not run it
+context spent per session (cost)     0 B                 3655 B full / 2178 B plugin
+```
+
+Run it yourself; it takes a second and needs no API key. Each row asserts the decision it
+expects, so it fails if a mechanism regresses, and it runs in CI on every push.
+
+Two rows are there to keep the rest honest. `rm -rf node_modules` must be allowed, because a
+guard that interrupts routine work gets switched off and a switched-off guard measures zero. And
+the last row is a cost, not a benefit: this spends context on every session whether or not a
+skill fires, and you should know the number before installing.
+
+What it does not measure: whether the skills produce better work. That needs a live model and
+human judgement. [`tests/auto-trigger.sh`](tests/auto-trigger.sh) measures whether they *fire*,
+which is a smaller and more checkable claim, and nothing here measures quality. It also says
+nothing about other setups — several have mechanisms this one does not.
+
 ## Verification that blocks completion
 
 Put an executable `.claude/verify.sh` in a repo and the `verify-gate.sh` Stop hook runs it

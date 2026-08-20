@@ -37,6 +37,7 @@ step "install (converge this machine)" ./install.sh
 step "verify.sh"              ./.claude/verify.sh
 step "gate-falsifiability.sh" ./tests/gate-falsifiability.sh
 step "install-matrix.sh"      ./tests/install-matrix.sh
+step "compare-baseline.sh"    ./tests/compare-baseline.sh
 step "doctor"                 ./bin/doctor
 step "doctor --drift"         ./bin/doctor --drift
 

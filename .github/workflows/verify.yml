@@ -93,6 +93,11 @@ jobs:
       - name: Prove every check is falsifiable
         run: ./tests/gate-falsifiability.sh
 
+      # The comparison the README cites. It asserts the decision each mechanism produces, so a
+      # regression turns it red rather than quietly changing a number in a table nobody re-runs.
+      - name: The mechanisms still decide what the README says they do
+        run: ./tests/compare-baseline.sh
+
       - name: Confirm the tree is restored
         run: git diff --exit-code
 
