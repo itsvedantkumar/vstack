@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Autonomous deploy: verify -> deploy -> health-check -> notify. Detects Vercel / Cloudflare.
 set -uo pipefail
-d="${1:-$PWD}"; cd "$d"
+# `cd || exit`, because without it a bad path left this running in the caller's directory and
+# every step below — verify, detect, deploy — operated on whatever project the shell happened to
+# be sitting in. A stale argument could deploy something nobody named.
+d="${1:-$PWD}"; cd "$d" || { echo "deploy-auto: cannot enter $d" >&2; exit 1; }
 notify(){ osascript -e "display notification \"$1\" with title \"Deploy\" sound name \"$2\"" >/dev/null 2>&1 || true; }
 if [ -x .claude/verify.sh ]; then echo "▶ verify"; bash .claude/verify.sh || { echo "✖ verify failed — aborting"; notify "verify failed — aborted" Basso; exit 1; }; fi
 url=""

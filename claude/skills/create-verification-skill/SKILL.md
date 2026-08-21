@@ -90,10 +90,20 @@ run() {  # run <label> <command...>
 
 has_script() { [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.['$1']?0:1)" 2>/dev/null; }
 
+RAN=0
+run_if() { # <label> <cmd...>  -- counts what actually executed
+  RAN=$((RAN+1)); run "$@"
+}
+
 # --- Static gate: replace with the exact checks found in this repo ------------
-has_script typecheck && run typecheck npm run --silent typecheck || echo "skip typecheck (no script)"
-has_script lint      && run lint      npm run --silent lint      || echo "skip lint (no script)"
-has_script test      && run test      npm run --silent test      || echo "skip test (no script)"
+# This template is npm-shaped. In a Go, Rust, Python or Makefile repo every has_script is false,
+# every line prints "skip", and the script exits 0 having verified nothing -- a gate that cannot
+# fail is not a gate. Replace these three lines with the repo's real commands (go vet ./... &&
+# go test ./..., cargo clippy, pytest, make check). The RAN counter below is the backstop: it
+# refuses to report success until at least one check has actually run.
+has_script typecheck && run_if typecheck npm run --silent typecheck || echo "skip typecheck (no script)"
+has_script lint      && run_if lint      npm run --silent lint      || echo "skip lint (no script)"
+has_script test      && run_if test      npm run --silent test      || echo "skip test (no script)"
 
 # --- Optional smoke: only if the app is ALREADY up. Never start a server here;
 # --- the hook has no way to reap it and a stray process poisons the next run.
@@ -101,6 +111,12 @@ if curl -fsS -m 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
   run smoke bash .claude/verify-smoke.sh
 else
   echo "skip smoke (nothing serving :3000)"
+fi
+
+if [ "$RAN" -eq 0 ]; then
+  echo "Blocked by .claude/verify.sh: every check skipped, so nothing was verified."
+  echo "This gate is still the npm-shaped template. Point it at this repo's real commands."
+  exit 1
 fi
 
 if [ "$FAILED" -ne 0 ]; then

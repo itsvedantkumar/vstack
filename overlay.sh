@@ -36,6 +36,15 @@ ALLOW=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$KEYFILE" | tr '\n' ' ')
 
 if command -v jq >/dev/null; then
   [ -f "$DEST/.claude/settings.json" ] || echo '{}' > "$DEST/.claude/settings.json"
+  # This used to delete every key vstack ships that is NOT on the project allowlist, on the
+  # theory that it was cleaning up its own past overlays. It has no way to know that. Run against
+  # a repository that independently set enabledPlugins, theme or forceLoginMethod — names vstack
+  # happens to use at user scope — it deleted all three, because the deletion was keyed on
+  # vstack's vocabulary rather than on provenance.
+  #
+  # It writes the allowlisted keys and leaves everything else alone now. Cleaning up an old
+  # overlay has to be an explicit, separate act: provenance is not recoverable from the file, and
+  # guessing at it costs someone their settings.
   clobbered=$(jq -rs '((.[0].hooks // {} | keys) - ((.[0].hooks // {} | keys) - (.[1].hooks // {} | keys))) | join(", ")' \
     "$DEST/.claude/settings.json" "$SRC/claude/settings.json")
   tmp=$(mktemp)
@@ -43,9 +52,7 @@ if command -v jq >/dev/null; then
     ($allow | split(" ") | map(select(length > 0))) as $A
     | . as [$dest, $src]
     | ($src | with_entries(select(.key as $k | $A | index($k)))) as $ship
-    | (($src | keys) - $A) as $strip
     | ($dest * $ship)
-    | delpaths([$strip[] | [.]])
     | .skillOverrides = ($ship.skillOverrides // {})
   ' "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"

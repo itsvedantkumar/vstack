@@ -80,6 +80,13 @@ fi
 
 echo "restoring from: $BK"
 
+# uninstall never had a backup helper — `back` is install.sh's, and calling it here was a
+# command-not-found that silently skipped the copy before every edit this script makes.
+# Anything modified below is copied next to the backup being restored from, so an uninstall is
+# itself reversible.
+UNDO="$BK/pre-uninstall"
+back(){ [ -f "$1" ] || return 0; mkdir -p "$UNDO$(dirname "$1")"; cp "$1" "$UNDO$1" 2>/dev/null || true; }
+
 # --- map a flat backup filename back to its real installed path ----------------------------
 # Inverse of install.sh's back(): "${path#$HOME/}" then `tr / _`. claude.json is special-cased
 # there too (copied without flattening), so it is special-cased here.
@@ -244,6 +251,78 @@ printf '%s' "$FILE_REMOVE_LIST" | while IFS= read -r tgt; do
   [ -n "$tgt" ] || continue
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] && rm -f "$tgt"
+done
+
+# --- settings.json: unpick vstack's own entries, leave everything else ------------------------
+#
+# Not deleting the file — install.sh merges into it, so it holds the user's configuration too.
+# But leaving it entirely alone was worse than either extreme: a fresh install followed by a
+# fresh uninstall left six hook commands pointing at scripts that had just been deleted, plus
+# vstack's model policy and all seventeen skillOverrides still in force. The result was not a
+# removed tool, it was a broken one, and later Claude sessions can error on the dead hooks.
+#
+# Ownership is decided by exact value, which is the only signal available. A hook whose command
+# points into the config dir vstack installed into is vstack's. A skillOverride whose value still
+# matches what vstack shipped is vstack's; one the user has since changed is theirs and stays. A
+# top-level key is removed only if it still equals what this repo ships — edit it and it is
+# yours. That is conservative in the right direction: the failure mode is leaving something
+# behind, not deleting something somebody wanted.
+if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/claude/settings.json" ]; then
+  utmp=$(mktemp)
+  if jq -s --arg h "$CDIR/hooks" '
+      . as [$live, $ship]
+      | ($live.hooks // {}) as $lh
+      | $live
+      # Hook entries whose command runs a script from vstack'"'"'s hooks directory.
+      | .hooks = ( $lh
+          | with_entries(.value |= map(select(
+              [.hooks[]?.command] | map(startswith($h)) | any | not )))
+          | with_entries(select(.value | length > 0)) )
+      | if (.hooks | length) == 0 then del(.hooks) else . end
+      # skillOverrides vstack set and the user has not changed since.
+      | .skillOverrides = ( (.skillOverrides // {})
+          | with_entries(select(
+              (.key as $k | ($ship.skillOverrides // {}) | has($k)) and
+              (.value == ($ship.skillOverrides // {})[.key]) | not )) )
+      | if (.skillOverrides | length) == 0 then del(.skillOverrides) else . end
+      # statusLine points at a file vstack installed and has just removed.
+      | if (.statusLine.command? // "") | startswith(($h | rtrimstr("/hooks"))) then del(.statusLine) else . end
+      # Top-level policy keys, removed only where the live value still equals what vstack ships.
+      | reduce ($ship | keys_unsorted[]) as $k (.;
+          if $k == "hooks" or $k == "skillOverrides" then .
+          elif has($k) and (.[$k] == $ship[$k]) then del(.[$k])
+          else . end)
+    ' "$CDIR/settings.json" "$SRC/claude/settings.json" > "$utmp" && jq -e . "$utmp" >/dev/null 2>&1; then
+    back "$CDIR/settings.json"
+    cat "$utmp" > "$CDIR/settings.json"
+    echo "cleaned  $CDIR/settings.json (vstack hooks, overrides and unedited policy keys removed)"
+  fi
+  rm -f "$utmp"
+fi
+
+# The trust store is vstack'"'"'s alone: it exists so the Stop hook will execute a repo'"'"'s gate.
+if [ -f "$HOME/.config/agents/verify-trust" ]; then
+  rm -f "$HOME/.config/agents/verify-trust"
+  echo "removed  $HOME/.config/agents/verify-trust"
+fi
+
+# Shell blocks vstack wrote, matched by their own sentinels so a hand-edited rc is left alone.
+for rc in .zshrc .zshenv .bashrc .profile; do
+  [ -f "$HOME/$rc" ] || continue
+  grep -q 'claude-parity' "$HOME/$rc" 2>/dev/null || continue
+  back "$HOME/$rc"
+  stmp=$(mktemp)
+  # The env block is removed first and by its own sentinels. Running the plain-block
+  # expression first consumed the line "# >>> claude-parity env >>>" — which also contains
+  # ">>> claude-parity" — and then ran on to the wrong terminator, so .zshrc came out clean
+  # while .zshenv kept its block. The earlier attempt at this fix also carried a stray '>' in
+  # the pattern, which matched nothing at all.
+  sed -e '/>>> claude-parity env >>>/,/<<< claude-parity env <<</d' \
+      -e '/>>> claude-parity >>>/,/<<< claude-parity <<</d' \
+      -e '/claude-parity\.zsh/d' \
+    "$HOME/$rc" > "$stmp" && cat "$stmp" > "$HOME/$rc"
+  rm -f "$stmp"
+  echo "cleaned  ~/$rc (claude-parity block removed)"
 done
 
 echo "restore complete."

@@ -136,9 +136,23 @@ case "$CMD" in
     tmp=$(mktemp)
     grep -vF "  $root/" "$ts" 2>/dev/null | grep -vF "  $v" > "$tmp" || true
     printf '%s  %s\n' "$h" "$v" >> "$tmp"
+    # Which scripts those are is read out of verify.sh, not hardcoded. The list used to be
+    # vstack's own four -- install.sh, overlay.sh, uninstall.sh, bootstrap.sh -- which covers this
+    # repo and no one else's: a stranger whose gate calls ./scripts/ci.sh got the entry point
+    # hashed and the code it runs floating free, which is the exact hole the boundary exists to
+    # close. Any .sh path written literally in verify.sh that resolves to a file inside the repo
+    # is recorded and re-checked.
+    #
+    # A path verify.sh builds at runtime is still invisible here, and no amount of scanning fixes
+    # that. The boundary is anchored on a human reading the script before running this command;
+    # what the hashes buy is that it cannot change afterwards without the gate noticing.
     n=1
-    for extra in install.sh overlay.sh uninstall.sh bootstrap.sh; do
+    for extra in $(grep -ohE '[A-Za-z0-9_][A-Za-z0-9_./-]*\.sh' "$v" 2>/dev/null | sed 's|^\./||' | sort -u) \
+                 install.sh overlay.sh uninstall.sh bootstrap.sh; do
+      case "$extra" in /*|*..*) continue ;; esac
       [ -f "$root/$extra" ] || continue
+      [ "$root/$extra" = "$v" ] && continue
+      grep -qF "  $root/$extra" "$tmp" && continue
       if command -v shasum >/dev/null 2>&1; then eh=$(shasum -a 256 "$root/$extra" | cut -d' ' -f1)
       else eh=$(sha256sum "$root/$extra" | cut -d' ' -f1); fi
       printf '%s  %s\n' "$eh" "$root/$extra" >> "$tmp"

@@ -240,6 +240,13 @@ fi
 
 p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖ $2"; FAIL=1; }; FAIL=0
 
+# Not every line below is vstack's to be right about. A stranger's Claude plan, their directory
+# layout, and which optional plugins they installed are theirs, and reporting DRIFT over them
+# made a clean install look broken -- eight red lines that no re-run could ever fix. `note` says
+# the same thing without claiming the setup is wrong. What stays a hard failure is only what
+# vstack itself installs and can therefore be held to.
+note(){ p "$1" "· $2"; }
+
 get_perms(){
   if [ "$(/usr/bin/uname -s 2>/dev/null || uname -s 2>/dev/null)" = "Darwin" ]; then
     stat -f '%Lp' "$1" 2>/dev/null
@@ -294,16 +301,39 @@ fi
 [ -n "$_amb_theirs" ] && p "your own secrets sourcing" "note:$_amb_theirs sources secrets.env, so every child process of those shells sees your tokens. The wrappers in ~/.config/agents/bin load what they need on their own, so this line is probably not needed."
 for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
-echo "── memory ──"; [ -d "$HOME/.claude-mem" ] && ok "claude-mem store" || bad "claude-mem" "missing"
+echo "── memory ──"
+# claude-mem is a third-party plugin vstack configures if present, not something it installs.
+if [ -d "$HOME/.claude-mem" ]; then ok "claude-mem store"
+else note "claude-mem" "not installed (optional; vstack tunes it when it is)"; fi
 S="$CDIR/settings.json"
 echo "── parity ──"
 [ -z "${ANTHROPIC_API_KEY:-}" ] && ok "no ANTHROPIC_API_KEY in env" || bad "ANTHROPIC_API_KEY" "set — billing API credits, not the Max sub"
 AS=$(claude auth status 2>/dev/null)
 # NB: there is no `apiKeySource` field in 2.1.226 — `jq '{apiKeySource}'` renders a missing
 # key as null, which looks like a pass but proves nothing. authMethod+apiProvider are real.
-printf '%s' "$AS" | jq -e '.subscriptionType=="max"' >/dev/null 2>&1 && ok "auth: Max subscription" || bad "auth" "not on subscription"
-printf '%s' "$AS" | jq -e '.authMethod=="claude.ai" and .apiProvider=="firstParty"' >/dev/null 2>&1 \
-  && ok "auth: claude.ai OAuth (not API key)" || bad "auth method" "not OAuth — may be billing API credits"
+# The plan is the user's. vstack's actual claim is narrower and is asserted right below: that
+# you are not silently paying per-token when you meant to use a subscription.
+sub=$(printf '%s' "$AS" | jq -r '.subscriptionType // "unknown"' 2>/dev/null)
+printf '%s' "$AS" | jq -e '.loggedIn == false' >/dev/null 2>&1 && sub="signed-out"
+case "$sub" in
+  max)        ok   "auth: Max subscription" ;;
+  signed-out) note "auth: plan" "not signed in yet — run 'claude login'" ;;
+  unknown)    note "auth: plan" "could not read subscriptionType (claude auth status gave nothing)" ;;
+  *)       note "auth: plan" "$sub — vstack works on any plan; Max is what its defaults were tuned against" ;;
+esac
+# Three states, not two. A machine that has never run `claude login` returns nothing here, and
+# reading nothing as "not OAuth" told every fresh install it might be burning API credits -- a
+# red line about billing on a setup that has not made a single request. Absence of an answer is
+# not an answer.
+# The CLI answers `{"loggedIn": false, "authMethod": "none"}` rather than staying silent, so
+# emptiness is not the signal -- loggedIn is.
+if [ -z "$AS" ] || printf '%s' "$AS" | jq -e '.loggedIn == false' >/dev/null 2>&1; then
+  note "auth method" "not signed in yet — run 'claude login' (nothing to check until then)"
+elif printf '%s' "$AS" | jq -e '.authMethod=="claude.ai" and .apiProvider=="firstParty"' >/dev/null 2>&1; then
+  ok "auth: claude.ai OAuth (not API key)"
+else
+  bad "auth method" "not OAuth — may be billing API credits"
+fi
 printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1 \
   && ok "forceLoginMethod enforced" || bad "forceLoginMethod" "not enforced"
 [ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
@@ -354,8 +384,17 @@ else
     [ -f "$main/.conductor/settings.toml" ] || uncovered="$uncovered $(basename "$main")"
   done
   uncovered=$(printf '%s' "$uncovered" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
-  [ -z "$uncovered" ] && ok "active repos overlaid ($scanned scanned)" \
-    || bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
+  # Scanning zero repos is not a pass. On any machine that does not use this layout the loop
+  # matched nothing, uncovered stayed empty, and the tick appeared over a check that compared
+  # nothing at all -- the same shape as every other green this project has had to go back and
+  # fix. Say what was looked at instead.
+  if [ "$scanned" = 0 ]; then
+    note "active repos overlaid" "no git repos found under ~/Projects, ~/conductor/repos or ~/conductor/workspaces — nothing scanned"
+  elif [ -z "$uncovered" ]; then
+    ok "active repos overlaid ($scanned scanned)"
+  else
+    bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
+  fi
 fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
@@ -367,4 +406,10 @@ if [ -f "$B" ]; then
     && ok "bridge env matches settings" || bad "bridge env" "settings=$want not in bridge-state.json"
 fi
 [ "${1:-}" = "--mcp" ] && { echo "── mcp ──"; claude mcp list 2>/dev/null | grep -E 'Connected|Failed'; }
-echo; [ "$FAIL" -eq 0 ] && echo "ALL GREEN ✔" || echo "DRIFT ✖"; exit $FAIL
+echo
+if [ "$FAIL" -eq 0 ]; then
+  echo "ALL GREEN ✔   (· lines are yours to decide on, not drift)"
+else
+  echo "DRIFT ✖"
+fi
+exit $FAIL

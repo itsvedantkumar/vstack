@@ -119,17 +119,24 @@ review() { # <fixture> <arm> <workdir>
   printf '%s\t%s\t%s' "$(printf '%s' "$text" | sed -n 's/.*\(\[.*\]\).*/\1/p' | head -1)" "${loaded:-0}" "${fired:-0}"
 }
 
-score() { # <fixture> <findings-json> -> {hits,planted,fp}
+score() { # <fixture> <findings-json> -> {hits,planted,fp,err}
   local f="$1" found="$2"
   [ -n "$found" ] || found='[]'
   printf '%s' "$found" | jq -e . >/dev/null 2>&1 || found='[]'
+  # The denominator comes from ground truth, never from the scorer. The old fallback returned
+  # planted:0 alongside hits:0, so an arm whose scorer crashed on every fixture finished at 0/0
+  # -- which prints as "there was nothing to find" instead of "the measurement broke". Every
+  # benchmark bug in this harness so far has had that shape: a zero that reads as a finding.
+  local planted
+  planted=$(jq -r --arg f "$f" '[.fixtures[]|select(.file==$f)|.planted[]?]|length' "$GT" 2>/dev/null || echo 0)
   jq -n --argjson g "$(jq --arg f "$f" '.fixtures[]|select(.file==$f)' "$GT")" \
         --argjson found "$found" --argjson tol "$TOL" '
     ($g.planted // []) as $p
     | { hits:    ([ $p[] | . as $pl | select(($found|map(select(((.line-$pl.line)|fabs)<=$tol))|length)>0) ]|length),
         planted: ($p|length),
-        fp:      ([ $found[] | . as $fd | select(($p|map(select(((($fd.line)-.line)|fabs)<=$tol))|length)==0) ]|length) }' \
-    2>/dev/null || echo '{"hits":0,"planted":0,"fp":0}'
+        fp:      ([ $found[] | . as $fd | select(($p|map(select(((($fd.line)-.line)|fabs)<=$tol))|length)==0) ]|length),
+        err:     0 }' \
+    2>/dev/null || printf '{"hits":0,"planted":%s,"fp":0,"err":1}' "${planted:-0}"
 }
 
 ARMS=$(printf '%s' "$ARMS_CSV" | tr ',' ' ')
@@ -137,7 +144,7 @@ RESULTS=""
 NFIX=$(jq -r '.fixtures|length' "$GT")
 
 for a in $ARMS; do
-  ah=0; ap=0; afp=0; aload=0; afire=0; runs=0
+  ah=0; ap=0; afp=0; aload=0; afire=0; runs=0; aerr=0
   for f in $(jq -r '.fixtures[].file' "$GT"); do
     for s in $(seq 1 "$SAMPLES"); do
       line=$(review "$f" "$a" "$ROOT/$a-${f%.py}-$s")
@@ -148,11 +155,12 @@ for a in $ARMS; do
       ah=$((ah + $(printf '%s' "$sc" | jq -r '.hits')))
       ap=$((ap + $(printf '%s' "$sc" | jq -r '.planted')))
       afp=$((afp + $(printf '%s' "$sc" | jq -r '.fp')))
+      aerr=$((aerr + $(printf '%s' "$sc" | jq -r '.err // 0')))
       aload=$((aload + ${loaded:-0})); afire=$((afire + ${fired:-0})); runs=$((runs+1))
     done
   done
   [ "$runs" -gt 0 ] || runs=1
-  RESULTS="$RESULTS$a|$ah|$ap|$afp|$((aload / runs))|$afire
+  RESULTS="$RESULTS$a|$ah|$ap|$afp|$((aload / runs))|$afire|$aerr
 "
 done
 
@@ -161,6 +169,7 @@ if [ "$JSON" = 1 ]; then
     'split("\n")|map(select(length>0))|map(split("|"))
      |map({arm:.[0],found:(.[1]|tonumber),planted:(.[2]|tonumber),false_positives:(.[3]|tonumber),
            skills_loaded_avg:(.[4]|tonumber),skill_invocations:(.[5]|tonumber),
+           scorer_errors:(.[6]//"0"|tonumber),
            samples_per_fixture:$n,fixtures:$fx})'
   exit 0
 fi
@@ -168,12 +177,13 @@ fi
 printf 'review benchmark — %s fixture(s), %s sample(s) each, real model calls\n\n' "$NFIX" "$SAMPLES"
 printf '%-8s %-8s %-9s %-17s %-15s %s\n' "arm" "found" "planted" "false positives" "skills loaded" "skill calls"
 printf '%-8s %-8s %-9s %-17s %-15s %s\n' "--------" "--------" "---------" "-----------------" "---------------" "-----------"
-printf '%s' "$RESULTS" | while IFS='|' read -r a h p fp ld fr; do
+printf '%s' "$RESULTS" | while IFS='|' read -r a h p fp ld fr er; do
   [ -n "$a" ] || continue
   note=""
   # A harness arm that loaded no more skills than the built-ins never actually ran. Saying so is
   # the whole point: an arm that silently did nothing scores zero and looks like a weak result.
   if [ "$a" != none ] && [ "${ld:-0}" -le 20 ]; then note="   INVALID: harness skills did not load"; fi
+  if [ "${er:-0}" -gt 0 ]; then note="$note   INVALID: scorer failed on ${er} run(s)"; fi
   printf '%-8s %-8s %-9s %-17s %-15s %s%s\n' "$a" "$h" "$p" "$fp" "$ld" "$fr" "$note"
 done
 

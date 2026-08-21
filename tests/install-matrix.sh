@@ -630,6 +630,89 @@ if want no-ambient-secrets; then
     || bad "credentials are not exported into shells" "${e#; }"
 fi
 
+# --- uninstall leaves nothing of vstack behind -------------------------------------------------
+# An external audit found that a fresh install followed by a fresh uninstall left six hook
+# commands pointing at scripts that had just been deleted, plus vstack's model policy and all
+# seventeen skillOverrides still in force. That is not a removed tool, it is a broken one, and
+# later sessions can error on the dead hooks.
+#
+# The user's own settings must survive the same operation, which is the harder half: uninstall
+# has to unpick its own entries from a file it merged into, not delete the file.
+if want uninstall-clean; then
+  H="$ROOT/unclean"; mkdir -p "$H/.claude" "$H/.conductor"
+  # things that are theirs, which must all still be here afterwards
+  printf '{"theirKey":"keep","theme":"dracula","skillOverrides":{"their-skill":"off"}}\n' > "$H/.claude/settings.json"
+  printf 'THEIR_MANAGED=true\n' > "$H/.conductor/settings.managed.toml"
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  HOME="$H" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
+  e=""
+  if command -v jq >/dev/null 2>&1; then
+    n=$(jq -r '[.hooks[]?[]?.hooks[]?.command]|length' "$H/.claude/settings.json" 2>/dev/null || echo 0)
+    [ "${n:-0}" -eq 0 ] || e="$e; $n hook commands left pointing at deleted scripts"
+    [ "$(jq -r '.model // "gone"' "$H/.claude/settings.json")" = gone ] || e="$e; vstack model policy still in force"
+    [ "$(jq -r 'if .statusLine then "left" else "gone" end' "$H/.claude/settings.json")" = gone ] || e="$e; statusLine points at a removed file"
+    # and the half that matters more: their own settings are untouched
+    [ "$(jq -r '.theirKey // "GONE"' "$H/.claude/settings.json")" = keep ] || e="$e; their own settings key was deleted"
+    [ "$(jq -r '.skillOverrides["their-skill"] // "GONE"' "$H/.claude/settings.json")" = off ] || e="$e; their own skillOverride was deleted"
+  fi
+  grep -q THEIR_MANAGED "$H/.conductor/settings.managed.toml" 2>/dev/null \
+    || e="$e; their Conductor managed policy was not restored"
+  [ -f "$H/.config/agents/verify-trust" ] && e="$e; the trust store was left behind"
+  for rc in .zshrc .zshenv .bashrc; do
+    [ -f "$H/$rc" ] && grep -q 'claude-parity' "$H/$rc" 2>/dev/null && e="$e; $rc still sources vstack"
+  done
+  [ -z "$e" ] && ok "uninstall removes vstack and keeps your own settings" \
+    || bad "uninstall removes vstack and keeps your own settings" "${e#; }"
+fi
+
+# --- overlay does not delete settings the target repo owns -------------------------------------
+# It used to delete every key vstack ships that is not on the project allowlist, on the theory
+# that it was cleaning up its own past overlays. It cannot know that. A repository that
+# independently set enabledPlugins, theme or forceLoginMethod — names vstack happens to use at
+# user scope — lost all three.
+if want overlay-preserves; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "overlay preserves the target's settings" "git or jq not installed"
+  else
+    T="$ROOT/ovlkeep"; mkdir -p "$T/.claude"
+    git -C "$T" init -q; git -C "$T" config user.email t@example.com; git -C "$T" config user.name t
+    printf '{"enabledPlugins":{"theirs@x":true},"theme":"dracula","forceLoginMethod":"console","theirOwn":"keep"}\n' > "$T/.claude/settings.json"
+    printf 'x\n' > "$T/f"; git -C "$T" add -A; git -C "$T" commit -qm init
+    "$SRC/overlay.sh" "$T" >/dev/null 2>&1
+    e=""
+    for k in enabledPlugins theme forceLoginMethod theirOwn; do
+      [ "$(jq -r "if has(\"$k\") then \"kept\" else \"DELETED\" end" "$T/.claude/settings.json")" = kept ] \
+        || e="$e; the target's $k was deleted"
+    done
+    # and vstack's own keys still arrive
+    [ "$(jq -r '.skillOverrides|length' "$T/.claude/settings.json")" -gt 0 ] || e="$e; vstack's own keys did not land"
+    [ -z "$e" ] && ok "overlay preserves the target's settings" || bad "overlay preserves the target's settings" "${e#; }"
+  fi
+fi
+
+# --- a stranger's clean install reports healthy, not broken -------------------------------------
+# doctor mixed what vstack installs with what the operator happens to have: the author's Claude
+# plan, their ~/Projects layout, their optional plugins. On a fresh machine eight of those went
+# red at once and no amount of re-installing could clear a single one, so the first thing a new
+# user saw after a successful install was DRIFT ✖. What vstack ships still fails hard; the rest
+# is now reported as a note.
+if want doctor-stranger; then
+  H="$ROOT/stranger"; mkdir -p "$H"
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  if [ ! -x "$H/.config/agents/bin/doctor" ]; then
+    bad "doctor is green on a clean install" "install did not place bin/doctor"
+  else
+    out=$(HOME="$H" "$H/.config/agents/bin/doctor" 2>&1); rc=$?
+    reds=$(printf '%s' "$out" | grep -c '✖' || true)
+    if [ "$rc" -eq 0 ] && [ "${reds:-0}" -eq 0 ]; then
+      ok "doctor is green on a clean install ($(printf '%s' "$out" | grep -c '·') note(s), 0 failures)"
+    else
+      bad "doctor is green on a clean install" \
+          "exit $rc with $reds failure(s): $(printf '%s' "$out" | grep '✖' | sed 's/  */ /g' | tr '\n' ';')"
+    fi
+  fi
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"

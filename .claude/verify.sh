@@ -340,9 +340,15 @@ ncs=$(grep -cE '^run_(negative_)?case ' tests/auto-trigger.sh 2>/dev/null || ech
 nmc=0
 command -v jq >/dev/null && nmc=$(jq 'keys|length' mcp/servers.json 2>/dev/null || echo 0)
 
+# README teaches "every one of the N checks in the gate has a mutation that proves it" -- a claim
+# about this file, which is exactly the kind that goes stale the moment a check is added. It sat
+# at 25 against a gate of 26 and nothing could see it, because the noun was not in the map.
+nck=$TOTAL
+
 want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
   case "$1" in
     skill|skills)                                   printf '%s' "$nsk" ;;
+    check|checks)                                   printf '%s' "$nck" ;;
     agent|agents|subagent|subagents|sub-agent|sub-agents) printf '%s' "$nag" ;;
     command|commands)                               printf '%s' "$ncm" ;;
     hook|hooks)                                     printf '%s' "$nhk" ;;
@@ -383,7 +389,7 @@ EOF
     [ -n "$want" ] && [ "$num" != "$want" ] \
       && errs="$errs\n$f: claims '$claim', tree has $want"
   done <<EOF
-$(printf '%s' "$norm" | grep -oE '[0-9]+ ((sub-?)?agents?|skills?|commands?|hooks?|cases?|MCP servers?|CLI wrappers?)' | sort -u)
+$(printf '%s' "$norm" | grep -oE '[0-9]+ ((sub-?)?agents?|skills?|commands?|hooks?|cases?|checks?|MCP servers?|CLI wrappers?)' | sort -u)
 EOF
 
   # table form: "| Commands | 14 |"
@@ -408,7 +414,7 @@ if command -v jq >/dev/null && [ -f docs/how-skills-fire.md ]; then
 fi
 
 [ -z "$errs" ] \
-  && ok "doc counts match tree ($nsk skills, $nag agents, $ncm commands, $nhk hooks, $ncs test cases)" \
+  && ok "doc counts match tree ($nsk skills, $nag agents, $ncm commands, $nhk hooks, $nck checks, $ncs test cases)" \
   || bad "doc counts match tree" "$(printf '%b' "$errs")"
 
 # --- 13. the two plugin manifests agree on a version -------------------------------------------
@@ -553,10 +559,17 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     allow=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' claude/settings.project-keys | tr '\n' ' ')
     leaked=$(jq -r --arg a "$allow" '
       ($a | split(" ") | map(select(length > 0))) as $A
-      | (keys - $A - ["permissions"]) | join(" ")' "$ov/.claude/settings.json" 2>/dev/null)
+      | (keys - $A - ["permissions","theme"]) | join(" ")' "$ov/.claude/settings.json" 2>/dev/null)
     [ -n "$leaked" ] && errs="$errs\nshipped non-project keys: $leaked"
+    # "Ships nothing personal" means nothing personal is WRITTEN. It never meant a key that
+    # resembles one of ours should be DELETED from the target, and this check enforced the wrong
+    # one of those: demanding theme be absent afterwards is what made overlay.sh strip it, along
+    # with enabledPlugins and forceLoginMethod, from any repo that had independently set them.
+    # The gate was asserting the data loss as correct. theme and permissions are excluded from
+    # the leak set above because the seed writes them -- they are the target's, and the question
+    # is what vstack added, not what survived.
     jq -e 'has("theme")' "$ov/.claude/settings.json" >/dev/null 2>&1 \
-      && errs="$errs\nleft a personal key (theme) behind on an already-overlaid repo"
+      || errs="$errs\ndeleted a key the target repo owned (theme)"
     jq -e '.permissions.allow[0] == "Bash(ls)"' "$ov/.claude/settings.json" >/dev/null 2>&1 \
       || errs="$errs\ndropped the target repo's own permissions key"
     jq -e '.model and .hooks and .statusLine' "$ov/.claude/settings.json" >/dev/null 2>&1 \
@@ -917,7 +930,25 @@ fi
 # until that version is tagged.
 if command -v git >/dev/null && command -v jq >/dev/null; then
   mv_=$(jq -r '.version' claude/.claude-plugin/plugin.json 2>/dev/null)
-  if [ -z "$mv_" ]; then
+
+  # A version pinned in the docs is not documentation, it is the thing a stranger installs. The
+  # quickstart pinned v1.4.0 while the manifests said v1.8.0, so anyone copy-pasting the "pin a
+  # release" lane got a four-version-old payload and no error -- the tag resolves, the install
+  # succeeds, and the only symptom is a setup that quietly disagrees with its own README.
+  pins=""
+  for f in README.md docs/*.md; do
+    [ -f "$f" ] || continue
+    while IFS= read -r pv; do
+      [ -n "$pv" ] && [ "$pv" != "$mv_" ] && pins="$pins\n  $f pins v$pv"
+    done <<PINEOF
+$(grep -oE '(vstack/v|VSTACK_REF=v)[0-9]+\.[0-9]+\.[0-9]+' "$f" 2>/dev/null | sed -E 's/.*v//' | sort -u)
+PINEOF
+  done
+
+  if [ -n "$pins" ]; then
+    bad "declared version matches what installs" \
+        "$(printf 'the manifests declare v%s, but the docs hand strangers a different release:%b' "$mv_" "$pins")"
+  elif [ -z "$mv_" ]; then
     bad "declared version matches what installs" "could not read the version from the plugin manifest"
   elif [ -z "$(git tag -l 2>/dev/null | head -1)" ]; then
     # No tags at all means a shallow or tagless checkout, not a repo with no releases. Saying
@@ -937,6 +968,57 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   fi
 else
   skip "declared version matches what installs" "git or jq not installed"
+fi
+
+# --- 25. the failure tail does not carry credentials back into the transcript ------------------
+#
+# PostToolUseFailure re-injects the tail of a failed command as context, so anything the command
+# printed is preserved in the conversation for good. The redactor guarding that path caught one
+# of seven real credential shapes when it was measured: it knew `NAME=value` and a list of token
+# prefixes, and JSON, YAML, HTTP headers and URL userinfo -- the formats a failing command is
+# most likely to emit -- all went through verbatim. Nothing could see that, because no check ever
+# fed it a secret. This one does, through the real hook rather than the regex in isolation.
+if command -v jq >/dev/null; then
+  fd="claude/hooks/failure-diagnose.sh"
+  if [ ! -x "$fd" ]; then
+    bad "failure tail redacts credentials" "$fd is missing or not executable"
+  else
+    # Each line pairs a realistic payload with the substring that must not survive it.
+    leaks=""
+    while IFS='|' read -r payload secret; do
+      [ -n "$payload" ] || continue
+      out=$(printf '%s' "$(jq -cn --arg e "$payload" '{tool_name:"Bash",tool_response:{stderr:$e}}')" \
+            | "$fd" 2>/dev/null)
+      case "$out" in *"$secret"*) leaks="$leaks\n  survived: $payload" ;; esac
+    done <<'REDEOF'
+export ANTHROPIC_API_KEY=sk-ant-FAKEVAL|sk-ant-FAKEVAL
+{"api_key": "abcd1234efgh5678"}|abcd1234efgh5678
+{"apiKey":"abcd1234efgh5678","port":3000}|abcd1234efgh5678
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.PAYLOAD1234.SIGNATURE|PAYLOAD1234
+curl -H 'x-api-key: abcd1234efgh5678'|abcd1234efgh5678
+password: hunter2correcthorse|hunter2correcthorse
+aws_secret_access_key = wJalrXUtnFEMIK7MDENGbPxRfiCY|wJalrXUtnFEMIK7MDENGbPxRfiCY
+DATABASE_URL=postgres://user:s3cr3tpw@host/db|s3cr3tpw
+GITHUB_TOKEN=ghp_FAKEVAL|ghp_FAKEVAL
+REDEOF
+
+    # The other half of the claim: redaction that eats ordinary diagnostics is its own defect,
+    # because the tail exists to be read. A control line has to come back intact.
+    ctl="error: cannot find module at /usr/local/lib/thing.js (exit 2)"
+    cout=$(printf '%s' "$(jq -cn --arg e "$ctl" '{tool_name:"Bash",tool_response:{stderr:$e}}')" \
+           | "$fd" 2>/dev/null)
+    case "$cout" in
+      *"cannot find module at /usr/local/lib/thing.js"*) ;;
+      *) leaks="$leaks\n  over-redacted an ordinary error line" ;;
+    esac
+
+    [ -z "$leaks" ] \
+      && ok "failure tail redacts credentials (9 shapes masked, plain errors intact)" \
+      || bad "failure tail redacts credentials" \
+             "$(printf 'these reach the transcript verbatim:%b' "$leaks")"
+  fi
+else
+  skip "failure tail redacts credentials" "jq not installed"
 fi
 
 echo

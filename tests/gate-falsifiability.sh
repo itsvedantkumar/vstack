@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -60,7 +60,7 @@ files_for(){ case "$1" in
   14)  printf 'claude/hooks/verify-gate.sh' ;;
   15)  printf 'claude/settings.json' ;;
   16)  printf 'tests/gate-falsifiability.sh' ;;
-  17)  printf 'claude/settings.project-keys' ;;
+  17)  printf 'overlay.sh' ;;
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
@@ -68,6 +68,7 @@ files_for(){ case "$1" in
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
   23)  printf 'claude/hooks/guard-destructive.sh' ;;
   24)  printf 'claude/.claude-plugin/plugin.json' ;;
+  25)  printf 'claude/hooks/failure-diagnose.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -98,6 +99,7 @@ label_for(){ case "$1" in
   22)  printf 'skills disclose what they do not ship' ;;
   23)  printf 'destructive guard decides correctly' ;;
   24)  printf 'declared version matches what installs' ;;
+  25)  printf 'failure tail redacts credentials' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -139,8 +141,12 @@ exit 0
         claude/settings.json && rm -f claude/settings.json.t ;;
   16) sed -i.t 's/^CHECKS="0 /CHECKS="/' tests/gate-falsifiability.sh \
         && rm -f tests/gate-falsifiability.sh.t ;;
-  17) # allow a personal key through, which is the whole failure this check exists to stop
-      printf '\ntheme\n' >> claude/settings.project-keys ;;
+  17) # Restore the deletion overlay.sh used to do: strip every destination key that is not on
+      # vstack's project allowlist. That silently destroyed target-owned enabledPlugins, theme,
+      # and forceLoginMethod, and the old version of this row -- appending theme to
+      # settings.project-keys -- could not see it, because the check it armed was asserting the
+      # deletion as correct. The row now mutates the behaviour, not the allowlist.
+      perl -0pi -e 's/\| \(\$dest \* \$ship\)/| (\$dest * \$ship)\n    | delpaths([(keys - \$A)[] | [.]])/' overlay.sh ;;
   18) # pad the per-prompt digest past its cap
       perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
   19) # A schema type violation, which is what check 19 is actually for.
@@ -173,10 +179,33 @@ exit 0
       # ships three lanes three different trees under one label
       sed -i.t 's/"version": "[0-9.]*"/"version": "1.4.0"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
+  25) # Put back the redactor that shipped for five versions: known token prefixes plus bare
+      # NAME=value. It masked one of the nine shapes the check feeds it, and no gate could see
+      # the other eight, because nothing ever handed the hook a secret.
+      perl -0pi -e 's/^redact\(\)\{.*?\n\}$/redact(){ sed -E "s\/(sk-ant-|ghp_)[A-Za-z0-9_]+\/\\1[REDACTED]\/g"; }/ms' \
+        claude/hooks/failure-diagnose.sh ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"
 echo
+
+# A green baseline, taken before anything is mutated.
+#
+# Every row here asserts "the gate goes red when I break this". A row that is already red before
+# the mutation passes for free, and that is not theoretical: a crashed row once left its edit on
+# disk, the next run's save() captured the broken file as its own baseline, restore() put the
+# break back, and the suite printed FALSIFIABLE over a repo that still carried the defect. The
+# tree-unchanged check at the end cannot see that -- it compares the run against a start that was
+# already wrong. Only a baseline can.
+if ! base=$(./.claude/verify.sh 2>&1) || printf '%s' "$base" | grep -q '^FAIL  '; then
+  printf 'FAIL  gate is not green before any mutation; nothing here would be evidence:\n%s\n' \
+    "$(printf '%s' "$base" | grep -E '^(FAIL|VERIFICATION)' | sed 's/^/      /')"
+  printf '\n0 passed, 1 failed\nNOT FALSIFIABLE\n'
+  exit 1
+fi
+printf 'ok    gate green at baseline (%s checks)\n\n' \
+  "$(printf '%s' "$base" | grep -c '^ok    ')"
+PASSED=$((PASSED+1))
 
 for id in $CHECKS; do
   fs=$(files_for "$id")

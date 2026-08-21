@@ -52,6 +52,40 @@ for a in "$@"; do
 done
 
 say(){ printf '%s\n' "$*"; }
+
+# Every jq merge below was `jq -e . "$tmp" >/dev/null && cat "$tmp" > "$dest"`, followed
+# unconditionally by say "merged ...". When jq produced nothing usable the && short-circuited,
+# the destination kept its old contents, and the install still printed "merged" and exited 0 --
+# so a settings merge that silently did not happen looked exactly like one that did. Failure has
+# to be visible, name the backup, and survive to the exit code.
+DEGRADED=0
+
+# set -e means any failing command aborts mid-install. That is the right call -- continuing past
+# a broken merge is how you get a half-configured machine -- but the bare abort printed a raw jq
+# error and stopped, leaving the user staring at a partial install with no idea whether their
+# own files had survived. They always had; nobody was ever told where.
+abort_note(){
+  st=$?
+  [ "$st" = 0 ] && return 0
+  [ "${BK:-}" = "" ] && return 0
+  [ "$DRY" = 1 ] && return 0
+  printf '\ninstall aborted (exit %s). Nothing of yours was lost:\n' "$st"
+  printf '  every file this run touched was copied to %s first\n' "$BK"
+  printf '  restore with: %s/uninstall.sh\n' "$SRC"
+  printf '  this installer is safe to re-run once the cause above is fixed\n'
+}
+trap abort_note EXIT
+
+commit_json(){ # <tmp> <dest> <what>
+  if jq -e . "$1" >/dev/null 2>&1; then
+    cat "$1" > "$2"; rm -f "$1"; return 0
+  fi
+  rm -f "$1"
+  DEGRADED=1
+  say "FAILED     $3 was NOT written -- the merge produced invalid JSON"
+  say "           $2 is unchanged; your copy from before this run is in $BK"
+  return 1
+}
 run(){ if [ "$DRY" = 1 ]; then say "would: $*"; else "$@"; fi; }
 
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run this from the vstack repo" >&2; exit 1; }
@@ -148,6 +182,12 @@ fi
 # UI, so it is ALWAYS overwritten — a managed file that install leaves alone is just a second
 # preferences file. The pins and their rationale live in conductor/settings.managed.toml.
 if [ -f "$SRC/conductor/settings.managed.toml" ]; then
+  # Backed up first. This file is always overwritten by design — a managed layer that install
+  # leaves alone is just a second preferences file — but overwriting without a backup is how
+  # someone already using Conductor managed settings loses machine-wide policy on first install,
+  # with nothing to restore from. It is the only file this installer replaced unconditionally
+  # and unrecoverably.
+  back "$HOME/.conductor/settings.managed.toml"
   [ "$DRY" = 0 ] && { mkdir -p "$HOME/.conductor"; cp "$SRC/conductor/settings.managed.toml" "$HOME/.conductor/settings.managed.toml"; }
   say "pinned     ~/.conductor/settings.managed.toml (models, fast mode, plan mode)"
 fi
@@ -300,7 +340,10 @@ elif [ "$DRY" = 0 ]; then
       | ($userhooks
           | with_entries(.value |= map(select(
               [.hooks[]?.command]
-              | map(test($h; "x") or test("SUPERSET_HOME_DIR"))
+              # startswith, not test(): the hooks path was being used as a regular expression,
+              # so a home directory containing [ ] ( ) + or . matched nothing and the previous
+              # vstack hooks were never removed — every reinstall appended another copy.
+              | map(startswith($h) or test("SUPERSET_HOME_DIR"))
               | any | not )))
           | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
@@ -310,14 +353,15 @@ elif [ "$DRY" = 0 ]; then
                    ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
       | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3})
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
-  jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
-  if [ "$BYPASS" = 1 ]; then
-    tmp=$(mktemp)
-    jq '.permissions.defaultMode = "bypassPermissions" | .skipDangerousModePermissionPrompt = true' "$US" > "$tmp"
-    jq -e . "$tmp" >/dev/null && cat "$tmp" > "$US"; rm -f "$tmp"
-    say "merged     ~/.claude/settings.json (+ bypassPermissions)"
-  else
-    say "merged     ~/.claude/settings.json"
+  if commit_json "$tmp" "$US" "~/.claude/settings.json"; then
+    if [ "$BYPASS" = 1 ]; then
+      tmp=$(mktemp)
+      jq '.permissions.defaultMode = "bypassPermissions" | .skipDangerousModePermissionPrompt = true' "$US" > "$tmp"
+      commit_json "$tmp" "$US" "~/.claude/settings.json (bypassPermissions)" \
+        && say "merged     ~/.claude/settings.json (+ bypassPermissions)"
+    else
+      say "merged     ~/.claude/settings.json"
+    fi
   fi
 fi
 
@@ -333,9 +377,9 @@ elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
   sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$tmp.servers"
   jq -s '.[0] as $cur | .[1] as $new | $cur | .mcpServers = (($cur.mcpServers // {}) * $new)' \
      "$CJ" "$tmp.servers" > "$tmp"
-  jq -e . "$tmp" >/dev/null && cat "$tmp" > "$CJ"
+  commit_json "$tmp" "$CJ" "MCP servers in $CJSON" \
+    && say "merged     MCP servers into $CJSON"
   rm -f "$tmp" "$tmp.servers"
-  say "merged     MCP servers into $CJSON"
 else
   say "skipped    MCP merge (no $CJSON yet — run claude once, then re-run this)"
 fi
@@ -423,5 +467,11 @@ if [ -x "$HOME/.config/agents/bin/doctor" ]; then
     say "  - exec zsh -l   (to pick up the shell lane)"
     exit 0
   }
+fi
+if [ "$DEGRADED" = 1 ]; then
+  say ""
+  say "install finished with failures above. Nothing was lost -- the originals are in $BK --"
+  say "but the setup is incomplete. Fix the cause and re-run; this is safe to run twice."
+  exit 1
 fi
 say "run: exec zsh -l"

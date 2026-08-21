@@ -15,7 +15,7 @@ That claim is easy to make and most setups make it. Here it is measured: `tests/
 runs 12 prompts against the real model and reports which attempt each one landed on, so the day
 routing starts eroding shows up as a number rather than a feeling.
 
-The same idea runs through the rest. Every one of the 25 checks in the verification gate has a
+The same idea runs through the rest. Every one of the 27 checks in the verification gate has a
 row in a suite that breaks what that check watches and requires the gate to go red naming it — a
 check nobody has watched fail is indistinguishable from a check that always passes. The
 installer is run into 19 throwaway home directories on Linux, macOS, Windows and Alpine on every
@@ -62,9 +62,9 @@ cd vstack
 read the script before running it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.4.0/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.8.0/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                       # about 100 lines
-VSTACK_REF=v1.4.0 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.8.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The unpinned one-liner is shorter and is what most people will paste:

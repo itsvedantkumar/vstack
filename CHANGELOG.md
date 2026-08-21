@@ -6,6 +6,85 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.8.0 — 2026-08-21
+
+A fourth external audit found four ways this bundle destroyed configuration it did not own. All
+four are fixed, each with a test that fails without the fix.
+
+**Conductor managed policy was overwritten with no backup.** `settings.managed.toml` is always
+replaced by design — a managed layer the installer leaves alone is just a second preferences
+file — but it was the one file replaced *unrecoverably*. Anyone already using Conductor managed
+settings lost machine-wide policy on first install with nothing to restore from. It is backed up
+now, and uninstall puts it back.
+
+**Uninstall left a broken install rather than no install.** A fresh install followed by a fresh
+uninstall left six hook commands pointing at scripts that had just been deleted, plus vstack's
+model policy and all seventeen skillOverrides still in force. It now unpicks its own entries
+from `settings.json` by exact value — a hook whose command runs a script from vstack's hooks
+directory, an override whose value still matches what vstack shipped, a top-level key the user
+has not edited — and leaves everything else. It also removes the trust store and its own shell
+blocks.
+
+**Overlay deleted settings the target repository owned.** It removed every key vstack ships that
+is not on the project allowlist, on the theory that it was cleaning up its own past overlays. It
+has no way to know that: a repo that independently set `enabledPlugins`, `theme` or
+`forceLoginMethod` lost all three, because the deletion keyed on vstack's vocabulary rather than
+on provenance. It writes the allowlisted keys and leaves the rest alone.
+
+**Two smaller ones.** `deploy-auto.sh` continued in the caller's directory after a failed `cd`,
+so a stale path could deploy whatever project the shell was sitting in. And the hook merge used
+the config path as a regular expression, so a home directory containing `[ ] ( ) + .` never
+matched its own previous hooks and every reinstall appended another copy.
+
+**The gate was asserting one of these defects as correct.** Check 17 demanded that a `theme` key
+be *absent* after an overlay, which is what made the overlay delete it. "Ships nothing personal"
+is a claim about what gets written. It had been implemented as a claim about what survives, and
+those are different. The check now asserts the target's keys are still there, and the
+falsifiability row arming it mutates the behaviour rather than the allowlist.
+
+**Credentials in the failure tail.** `PostToolUseFailure` re-injects the tail of a failed command
+as context, so whatever that command printed stays in the conversation permanently. Measured
+against nine real credential shapes, the redactor guarding that path masked two. It knew
+`NAME=value` and a list of token prefixes. JSON, YAML, HTTP headers, `key = value` with spaces,
+and URL userinfo all went through verbatim, which is most of what a failing command actually
+prints. No check had ever handed the hook a secret, so nothing could see it. Check 25 does that
+now, through the real hook, and it also asserts an ordinary error line still comes back intact.
+
+**A gate that skipped everything reported success.** The template in `create-verification-skill`
+is npm-shaped. In a Go, Rust or Python repo every check it emits printed `skip` and the script
+exited 0, so `VERIFIED` meant nothing had run. It refuses to pass now until at least one check
+has actually executed.
+
+**Silent merge failures.** All three `settings.json` and MCP merges wrote with
+`jq -e . "$tmp" && cat "$tmp" > "$dest"` and then announced "merged" no matter what happened.
+When the merge produced nothing usable, the destination kept its old contents and the install
+still exited 0. A merge that did not happen looked exactly like one that did. Failure is named
+now, points at the backup, and reaches the exit code. A hard abort mid-install says the same
+thing instead of leaving a raw `jq` error as the last word.
+
+**The scorer could zero its own denominator.** In the review benchmark, a scoring failure returned
+`planted: 0` alongside `hits: 0`, so an arm whose scorer crashed on every fixture finished at 0/0.
+That reads as "there was nothing to find" rather than "the measurement broke". The denominator
+comes from ground truth regardless now, and the row is marked INVALID.
+
+**doctor told a clean install it was broken.** It mixed what vstack installs with what the
+operator happens to have: their Claude plan, their `~/Projects` layout, their optional plugins.
+On a fresh machine eight checks went red at once and no reinstall could clear one of them. Those
+are notes now, and what vstack ships still fails hard. The repo-coverage scan also printed a tick
+after scanning zero repositories, and `claude auth status` returning `loggedIn: false` was read as
+"may be billing API credits" on a machine that had never made a request.
+
+**The trust boundary was vstack-shaped.** `vstack trust` hashed `.claude/verify.sh` plus a
+hardcoded list of this repo's four root scripts. Any other repository's gate, one calling
+`./scripts/ci.sh`, had its entry point pinned while the code it executes floated free. That list
+is read out of `verify.sh` itself now. A path the script builds at runtime is still invisible,
+and the comment where the boundary is drawn says so rather than implying otherwise.
+
+**The falsifiability suite could pass over a broken repo.** A crashed row once left its mutation
+on disk. The next run backed that file up as its own baseline, restored the break, and printed
+FALSIFIABLE. Every row asserts "the gate goes red when I break this", and a row already red
+before its mutation passes for free. The suite refuses to start now unless the gate is green.
+
 ## 1.7.0 — 2026-08-21
 
 **The reviewer stops padding short diffs.** `code-reviewer.md` listed "naming, dead code,

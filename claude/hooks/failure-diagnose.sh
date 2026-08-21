@@ -16,12 +16,24 @@ in=$(cat)
 if [ -n "$JQ" ]; then tool=$(printf '%s' "$in" | "$JQ" -r '.tool_name // "tool"' 2>/dev/null)
 else tool=$(printf '%s' "$in" | sed -n 's/.*"tool_name" *: *"\([^"]*\)".*/\1/p' | head -1); fi
 [ -n "$tool" ] || tool=tool
-# Redact token shapes before the tail re-enters the transcript: a failing command that
-# echoed a credential would otherwise persist it in the conversation log forever.
-# Redact token shapes before the tail re-enters the transcript: a failing command that
-# echoed a credential would otherwise persist it in the conversation log forever. The keyword
-# class covers all three cases — an uppercase-only pattern walked straight past api_key=.
-redact(){ sed -E 's/(sk-ant-|sk-proj-|github_pat_|ghp_|gho_|xoxb-|AKIA|AIza)[A-Za-z0-9_\/+-]+/\1[REDACTED]/g; s/((KEY|TOKEN|SECRET|PASSWORD|key|token|secret|password|Key|Token|Secret|Password)[A-Za-z_]*=)[^[:space:]]+/\1[REDACTED]/g'; }
+# Redact credential shapes before the tail re-enters the transcript: a failing command that
+# echoed a secret would otherwise persist it in the conversation log forever.
+#
+# This used to be two rules -- known token prefixes, and NAME=value. Against seven real shapes it
+# caught one. `{"api_key": "..."}`, `x-api-key: ...`, `password: ...`, `aws_secret_access_key =
+# ...`, `Authorization: Bearer <jwt>` and `postgres://user:pw@host` all went through verbatim,
+# because every one of them separates the name from the value with something other than a bare
+# `=`. JSON, YAML and HTTP headers are the formats a failing command is most likely to print.
+#
+# Over-redaction is the cheap direction here: this text is diagnostic context for a model, and a
+# masked value costs a retry while a leaked one is permanent.
+redact(){ sed -E \
+  -e 's/(sk-ant-|sk-proj-|sk-|github_pat_|ghp_|gho_|ghu_|ghs_|ghr_|glpat-|xoxb-|xoxp-|xoxa-|xapp-|AKIA|ASIA|AIza|ya29\.|hf_|npm_|dop_v1_)[A-Za-z0-9_\/+.-]{6,}/\1[REDACTED]/g' \
+  -e 's/(eyJ[A-Za-z0-9_-]{4,})\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+/\1.[REDACTED]/g' \
+  -e 's/([Aa]uthorization|[Pp]roxy-[Aa]uthorization)([[:space:]]*[:=][[:space:]]*)("?)([A-Za-z]+[[:space:]]+)?[^[:space:]"'"'"']{6,}/\1\2\3\4[REDACTED]/g' \
+  -e 's/(([Aa]pi[_-]?|[Aa]ccess[_-]?|[Ss]ecret[_-]?|[Aa]uth[_-]?|[Pp]rivate[_-]?|[Bb]earer[_-]?|[Rr]efresh[_-]?|[Ss]ession[_-]?)?([Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?)[A-Za-z0-9_-]*)("?[[:space:]]*[:=][[:space:]]*)("?)[^[:space:],;"'"'"']{4,}/\1\4\5[REDACTED]/g' \
+  -e 's|([A-Za-z][A-Za-z0-9+.-]*://[^/:[:space:]]+):[^@[:space:]]+@|\1:[REDACTED]@|g'
+}
 if [ -n "$JQ" ]; then
   err=$(printf '%s' "$in" | "$JQ" -r '(.tool_response.error // .tool_response.stderr // .tool_response // "") | tostring' 2>/dev/null \
     | redact | tail -c 900)
