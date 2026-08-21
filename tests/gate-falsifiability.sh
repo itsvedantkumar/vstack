@@ -72,7 +72,7 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
-  29)  printf 'claude/hooks/format.sh' ;;
+  29)  printf 'bin/cloudflare-mcp' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -189,8 +189,13 @@ exit 0
         && rm -f claude/.claude-plugin/plugin.json.t ;;
   29) # An unquoted expansion, which is the single most common way a shell script breaks on
       # somebody else's machine: a path with a space in it silently becomes two arguments.
+      #
+      # Broken in bin/cloudflare-mcp on purpose. It is a #!/bin/sh script with no .sh suffix, so
+      # the old `git ls-files '*.sh' bin/doctor bin/vstack` selector never linted it and this
+      # exact mutation left the check green. Mutating a file the selector already covered would
+      # prove the linter runs; mutating this one proves it runs over everything.
       printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' \
-        >> claude/hooks/format.sh ;;
+        >> bin/cloudflare-mcp ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;

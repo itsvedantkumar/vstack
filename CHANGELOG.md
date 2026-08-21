@@ -26,7 +26,7 @@ names in CI and the platform names in the README to be the same set, in both dir
 Codex, not a local model behind a compatibility shim. Every mechanism here is Claude Code's own
 and there is no adapter layer.
 
-**shellcheck is a gate.** This bundle is 29 shell scripts and almost nothing else. Warning level,
+**shellcheck is a gate.** This bundle is 31 shell scripts and almost nothing else. Warning level,
 and where a warning is wrong the suppression carries its reason on the line above. It found a
 pattern in the destructive guard that could never match, a variable in `doctor` computed for a
 check nobody ever wrote, and two dead assignments.

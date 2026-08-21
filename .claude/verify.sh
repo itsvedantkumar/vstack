@@ -35,7 +35,7 @@ for t in jq git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; do
 # --- 1. every shell script parses ----------------------------------------------------------
 errs=""
 while IFS= read -r f; do
-  head -1 "$f" | grep -q '^#!.*sh' || continue
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue   # not a pipe: SIGPIPE + pipefail = 141
   out=$(bash -n "$f" 2>&1) || errs="$errs\n$f: $out"
 done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*" \) -print)
 [ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
@@ -345,6 +345,13 @@ command -v jq >/dev/null && nmc=$(jq 'keys|length' mcp/servers.json 2>/dev/null 
 # at 25 against a gate of 26 and nothing could see it, because the noun was not in the map.
 nck=$TOTAL
 
+# Same shape, one noun later. The CHANGELOG said "29 shell scripts" against a tree of 27 .sh
+# files and 31 shebang scripts, and nothing could see it because "shell script" was not in the
+# map. Derived the same way check 29 selects, so the two can never disagree.
+nsh=$(git ls-files 2>/dev/null | while IFS= read -r f; do
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf 'x\n'
+done | grep -c .)
+
 want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
   case "$1" in
     skill|skills)                                   printf '%s' "$nsk" ;;
@@ -355,6 +362,7 @@ want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty 
     "cli wrapper"|"cli wrappers")                   printf '%s' "$nwr" ;;
     case|cases)                                     printf '%s' "$ncs" ;;
     "mcp server"|"mcp servers")                     printf '%s' "$nmc" ;;
+    "shell script"|"shell scripts")                 printf '%s' "$nsh" ;;
   esac
 }
 
@@ -369,11 +377,40 @@ exempt_phrases(){
   esac
 }
 
+# Every noun this check can resolve, spelled once. The extraction regex is built from this
+# list, so a noun can no longer be resolvable-but-never-extracted -- which is how "29 shell
+# scripts" sat in the CHANGELOG unchallenged. want_for had no case for it, and even after one
+# was added the claim stayed invisible, because the extractor carried its own separate
+# alternation and nothing compared the two.
+NOUNS='skills?|checks?|agents?|subagents?|sub-agents?|commands?|hooks?|CLI wrappers?|cases?|MCP servers?|shell scripts?'
+
 errs=""
-for f in README.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
+
+# Positive control. Every alternative the extractor looks for must resolve to a number, or the
+# check pulls claims out of the docs and then drops them on the floor without saying so.
+while IFS= read -r _n; do
+  [ -n "$_n" ] || continue
+  [ -n "$(want_for "$(printf '%s' "$_n" | tr '[:upper:]' '[:lower:]')")" ] \
+    || errs="$errs\ninternal: the extractor looks for '$_n' but want_for cannot resolve it"
+done <<EOF
+$(printf '%s' "$NOUNS" | tr '|' '\n' | sed 's/?$//')
+EOF
+
+for f in README.md CHANGELOG.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
          claude/skills/ATTRIBUTION.md claude/CLAUDE.md docs/how-skills-fire.md tests/README.md; do
   [ -f "$f" ] || continue
-  norm=$(tr '\n' ' ' < "$f" | tr -s '[:space:]' ' ')
+  if [ "$f" = CHANGELOG.md ]; then
+    # Only the entries that describe what ships today: Unreleased, plus the section for the
+    # version the manifests declare. Older entries record what was true at that release and
+    # rewriting them to satisfy today's tree would be falsifying history. Taking simply "the top
+    # section" is not enough -- an Unreleased heading sits above the release, and slicing there
+    # stopped one section short of the claim that had gone stale.
+    _cv=$(jq -r '.version' claude/.claude-plugin/plugin.json 2>/dev/null)
+    norm=$(awk -v v="$_cv" '/^## /{ sec = ($2 == "Unreleased" || index($2, v) == 1) } sec' "$f" \
+             | tr '\n' ' ' | tr -s '[:space:]' ' ')
+  else
+    norm=$(tr '\n' ' ' < "$f" | tr -s '[:space:]' ' ')
+  fi
   while IFS= read -r ph; do
     [ -n "$ph" ] && norm=${norm//"$ph"/}
   done <<EOF
@@ -389,7 +426,7 @@ EOF
     [ -n "$want" ] && [ "$num" != "$want" ] \
       && errs="$errs\n$f: claims '$claim', tree has $want"
   done <<EOF
-$(printf '%s' "$norm" | grep -oE '[0-9]+ ((sub-?)?agents?|skills?|commands?|hooks?|cases?|checks?|MCP servers?|CLI wrappers?)' | sort -u)
+$(printf '%s' "$norm" | grep -oE "[0-9]+ ($NOUNS)" | sort -u)
 EOF
 
   # table form: "| Commands | 14 |"
@@ -1153,7 +1190,7 @@ fi
 
 # --- 29. every shell script passes shellcheck ------------------------------------------------
 #
-# This bundle is 27 shell scripts and almost nothing else, and the whole product is the claim
+# This bundle is shell scripts and almost nothing else, and the whole product is the claim
 # that they behave correctly on someone else's machine. The class of bug that keeps landing here
 # is not exotic -- an unquoted expansion, a pattern that can never match, a variable set for a
 # check nobody wrote -- and a linter finds all three for free.
@@ -1161,11 +1198,21 @@ fi
 # Warning level, not style: informational notes are opinions and this should fail on defects.
 # Where a warning is wrong the suppression carries a reason on the line above it, so the next
 # reader can see the argument rather than a bare disable.
+#
+# Selected by shebang, the same way check 1 selects. It used to be the hand-maintained list
+# `git ls-files '*.sh' bin/doctor bin/vstack`, and bin/cloudflare-mcp -- a #!/bin/sh script with
+# no .sh suffix -- had never been on it. Appending an unquoted `$HOME/some path` to that file
+# left shellcheck exiting 1 on it while this check still printed "ok shellcheck clean (29
+# scripts)". A list you have to remember to update is a list that goes stale silently.
 if command -v shellcheck >/dev/null 2>&1; then
-  sc_out=$(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null \
-    | while IFS= read -r f; do shellcheck -S warning -f gcc "$f" 2>/dev/null; done)
+  sc_files=$(git ls-files 2>/dev/null | while IFS= read -r f; do
+    grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf '%s\n' "$f"
+  done)
+  sc_out=$(while IFS= read -r f; do
+    [ -n "$f" ] && shellcheck -S warning -f gcc "$f" 2>/dev/null
+  done <<<"$sc_files")
   [ -z "$sc_out" ] \
-    && ok "shellcheck clean ($(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null | wc -l | tr -d ' ') scripts, warning level)" \
+    && ok "shellcheck clean ($(grep -c . <<<"$sc_files") scripts, warning level)" \
     || bad "shellcheck clean" "$(printf '%s' "$sc_out" | sed 's/^/  /' | head -20)"
 else
   skip "shellcheck clean" "shellcheck not installed (brew install shellcheck / apk add shellcheck)"
