@@ -205,3 +205,32 @@ passing.
 
 That is the second time in this benchmark that three identical zeroes looked like a result about
 the harnesses and was a result about my own scaffolding.
+
+## SWE-bench Lite — three harness bugs before any number was real
+
+The first three SWE-bench runs returned **0/4 for every arm**. None of those was a result.
+
+1. **No pre-flight validity check.** The gate asked "do the target tests fail?", which a
+   completely broken environment also satisfies. A flask instance pulled a werkzeug too new for
+   it, `from werkzeug.urls import url_quote` raised ImportError, every test in the repository
+   failed, the instance was marked usable, and all three arms scored zero on a checkout where
+   flask could not be imported.
+
+2. **PASS_TO_PASS was ignored.** Those tests already pass before anyone touches the code, so if
+   they fail the environment is broken rather than the code. Using them is what turned "does it
+   fail" into "does it fail for the right reason".
+
+3. **Every edit was being denied.** In headless mode with no project settings the default
+   permission mode prompts, there is nobody to answer, and the write silently does not happen.
+   The agent called `Edit`, nothing changed on disk, and the benchmark measured "can this agent
+   write a file" — no, identically, for all three arms — rather than "can it fix the bug".
+   Re-running the same instance with `--permission-mode bypassPermissions` changed the source
+   immediately.
+
+Three identical zeroes have now been a bug in this harness three separate times, and each time
+the arms agreed perfectly, which is what made it look like a finding. In a benchmark with
+independent arms, **identical results are evidence of a common cause, and the harness is the
+only thing all the arms share.**
+
+Unresolved runs are now kept rather than deleted, because the moment you most need to look at
+what the agent did is the moment everything scored zero.

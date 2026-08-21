@@ -169,14 +169,28 @@ for arm in $(echo "$ARMS_CSV" | tr ',' ' '); do
     install_arm "$arm" "$d"
     prob=$(jq -r ".[$i].problem_statement" "$DATA")
     if [ "$arm" = none ]; then pre=""; else pre="/debug "; fi
+    # --permission-mode bypassPermissions, or this measures the wrong thing entirely.
+    #
+    # Without it the first three runs scored 0/4 for every arm. The agent was calling Edit and
+    # the calls were being denied: in headless mode with no project settings, the default
+    # permission mode prompts, there is nobody to answer, and the write silently does not happen.
+    # The repository was untouched at the end of every run, so the benchmark was measuring "can
+    # this agent write a file" — the answer being no, identically, for all three arms — rather
+    # than "can it fix the bug".
+    #
+    # Three identical zeroes have now been a bug in this harness three separate times. They are
+    # worth treating as a defect report about the scaffolding until proven otherwise.
     ( cd "$d" && timeout 900 claude -p "${pre}Fix this bug in this repository. Change the source, not the tests.
 
-$prob" --setting-sources=project --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
+$prob" --setting-sources=project --permission-mode bypassPermissions \
+        --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
     read -r p t <<< "$(run_tests "$d" "$i")"
     [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && res=1 || res=0
     printf '%s\t%s\t%s\t%s\t%s\tok\n' "$arm" "$id" "$res" "$p" "$t" >> "$RUNLOG"
     printf '  %-8s %-34s resolved=%s (%s/%s)\n' "$arm" "$id" "$res" "$p" "$t" >&2
-    rm -rf "$d"
+    # Unresolved runs are kept. Deleting them left nothing to inspect when every arm scored zero,
+    # which is exactly when you need to look at what the agent actually did.
+    if [ "$res" = 1 ]; then rm -rf "$d"; else rm -rf "$d/.venv"; fi
   done
 done
 
