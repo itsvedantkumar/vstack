@@ -27,12 +27,49 @@ else tool=$(printf '%s' "$in" | sed -n 's/.*"tool_name" *: *"\([^"]*\)".*/\1/p' 
 #
 # Over-redaction is the cheap direction here: this text is diagnostic context for a model, and a
 # masked value costs a retry while a leaked one is permanent.
-redact(){ sed -E \
-  -e 's/(sk-ant-|sk-proj-|sk-|github_pat_|ghp_|gho_|ghu_|ghs_|ghr_|glpat-|xoxb-|xoxp-|xoxa-|xapp-|AKIA|ASIA|AIza|ya29\.|hf_|npm_|dop_v1_)[A-Za-z0-9_\/+.-]{6,}/\1[REDACTED]/g' \
-  -e 's/(eyJ[A-Za-z0-9_-]{4,})\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+/\1.[REDACTED]/g' \
-  -e 's/([Aa]uthorization|[Pp]roxy-[Aa]uthorization)([[:space:]]*[:=][[:space:]]*)("?)([A-Za-z]+[[:space:]]+)?[^[:space:]"'"'"']{6,}/\1\2\3\4[REDACTED]/g' \
-  -e 's/(([Aa]pi[_-]?|[Aa]ccess[_-]?|[Ss]ecret[_-]?|[Aa]uth[_-]?|[Pp]rivate[_-]?|[Bb]earer[_-]?|[Rr]efresh[_-]?|[Ss]ession[_-]?)?([Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?)[A-Za-z0-9_-]*)("?[[:space:]]*[:=][[:space:]]*)("?)[^[:space:],;"'"'"']{4,}/\1\4\5[REDACTED]/g' \
-  -e 's|([A-Za-z][A-Za-z0-9+.-]*://[^/:[:space:]]+):[^@[:space:]]+@|\1:[REDACTED]@|g'
+redact(){
+  # Prefixed tokens, JWTs, auth headers and URL userinfo are unambiguous, so sed handles them.
+  sed -E \
+    -e 's/(sk-ant-|sk-proj-|sk-|github_pat_|ghp_|gho_|ghu_|ghs_|ghr_|glpat-|xoxb-|xoxp-|xoxa-|xapp-|AKIA|ASIA|AIza|ya29\.|hf_|npm_|dop_v1_)[A-Za-z0-9_\/+.-]{6,}/\1[REDACTED]/g' \
+    -e 's/(eyJ[A-Za-z0-9_-]{4,})\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+/\1.[REDACTED]/g' \
+    -e 's/([Aa]uthorization|[Pp]roxy-[Aa]uthorization)([[:space:]]*[:=][[:space:]]*)("?)([A-Za-z]+[[:space:]]+)?[^[:space:]"'"'"']{6,}/\1\2\3\4[REDACTED]/g' \
+    -e 's|([A-Za-z][A-Za-z0-9+.-]*://[^/:[:space:]]+):[^@[:space:]]+@|\1:[REDACTED]@|g' \
+  | awk '
+  # NAME=VALUE needs both halves judged, which sed cannot do. Matching the name alone ate
+  # ordinary output: the hook digest line "TOKENS: never read whole files" came back as
+  # "TOKENS: [REDACTED] read whole files", and "Keystrokes: 1420 recorded" went the same way.
+  # A diagnostic tail that has been chewed up is worth nothing, and the point of this hook is
+  # that the tail gets read. So the name only nominates a candidate; the value decides.
+  #
+  # A credential is opaque. English is not. Sixteen or more characters, or six-plus with a
+  # digit in them, or base64 padding, and it is not a word anyone typed as prose. "never" and
+  # "1420" survive that test and every real key shape below fails it.
+  function looks_secret(v,   n) {
+    gsub(/^["\047]+|["\047]+$/, "", v)
+    n = length(v)
+    if (n < 4) return 0
+    if (n >= 16) return 1
+    if (v ~ /[0-9]/ && n >= 6) return 1
+    if (v ~ /[\/+=]/) return 1
+    return 0
+  }
+  {
+    line = $0; out = ""
+    while (1) {
+      lc = tolower(line)
+      if (!match(lc, /(^|[^a-z0-9_-])[a-z0-9_-]*(key|token|secret|passwd|password|credential)[a-z0-9_-]*"?[ \t]*[:=][ \t]*"?[^ \t,;"\047]+/)) break
+      st = RSTART; ln = RLENGTH
+      seg = substr(line, st, ln)
+      if (match(seg, /[:=][ \t]*"?/)) {
+        head = substr(seg, 1, RSTART + RLENGTH - 1)
+        val  = substr(seg, RSTART + RLENGTH)
+        if (looks_secret(val)) seg = head "[REDACTED]"
+      }
+      out = out substr(line, 1, st - 1) seg
+      line = substr(line, st + ln)
+    }
+    print out line
+  }'
 }
 if [ -n "$JQ" ]; then
   err=$(printf '%s' "$in" | "$JQ" -r '(.tool_response.error // .tool_response.stderr // .tool_response // "") | tostring' 2>/dev/null \

@@ -1002,15 +1002,27 @@ DATABASE_URL=postgres://user:s3cr3tpw@host/db|s3cr3tpw
 GITHUB_TOKEN=ghp_FAKEVAL|ghp_FAKEVAL
 REDEOF
 
-    # The other half of the claim: redaction that eats ordinary diagnostics is its own defect,
-    # because the tail exists to be read. A control line has to come back intact.
-    ctl="error: cannot find module at /usr/local/lib/thing.js (exit 2)"
-    cout=$(printf '%s' "$(jq -cn --arg e "$ctl" '{tool_name:"Bash",tool_response:{stderr:$e}}')" \
-           | "$fd" 2>/dev/null)
-    case "$cout" in
-      *"cannot find module at /usr/local/lib/thing.js"*) ;;
-      *) leaks="$leaks\n  over-redacted an ordinary error line" ;;
-    esac
+    # The other half of the claim, and the half that actually broke. Redaction that eats ordinary
+    # diagnostics is its own defect, because the tail exists to be read. One control line was not
+    # enough: with only "cannot find module" here, a redactor that matched on the NAME alone
+    # passed this check while turning the session digest "TOKENS: never read whole files" into
+    # "TOKENS: [REDACTED] read whole files". Every line below contains a credential-shaped word
+    # followed by a colon and ordinary prose, which is the case that was missed.
+    while IFS= read -r ctl; do
+      [ -n "$ctl" ] || continue
+      cout=$(printf '%s' "$(jq -cn --arg e "$ctl" '{tool_name:"Bash",tool_response:{stderr:$e}}')" \
+             | "$fd" 2>/dev/null)
+      case "$cout" in
+        *"$ctl"*) ;;
+        *) leaks="$leaks\n  over-redacted an ordinary line: $ctl" ;;
+      esac
+    done <<'CTLEOF'
+error: cannot find module at /usr/local/lib/thing.js (exit 2)
+TOKENS: never read whole files, use grep
+Keystrokes: 1420 recorded
+passwords: are stored hashed in this table
+npm ERR! code ELIFECYCLE, exit status 1
+CTLEOF
 
     [ -z "$leaks" ] \
       && ok "failure tail redacts credentials (9 shapes masked, plain errors intact)" \
@@ -1046,6 +1058,86 @@ if [ -f .github/workflows/verify.yml ]; then
     || bad "documented platforms match CI" "$(printf 'support is a claim about what is tested:%b' "$errs")"
 else
   skip "documented platforms match CI" "no .github/workflows/verify.yml"
+fi
+
+# --- 27. the skill mandate blocks on an unmet rule and stays quiet otherwise -------------------
+#
+# The digest tells the model to route to a skill and the descriptions carry their own triggers.
+# Both are instructions, and an instruction is a probability -- auto-trigger.sh measures the
+# routing landing, not the routing being certain. This hook is the part that is certain, for the
+# few rules decidable from tool calls rather than judgement, so it has to be exercised in both
+# directions. A gate that never blocks and a gate that always blocks look identical from a
+# passing test that only checks one of them.
+if command -v jq >/dev/null; then
+  sm="claude/hooks/skill-mandate.sh"
+  if [ ! -x "$sm" ]; then
+    bad "skill mandate decides correctly" "$sm is missing or not executable"
+  else
+    md=$(mktemp -d); errs=""
+    say_(){ printf '%s\n' "$@" > "$md/t.jsonl"; }
+    hit_(){ printf '{"session_id":"vfy-%s","transcript_path":"%s/t.jsonl","stop_hook_active":%s}' \
+              "$1" "$md" "${2:-false}" | "./$sm" 2>/dev/null; }
+    W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
+    T='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}}]}}'
+    U='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"unslop"}}]}}'
+    P='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/main.py"}}]}}'
+
+    # blocks when the rule is unmet
+    say_ "$W"; hit_ a | grep -q '"decision":"block"' || errs="$errs\nwrote prose without unslop and it did not block"
+    say_ "$T"; hit_ b | grep -q '"decision":"block"' || errs="$errs\nwrote TypeScript without the ts skill and it did not block"
+    # silent when the rule is met, or does not apply
+    say_ "$W" "$U"; [ -z "$(hit_ c)" ] || errs="$errs\nblocked even though unslop had run"
+    say_ "$P";      [ -z "$(hit_ d)" ] || errs="$errs\nblocked on a file no mandate covers"
+    # cannot trap the session
+    say_ "$W"; [ -z "$(hit_ e true)" ] || errs="$errs\nblocked while stop_hook_active was already true"
+    say_ "$W"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ f)" ] || errs="$errs\nignored VSTACK_NO_MANDATE=1"
+    say_ "$W"; hit_ g >/dev/null; hit_ g >/dev/null
+    [ -z "$(hit_ g)" ] || errs="$errs\ndid not latch open after 2 blocks in one session"
+
+    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-vfy-* 2>/dev/null
+    [ -z "$errs" ] && ok "skill mandate decides correctly (7 cases, both directions)" \
+      || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
+  fi
+else
+  skip "skill mandate decides correctly" "jq not installed"
+fi
+
+# --- 28. every doc is reachable from another doc ----------------------------------------------
+#
+# A file nobody links to is a file nobody reads and nobody updates, and it rots in public. A
+# 783-line research handoff landed in docs/ and was reachable from nothing: not the README index,
+# not another document. It read as deleted while still being served to anyone browsing the repo.
+#
+# The rule is reachability, not a fixed index: a doc linked from another doc is fine. What is not
+# fine is a doc no path in the repository leads to.
+docs_all=$(find docs -name '*.md' 2>/dev/null | sort)
+if [ -z "$docs_all" ]; then
+  skip "every doc is reachable" "no docs/ directory"
+else
+  # Written to a file and grepped directly. `printf ... | grep -q` returns 141 under pipefail
+  # when grep exits early on a match, so every doc that WAS linked reported as an orphan -- the
+  # same pipe-and-exit-status trap that has bitten this repository twice before.
+  linkable=$(mktemp)
+  cat README.md CHANGELOG.md $(find docs -name '*.md') claude/skills/*/SKILL.md > "$linkable" 2>/dev/null
+  orphans=""
+  for d in $docs_all; do
+    base=${d##*/}
+    # Either the repo-relative path or the bare filename, since docs link to each other by
+    # sibling name.
+    dir=${d%/*}
+    # A link to the containing directory counts. docs/provenance/README.md points at `plans/`
+    # rather than naming each plan, and a reader following it lands on all three -- that is
+    # reachable, and demanding a per-file link would only produce an index nobody maintains.
+    if ! grep -qF "$d" "$linkable" \
+       && ! grep -qF "]($base" "$linkable" \
+       && ! grep -qE "\]\((\./)?${dir##*/}/\)" "$linkable"; then
+      orphans="$orphans\n  $d"
+    fi
+  done
+  rm -f "$linkable"
+  [ -z "$orphans" ] \
+    && ok "every doc is reachable ($(printf '%s' "$docs_all" | wc -l | tr -d ' ') under docs/)" \
+    || bad "every doc is reachable" "$(printf 'nothing in this repository links to:%b' "$orphans")"
 fi
 
 echo

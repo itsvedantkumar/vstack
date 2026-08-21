@@ -67,7 +67,17 @@ assert_install(){ # <label> <config-dir> <home> [atleast]
   # With `atleast` they become a floor: a home that already held the user's own skills and
   # agents legitimately ends up with more than this repo ships, and demanding equality there
   # reports their surviving files as a defect.
-  lbl="$1"; cdir="$2"; h="$3"; mode="${4:-exact}"; errs=""
+  lbl="$1"; cdir="$2"; h="$3"; mode="${4:-exact}"; from="${5:-$SRC}"; errs=""
+  # The two network lanes install whatever `main` currently serves, which is not necessarily
+  # what is on this disk. Measuring a published install against local counts made the matrix go
+  # red for the entirely correct reason that a new hook had not been pushed yet -- and since
+  # preflight gates the commit, that is a state no ordering of commit and push can clear. The
+  # expectation comes from the tree that was actually installed.
+  NSK=$(count_dirs "$from/claude/skills")
+  NAG=$(count_files "$from/claude/agents" '*.md')
+  NCM=$(count_files "$from/claude/commands" '*.md')
+  NHK=$(count_files "$from/claude/hooks" '*.sh')
+  NWR=$(find "$from/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
   cmp_count(){ # <what> <got> <want>
     if [ "$mode" = atleast ]; then
       [ "$2" -ge "$3" ] || errs="$errs; $1 $2/$3"
@@ -334,8 +344,12 @@ if want bootstrap; then
     H="$ROOT/boot"; mkdir -p "$H"
     # --skip-deps: setup-machine.sh installs packages, which is not what this case is measuring.
     out=$(HOME="$H" VSTACK_DIR="$H/.vstack" bash "$ROOT/bootstrap.sh" --skip-deps 2>&1); rc=$?
-    e=$(assert_install bootstrap "$H/.claude" "$H")
+    e=$(assert_install bootstrap "$H/.claude" "$H" exact "$H/.vstack")
     [ -d "$H/.vstack/.git" ] || e="$e; bootstrap did not leave a clone at VSTACK_DIR"
+    # Local being ahead of the published tree is normal mid-change, and worth saying out loud
+    # so the lane's numbers are never mistaken for this checkout's.
+    lh=$(count_files "$SRC/claude/hooks" '*.sh'); rh=$(count_files "$H/.vstack/claude/hooks" '*.sh')
+    [ "$lh" = "$rh" ] || printf 'note  published main has %s hooks, this checkout has %s\n' "$rh" "$lh"
     [ "$rc" = 0 ] && [ -z "$e" ] && ok "curl bootstrap lane" || bad "curl bootstrap lane" "exit=$rc$e"
   fi
 fi

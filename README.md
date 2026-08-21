@@ -25,7 +25,7 @@ That claim is easy to make and most setups make it. Here it is measured: `tests/
 runs 12 prompts against the real model and reports which attempt each one landed on, so the day
 routing starts eroding shows up as a number rather than a feeling.
 
-The same idea runs through the rest. Every one of the 28 checks in the verification gate has a
+The same idea runs through the rest. Every one of the 30 checks in the verification gate has a
 row in a suite that breaks what that check watches and requires the gate to go red naming it — a
 check nobody has watched fail is indistinguishable from a check that always passes. The
 installer is run into 22 throwaway home directories on Linux, macOS and Alpine on every
@@ -150,7 +150,7 @@ exits 127 on every hook event inside a sandbox.
 | Skills | 26 | `~/.claude/skills/` |
 | Subagents | 8 | `~/.claude/agents/` |
 | Commands | 14 | `~/.claude/commands/` |
-| Hooks | 5 | `~/.claude/hooks/` |
+| Hooks | 6 | `~/.claude/hooks/` |
 | CLI wrappers | 7 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 | Global directives | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
@@ -213,6 +213,30 @@ start.
 `tests/auto-trigger.sh` proves it still works. It runs real prompts through the CLI and checks
 which skills fired. Strip the routing block and cases fail, which is how you know the test is
 worth having. [docs/how-skills-fire.md](docs/how-skills-fire.md) has the measurements.
+
+### The ones that are not optional
+
+Everything above is instruction, and an instruction is a probability. The routing lands on the
+cases that measure it, and "lands on the cases that measure it" is a weaker claim than "always".
+
+`claude/hooks/skill-mandate.sh` runs on `Stop` and makes two of them certain. It reads the
+session transcript for what actually happened, which files were written and which skills were
+invoked, and refuses to let the turn finish when a rule went unmet:
+
+| You wrote | This must have run |
+|---|---|
+| `.md` or `.mdx` | `unslop` |
+| `.ts` or `.tsx` | `typescript-best-practices` |
+
+Two rules, not twenty, and the bar for adding a third is high: the situation has to be decidable
+from a tool call rather than from judgement, and the skill has to be the right answer every
+single time. A rule that is correct nine times in ten belongs in the routing block as guidance.
+As a gate it would just teach you to switch the gate off.
+
+It blocks at most twice per session and then latches open, it never fires while a `Stop` hook is
+already running, and `VSTACK_NO_MANDATE=1` turns it off. Check 27 exercises all seven of those
+behaviours in both directions, because a gate that always blocks passes any test that only
+checks that it blocks.
 
 ## What this does that an unconfigured setup does not
 
@@ -428,6 +452,9 @@ true.
   each of its own checks can fail
 - [Why these skills](docs/provenance/pstack-audit.md), the fit-and-benefit audit of all 44 pstack
   skills that decided which 18 were worth porting
+- [Provenance](docs/provenance/README.md), the design history this project was extracted from
+- [Five open investigations](docs/provenance/research-v1.7.0.md), an outside research pass on
+  skill reachability, false-success labelling, ablation design, evidence bundles and a UI floor
 - [Changelog](CHANGELOG.md), with the measurements behind each release
 
 ## Credits

@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -70,6 +70,8 @@ files_for(){ case "$1" in
   24)  printf 'claude/.claude-plugin/plugin.json' ;;
   25)  printf 'claude/hooks/failure-diagnose.sh' ;;
   26)  printf 'README.md' ;;
+  27)  printf 'claude/hooks/skill-mandate.sh' ;;
+  28)  printf 'README.md' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -102,6 +104,8 @@ label_for(){ case "$1" in
   24)  printf 'declared version matches what installs' ;;
   25)  printf 'failure tail redacts credentials' ;;
   26)  printf 'documented platforms match CI' ;;
+  27)  printf 'skill mandate decides correctly' ;;
+  28)  printf 'every doc is reachable' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -181,6 +185,13 @@ exit 0
       # ships three lanes three different trees under one label
       sed -i.t 's/"version": "[0-9.]*"/"version": "1.4.0"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
+  28) # Strand a document by removing the only link to it, which is how a 783-line research
+      # handoff came to sit in docs/ reachable from nothing.
+      perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;
+  27) # Make the mandate unconditional. A gate that always blocks passes any test that only ever
+      # checks that it blocks, which is why check 27 exercises both directions.
+      perl -0pi -e 's/\[ -n "\$unmet" \] \|\| \{ rm -f "\$cnt_file"; exit 0; \}/unmet="\$unmet\\n  always"/' \
+        claude/hooks/skill-mandate.sh ;;
   26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
       # passages describing a Windows lane, with the Windows job red.
       perl -0pi -e 's/(runs\non `ubuntu-latest`)/runs\non `windows-latest`, `ubuntu-latest`/' README.md ;;
