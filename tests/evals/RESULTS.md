@@ -85,7 +85,7 @@ through a skill. This one invokes each harness's actual front door — `/review`
 diff, which is what both are written for. Fixtures become repos whose base commit is a
 placeholder and whose working tree carries the defect.
 
-## Run of 2026-08-21 — 8 fixtures, 1 sample per arm
+## Run of 2026-08-21 — 8 fixtures, 1 sample per arm (superseded by n=5 below)
 
 | arm | planted found | false positives | pathway entered |
 |---|---|---|---|
@@ -133,3 +133,43 @@ n=1 across 8 fixtures is not enough to separate 7/7 from 6/7. The same harness a
 across all three arms is roughly 120 reviews and would give the recall and precision numbers
 error bars. The fixtures are also small and Python-only; a defect class this set does not contain
 is a defect class this says nothing about.
+
+
+## Run of 2026-08-21 — 8 fixtures, 5 samples per arm (120 reviews)
+
+| arm | recall | false positives | precision |
+|---|---|---|---|
+| none (plain request) | **33/34 — 97.1%** | **0** | **100%** |
+| vstack `/review` | 29/35 — 82.9% | 15 | 65.9% |
+| gstack `/review` | 24/35 — 68.6% | 19 | 55.8% |
+
+Both harness pathways engaged on all 40 of their runs, so both arms are valid.
+
+**vstack beats gstack on both axes** — 14 points of recall and 10 points of precision. That
+comparison is real, reproducible, and the numbers are above.
+
+**Both lose badly to not using a harness at all.** A plain review request found 33 of 34 planted
+defects and reported nothing spurious in 40 runs. Running either `/review` pathway found fewer
+real defects and invented between 15 and 19 that were not there.
+
+That is the result. Any use of the vstack-versus-gstack number that omits the first row is
+dishonest, and trivially caught, because the harness that produced it is in this repository and
+takes one command to re-run.
+
+### The likely mechanism, stated as a hypothesis rather than a finding
+
+Both `/review` pathways instruct a thorough, structured, multi-section review. On an
+eight-line Python file with one planted defect, that structure appears to manufacture findings:
+a review told to produce sections about security, performance and error handling will produce
+them whether or not the file warrants any. The plain request has no such pressure and answers
+the question asked.
+
+If that is right, these harnesses would do better on the large diffs they were designed for than
+on these fixtures, and this benchmark is unkind to them in a way worth saying out loud. Testing
+that means running real repository-scale tasks, not eight-line files.
+
+### Denominator note
+
+The `none` arm shows 34 planted rather than 35: one of its 40 runs failed to return, so its
+fixture's planted defect was not counted for that sample. It is reported as measured rather than
+adjusted.
