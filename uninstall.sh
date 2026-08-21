@@ -159,7 +159,11 @@ done
 # settings.json and .claude.json are deliberately not in this list. install.sh MERGES those
 # rather than copying them, so there is no version of them that belongs solely to vstack —
 # deleting either would take the user's own configuration with it. If the backup holds a prior
-# copy, the restore pass above already put it back.
+# copy, the restore pass above already put it back, and for .claude.json it always does:
+# install.sh backs the file up before merging, and creates it as `{}` first where it is absent,
+# so there is always a prior copy to come back to. The uninstall-clean matrix case asserts that
+# end to end -- vstack's mcpServers entries gone, the user's own still registered -- with a
+# positive control that the entries were there to begin with.
 #
 # A file only qualifies if it is still byte-identical to the copy vstack installed. Once it
 # differs, somebody edited it, and their edit is not this script's to throw away — CLAUDE.md is
@@ -198,6 +202,14 @@ for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$CDIR
 for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")" "$f"; done
 plan_file_removal "$CDIR/CLAUDE.md"                    "$SRC/claude/CLAUDE.md"
 plan_file_removal "$CDIR/statusline.sh"                "$SRC/claude/statusline.sh"
+# Conductor. install.sh writes settings.toml where none exists and rewrites settings.managed.toml
+# every time, and this script had no reference to conductor at all -- so an uninstall left both in
+# place permanently. The managed file is the one that pins models, fast mode and plan mode, which
+# means a removed vstack went on setting a machine's policy. The same three rules apply as to
+# everything else here: a backup wins, an edited file is kept and named, and only a file still
+# byte-identical to what vstack shipped is removed.
+plan_file_removal "$HOME/.conductor/settings.toml"         "$SRC/conductor/settings.toml"
+plan_file_removal "$HOME/.conductor/settings.managed.toml" "$SRC/conductor/settings.managed.toml"
 plan_file_removal "$CDIR/skills/LICENSE.pstack"        "$SRC/claude/skills/LICENSE.pstack"
 plan_file_removal "$CDIR/skills/ATTRIBUTION.md"        "$SRC/claude/skills/ATTRIBUTION.md"
 plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh" "$SRC/shell/claude-parity.zsh"

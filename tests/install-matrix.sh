@@ -658,10 +658,23 @@ if want uninstall-clean; then
   # things that are theirs, which must all still be here afterwards
   printf '{"theirKey":"keep","theme":"dracula","skillOverrides":{"their-skill":"off"}}\n' > "$H/.claude/settings.json"
   printf 'THEIR_MANAGED=true\n' > "$H/.conductor/settings.managed.toml"
+  printf '{"mcpServers":{"their-server":{"command":"theirs"}}}\n' > "$H/.claude.json"
   HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  # Positive control, taken between install and uninstall. Asserting only that vstack's servers
+  # are gone afterwards passes for free on any machine where they were never registered, which
+  # is the shape of every fake green this repo has shipped.
+  installed_srv=0
+  command -v jq >/dev/null 2>&1 \
+    && installed_srv=$(jq -r '[(.mcpServers // {}) | keys[]] | length' "$H/.claude.json" 2>/dev/null || echo 0)
+  installed_cond=0
+  [ -f "$H/.conductor/settings.toml" ] && installed_cond=1
   HOME="$H" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
   e=""
+  [ "${installed_cond:-0}" -eq 1 ] || e="$e; install never wrote ~/.conductor/settings.toml, so its removal proves nothing"
   if command -v jq >/dev/null 2>&1; then
+    want_srv=$(jq -r 'keys | length' "$SRC/mcp/servers.json" 2>/dev/null || echo 0)
+    [ "${installed_srv:-0}" -gt "$want_srv" ] \
+      || e="$e; install registered ${installed_srv:-0} MCP servers where theirs plus $want_srv were expected, so the removal assertions below prove nothing"
     n=$(jq -r '[.hooks[]?[]?.hooks[]?.command]|length' "$H/.claude/settings.json" 2>/dev/null || echo 0)
     [ "${n:-0}" -eq 0 ] || e="$e; $n hook commands left pointing at deleted scripts"
     [ "$(jq -r '.model // "gone"' "$H/.claude/settings.json")" = gone ] || e="$e; vstack model policy still in force"
@@ -672,6 +685,20 @@ if want uninstall-clean; then
   fi
   grep -q THEIR_MANAGED "$H/.conductor/settings.managed.toml" 2>/dev/null \
     || e="$e; their Conductor managed policy was not restored"
+  # install.sh writes ~/.conductor/settings.toml where none exists. uninstall.sh had no
+  # reference to conductor at all, so an install into a clean home left both files behind for
+  # good -- and the managed one is the pinning file, so a removed vstack went on pinning models.
+  [ -f "$H/.conductor/settings.toml" ] && e="$e; ~/.conductor/settings.toml was left behind"
+  # Same shape one file over: install.sh merges its servers into the global mcpServers map, and
+  # nothing subtracted them again. Theirs must survive, ours must not.
+  if command -v jq >/dev/null 2>&1; then
+    for srv in $(jq -r 'keys[]' "$SRC/mcp/servers.json" 2>/dev/null); do
+      [ "$(jq -r --arg s "$srv" 'if (.mcpServers // {}) | has($s) then "left" else "gone" end' "$H/.claude.json" 2>/dev/null)" = gone ] \
+        || e="$e; vstack's $srv MCP server was left registered"
+    done
+    [ "$(jq -r '(.mcpServers // {})["their-server"].command // "GONE"' "$H/.claude.json" 2>/dev/null)" = theirs ] \
+      || e="$e; their own MCP server was removed"
+  fi
   [ -f "$H/.config/agents/verify-trust" ] && e="$e; the trust store was left behind"
   for rc in .zshrc .zshenv .bashrc; do
     [ -f "$H/$rc" ] && grep -q 'claude-parity' "$H/$rc" 2>/dev/null && e="$e; $rc still sources vstack"
