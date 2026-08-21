@@ -103,5 +103,6 @@ if [ "$DEPS" = 1 ] && [ -x "$DIR/setup-machine.sh" ]; then
   echo
 fi
 
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # $ARGS is a caller-supplied flag list and has to word-split here;
+                              # quoting it would hand install.sh one argument containing spaces
 exec "$DIR/install.sh" $ARGS

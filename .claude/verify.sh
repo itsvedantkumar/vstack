@@ -1196,8 +1196,7 @@ fi
 # check nobody wrote -- and a linter finds all three for free.
 #
 # Warning level, not style: informational notes are opinions and this should fail on defects.
-# Where a warning is wrong the suppression carries a reason on the line above it, so the next
-# reader can see the argument rather than a bare disable.
+# Where a warning is wrong the suppression carries a reason, which check 30 enforces.
 #
 # Selected by shebang, the same way check 1 selects. It used to be the hand-maintained list
 # `git ls-files '*.sh' bin/doctor bin/vstack`, and bin/cloudflare-mcp -- a #!/bin/sh script with
@@ -1217,6 +1216,43 @@ if command -v shellcheck >/dev/null 2>&1; then
 else
   skip "shellcheck clean" "shellcheck not installed (brew install shellcheck / apk add shellcheck)"
 fi
+
+# --- 30. every shellcheck suppression carries a reason ----------------------------------------
+#
+# Check 29's own header has said for several versions that a suppression carries its reason with
+# it, so the next reader sees the argument rather than a bare disable. Nothing enforced it, and
+# bootstrap.sh had carried a naked `# shellcheck disable=SC2086` since the lane was written. A
+# rule that lives only in prose is a rule that gets skipped by whoever did not read the prose,
+# which is the second time that has happened here -- the documented-count rule was the first.
+#
+# A reason counts if it is on the same line after the code list, which is how the other five
+# suppressions in this repo are written, or on the line immediately above. Both are readable at
+# the point of the disable; a reason three lines away is not.
+bare=""
+nsup=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    n=${hit%%:*}
+    nsup=$((nsup + 1))
+    line=$(sed -n "${n}p" "$f")
+    # whatever follows the comma-separated code list on the same line
+    tail_=$(sed -E 's/.*shellcheck[[:space:]]+disable=[A-Za-z0-9,]+//' <<<"$line")
+    above=$(sed -n "$((n - 1))p" "$f")
+    if ! grep -qE '[A-Za-z]{3}' <<<"$tail_" && ! grep -qE '^[[:space:]]*#.*[A-Za-z]{3}' <<<"$above"; then
+      bare="$bare\n  $f:$n"
+    fi
+    # A directive shellcheck honours is always its own comment line, so anchor on that. Matching
+    # the bare phrase also picked up this file's own prose about the rule and the mutation
+    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 6.
+  done <<<"$(grep -nE '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=' "$f" 2>/dev/null)"
+done <<<"$(git ls-files 2>/dev/null)"
+[ -z "$bare" ] \
+  && ok "shellcheck suppressions carry a reason ($nsup suppressions)" \
+  || bad "shellcheck suppressions carry a reason" \
+         "$(printf 'a bare disable hides the argument from the next reader:%b' "$bare")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
