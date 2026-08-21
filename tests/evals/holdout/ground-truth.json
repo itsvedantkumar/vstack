@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "Hold-out ground truth. The optimisation loop never scores against this set — it exists only",
+    "to answer, once, whether a change that improved the dev fixtures improved anything real or",
+    "just fitted their noise. Anything tuned against a set it is then measured on is measuring",
+    "its own tuning."
+  ],
+  "tolerance": 3,
+  "fixtures": [
+    { "file": "tocttou.py",
+      "planted": [{"line": 6, "category": "correctness",
+        "what": "os.access then copy is check-then-act; the file can change between the two"}],
+      "decoys": [{"line": 13, "why_not_a_bug": "opening directly and handling OSError is the correct pattern"}] },
+    { "file": "mutable_default.py",
+      "planted": [{"line": 3, "category": "correctness",
+        "what": "the mutable default list is shared across every call and accumulates forever"}],
+      "decoys": [{"line": 8, "why_not_a_bug": "the None sentinel makes this version correct"}] },
+    { "file": "encoding.py",
+      "planted": [{"line": 4, "category": "correctness",
+        "what": "open() without an encoding decodes with the platform default and raises on non-ASCII"}],
+      "decoys": [{"line": 9, "why_not_a_bug": "binary mode has no encoding to get wrong"}] },
+    { "file": "clean2.py",
+      "planted": [],
+      "decoys": [{"line": 0, "why_not_a_bug": "correct throughout; any finding is a false positive"}] }
+  ]
+}

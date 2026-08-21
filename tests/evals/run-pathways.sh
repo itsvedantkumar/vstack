@@ -36,8 +36,12 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 SRC=$(pwd)
-FIX="$SRC/tests/evals/fixtures"
-GT="$SRC/tests/evals/ground-truth.json"
+# FIXTURES selects the set. `holdout` is the set the optimisation loop never tunes against, so
+# a change that helps the dev fixtures can be checked against something it has not seen.
+case "${FIXTURES:-dev}" in
+  holdout) FIX="$SRC/tests/evals/holdout"; GT="$SRC/tests/evals/holdout/ground-truth.json" ;;
+  *)       FIX="$SRC/tests/evals/fixtures"; GT="$SRC/tests/evals/ground-truth.json" ;;
+esac
 
 SAMPLES=1; ARMS_CSV="none,vstack,gstack"; JSON=0
 while [ $# -gt 0 ]; do
