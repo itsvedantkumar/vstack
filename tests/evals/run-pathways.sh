@@ -167,7 +167,22 @@ extract_findings() {
   [ -n "$review" ] || { printf '[]'; return; }
   ed=$(mktemp -d "$ROOT/extract.XXXXXX")
   printf '%s' "$review" > "$ed/review.txt"
-  out=$( cd "$ed" && timeout 180 claude -p "Read review.txt. It is a code review. Convert every genuine defect it reports into this JSON array and output ONLY the array, no prose: [{\"line\": <integer>, \"category\": \"security|correctness|resource-leak\", \"summary\": \"<one sentence>\"}]. Use the line number the review gives for each defect. If it reports no defects, output []." \
+  # The extractor decides what counts as a defect claim, and it must apply the same bar to every
+  # arm. The first version asked only for "defects" and let the reviewer's own framing through,
+  # which made this benchmark unfair in a way that took an outsider's disbelief to catch.
+  #
+  # The `none` arm was told "do not report style, naming, typing, documentation, or preference",
+  # so it stayed silent on those. The harness arms were given their own /review, which is written
+  # to produce a thorough multi-section report — and it duly reported things like "inconsistent
+  # parameter typing (nit)", "no tests (low)" and "no call sites (info)". Those are not false
+  # claims about defects. They are correct observations that the baseline had been instructed not
+  # to make, and counting them as false positives scored the harnesses for answering a question
+  # nobody asked them to skip.
+  #
+  # So the extractor now drops anything the review itself frames as a nit, a suggestion, a
+  # missing test, a style or typing preference, or an informational note, and keeps only what it
+  # presents as an actual bug. Same instruction, same model, every arm.
+  out=$( cd "$ed" && timeout 180 claude -p "Read review.txt. It is a code review. Extract ONLY findings that the review presents as a genuine BUG, security problem, or resource-handling error in the code — something that would misbehave at runtime. EXCLUDE anything the review frames as a nit, style, naming, typing or annotation preference, a missing test, missing documentation, a suggestion, or an informational note, however it is labelled. Output ONLY a JSON array and no prose: [{\"line\": <integer>, \"category\": \"security|correctness|resource-leak\", \"summary\": \"<one sentence>\"}]. Use the line number the review gives. If it reports no genuine bug, output []." \
          --setting-sources=project --output-format=stream-json --verbose < /dev/null 2>/dev/null \
        | jq -rs '[.[]|select(.type=="assistant")|.message.content[]?|select(.type=="text")|.text]|join("")' 2>/dev/null )
   printf '%s' "$out" | grep -o '\[[^][]*\]' | tail -1

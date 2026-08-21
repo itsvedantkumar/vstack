@@ -135,7 +135,17 @@ error bars. The fixtures are also small and Python-only; a defect class this set
 is a defect class this says nothing about.
 
 
-## Run of 2026-08-21 — 8 fixtures, 5 samples per arm (120 reviews)
+## RETRACTED — Run of 2026-08-21 — 8 fixtures, 5 samples per arm (120 reviews)
+
+> **These numbers are unfair to both harnesses and are retracted.** The scoring counted a
+> reviewer's nits, style notes and "no tests here" observations as false positives, while the
+> baseline had been explicitly instructed not to make such observations at all. So the precision
+> column compared a constrained prompt against unconstrained thorough reviews and scored the
+> difference as error. The table is kept because deleting a wrong result you already published is
+> worse than leaving it standing with the reason attached. A corrected run replaces it below.
+>
+> Caught by a reader refusing to believe the result, not by any check in this repository. The
+> question "why would anyone use these harnesses then" was the right one to ask.
 
 | arm | recall | false positives | precision |
 |---|---|---|---|
