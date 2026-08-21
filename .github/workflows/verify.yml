@@ -17,9 +17,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The gate needs jq for the JSON checks and the install dry run.
-      - name: Install jq
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      # The gate needs jq for the JSON checks and the install dry run. shellcheck backs check 29,
+      # which skips without it -- and a check that skips on the one machine gating every push is
+      # a green measuring nothing, which is the failure mode this repository keeps rediscovering.
+      # `shellcheck --version` runs so a broken install stops the run here rather than being
+      # found later as a check that quietly proved nothing.
+      - name: Install jq and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq shellcheck
+          shellcheck --version
 
       # Check 19 runs `claude plugin validate --strict`; without a working CLI it skips, and the
       # falsifiability suite skips its case 19 with it. Install it so CI proves the real thing.
