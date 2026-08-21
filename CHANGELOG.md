@@ -6,6 +6,52 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.9.0 — 2026-08-22
+
+An audit pass. Every finding below is a green that measured nothing, which is the fifth time
+that class has shipped here, so each one leaves behind a check and a mutation row rather than
+just a fix.
+
+**Check 24 said ok over a comparison it never ran.** A version declared by the manifests but not
+yet tagged has no payload to diff against, and that branch printed ok. The tagless branch one
+elif below already knew better. It now skips with a reason, so the skip census can see it.
+
+**A pinned quickstart that 404s.** The README's "pin a release" lane pinned v1.8.0, the manifests
+said v1.8.0, and no such tag existed. The check compared the two strings, found them equal, and
+was satisfied. Measured: HTTP 404. A pin now has to name a tag that is actually there.
+
+**shellcheck was linting a hand-maintained list.** `git ls-files '*.sh' bin/doctor bin/vstack`
+never included bin/cloudflare-mcp, a #!/bin/sh script with no .sh suffix. An unquoted expansion
+appended to it made shellcheck exit 1 while the gate printed "ok shellcheck clean (29 scripts)".
+Selection is by shebang now, the way check 1 already did it, and the count is 30. Row 29 mutates
+that file specifically, so it proves the linter runs over everything rather than that it runs.
+
+**The count check dropped nouns on the floor.** `want_for()` resolved eight nouns and the
+extractor carried a separate grep alternation, so a claim could be extractable-but-unresolvable
+or the reverse, silently either way. Both come from one list now, with a positive control that
+fails if the extractor looks for a noun `want_for` cannot resolve. Adding "shell scripts"
+surfaced a stale CHANGELOG claim, and CHANGELOG's current-version section is now in the scan.
+
+**A suppression-reason rule that only lived in a comment.** Check 29's header had claimed it for
+several versions while bootstrap.sh carried a naked disable=SC2086. Check 30 enforces it.
+
+**Two files nothing pointed at.** A launchd wrapper around the doctor, which install.sh never
+installed and uninstall.sh never removed, and the eval-loop driver. The wrapper is deleted; the
+driver now has a real referrer in tests/README.md. Check 31 makes an unreferenced file a failure.
+
+**An uninstall that left Conductor pinning policy.** install.sh writes ~/.conductor/settings.toml
+and settings.managed.toml; uninstall.sh had no reference to conductor at all, so both survived
+removal, and the managed file is the one that pins models and plan mode.
+
+**The 141 that hid all of it.** tests/gate-falsifiability.sh probed for a check's skip with
+`verify.sh | grep -q`. Under `set -o pipefail` grep -q exits on the first match, verify dies of
+SIGPIPE, and the pipeline returns 141, which reads as "did not skip". Measured: rc=141 with
+pipefail, rc=0 without. Four sites now capture first and grep a here-string.
+
+The gate is 33 checks. Two of the new ones defeated themselves before they worked: naming a file
+in the check that hunts unnamed files gives it a referrer, and so does naming the probe in the
+mutation row.
+
 ## 1.8.0 — 2026-08-22
 
 **Two skill routings are mandatory now, not merely instructed.** Everything vstack did to route

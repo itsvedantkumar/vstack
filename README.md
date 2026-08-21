@@ -72,9 +72,9 @@ cd vstack
 read the script before running it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.8.0/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.9.0/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                       # about 100 lines
-VSTACK_REF=v1.8.0 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.9.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The unpinned one-liner is shorter and is what most people will paste:

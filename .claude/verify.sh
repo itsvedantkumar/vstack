@@ -977,11 +977,23 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   # quickstart pinned v1.4.0 while the manifests said v1.8.0, so anyone copy-pasting the "pin a
   # release" lane got a four-version-old payload and no error -- the tag resolves, the install
   # succeeds, and the only symptom is a setup that quietly disagrees with its own README.
+  #
+  # Agreeing with the manifest is not enough. The quickstart's "pin a release" lane pinned
+  # v1.8.0 while the manifests said v1.8.0 and no such tag existed, so the check was satisfied
+  # and the URL a stranger copy-pastes returned 404. A pin has to name a tag that is actually
+  # there. Only asserted where the checkout has tags at all -- a shallow clone has none, and the
+  # branch below already declines to measure in that case.
   pins=""
   for f in README.md docs/*.md; do
     [ -f "$f" ] || continue
     while IFS= read -r pv; do
-      [ -n "$pv" ] && [ "$pv" != "$mv_" ] && pins="$pins\n  $f pins v$pv"
+      [ -n "$pv" ] || continue
+      if [ "$pv" != "$mv_" ]; then
+        pins="$pins\n  $f pins v$pv"
+      elif [ -n "$(git tag -l 2>/dev/null | head -1)" ] \
+           && ! git rev-parse -q --verify "refs/tags/v$pv" >/dev/null 2>&1; then
+        pins="$pins\n  $f pins v$pv, which is not a tag in this repository (the URL 404s)"
+      fi
     done <<PINEOF
 $(grep -oE '(vstack/v|VSTACK_REF=v)[0-9]+\.[0-9]+\.[0-9]+' "$f" 2>/dev/null | sed -E 's/.*v//' | sort -u)
 PINEOF
