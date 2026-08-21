@@ -6,7 +6,9 @@ secrets.env
 
 # Local audit trails: decision logs carry machine detail and are not launch material.
 .audit/
-tests/evals/swebench/__pycache__/
+
+# Python bytecode. Eight of these were tracked by accident and shipped in the tree.
+__pycache__/
 
 # SWE-bench instances are fetched on demand, never vendored: 3.9MB of upstream patches that
 # carry absolute paths from other people's machines, which the home-path scanner correctly

@@ -76,6 +76,28 @@ setup_repo() { # <index> <dir> -> 0 usable, 1 unusable
 }
 
 f2p_list() { jq -r ".[$1].FAIL_TO_PASS | if type==\"string\" then fromjson else . end | .[]" "$DATA"; }
+p2p_list() { jq -r ".[$1].PASS_TO_PASS | if type==\"string\" then fromjson else . end | .[0:5][]" "$DATA"; }
+
+# PASS_TO_PASS is the environment check, and leaving it out made every instance look usable.
+#
+# The gate was "do the target tests fail?" — which a completely broken environment also
+# satisfies. One flask instance imported a werkzeug too new for it, so `from werkzeug.urls
+# import url_quote` raised ImportError, every test failed, the instance was marked usable, and
+# all three arms scored zero on a repository where flask could not be imported at all. Three
+# identical zeroes look like a finding about the harnesses and were a finding about my setup.
+#
+# So a usable instance must ALSO have its PASS_TO_PASS tests passing: those are tests that
+# already work, so if they fail the environment is broken rather than the code. A sample of
+# five is enough to catch an import error without paying for the whole suite.
+run_p2p() { # <dir> <index> -> "pass total"
+  local d="$1" i="$2" pass=0 tot=0 t
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    tot=$((tot+1))
+    ( cd "$d" && timeout 240 .venv/bin/python -m pytest -x -q "$t" >/dev/null 2>&1 ) && pass=$((pass+1))
+  done < <(p2p_list "$i")
+  printf '%s %s' "$pass" "$tot"
+}
 
 run_tests() { # <dir> <index> -> "pass total"
   local d="$1" i="$2" pass=0 tot=0 t
@@ -113,11 +135,18 @@ while [ "$checked" -lt "$N" ] && [ "$idx" -lt "$(jq 'length' "$DATA")" ]; do
   if setup_repo "$idx" "$d"; then
     read -r p t <<< "$(run_tests "$d" "$idx")"
     # Usable means the target tests genuinely fail before anyone touches the code.
-    if [ "$t" -gt 0 ] && [ "$p" -lt "$t" ]; then
-      USABLE="$USABLE $idx"; checked=$((checked+1))
-      printf 'usable (%s/%s passing)\n' "$p" "$t" >&2
+    read -r pp pt <<< "$(run_p2p "$d" "$idx")"
+    if [ "$t" -eq 0 ]; then
+      printf 'UNUSABLE (no target tests)\n' >&2
+    elif [ "$p" -ge "$t" ]; then
+      printf 'UNUSABLE (target tests already pass)\n' >&2
+    elif [ "$pt" -gt 0 ] && [ "$pp" -lt "$pt" ]; then
+      # The decisive one: tests that are supposed to already pass do not, so the environment is
+      # broken and any score from it would measure my setup rather than the agent.
+      printf 'UNUSABLE (environment broken: %s/%s known-good tests fail)\n' "$((pt-pp))" "$pt" >&2
     else
-      printf 'UNUSABLE (%s/%s already passing)\n' "$p" "$t" >&2
+      USABLE="$USABLE $idx"; checked=$((checked+1))
+      printf 'usable (target %s/%s, known-good %s/%s)\n' "$p" "$t" "$pp" "$pt" >&2
     fi
   else
     printf 'UNUSABLE (environment did not build)\n' >&2
