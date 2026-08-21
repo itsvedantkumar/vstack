@@ -132,7 +132,11 @@ run_arm() { # <arm> <dir> -> findings TAB pathway_entered
     # nothing needs to be appended here.
     *)    prompt="/review" ;;
   esac
-  raw=$( cd "$d" && timeout 300 claude -p "$prompt" --setting-sources=project \
+  # 300s per review let one slow pathway stall the whole suite: gstack's /review reads a large
+  # tree and its arm was averaging minutes per run, which turned a 120-review benchmark into
+  # hours. A shorter ceiling loses the occasional slow run — recorded as a miss, which is the
+  # honest treatment of a review that did not finish — rather than losing the whole suite.
+  raw=$( cd "$d" && timeout "${REVIEW_TIMEOUT:-150}" claude -p "$prompt" --setting-sources=project \
            --output-format=stream-json --verbose < /dev/null 2>/dev/null )
   text=$(printf '%s' "$raw" | jq -rs '[.[]|select(.type=="assistant")|.message.content[]?|select(.type=="text")|.text]|join("")' 2>/dev/null)
   # Did the harness's own pathway actually engage? For `none` there is nothing to enter.
@@ -182,27 +186,48 @@ extract_findings() {
   # So the extractor now drops anything the review itself frames as a nit, a suggestion, a
   # missing test, a style or typing preference, or an informational note, and keeps only what it
   # presents as an actual bug. Same instruction, same model, every arm.
-  out=$( cd "$ed" && timeout 180 claude -p "Read review.txt. It is a code review. Extract ONLY findings that the review presents as a genuine BUG, security problem, or resource-handling error in the code — something that would misbehave at runtime. EXCLUDE anything the review frames as a nit, style, naming, typing or annotation preference, a missing test, missing documentation, a suggestion, or an informational note, however it is labelled. Output ONLY a JSON array and no prose: [{\"line\": <integer>, \"category\": \"security|correctness|resource-leak\", \"summary\": \"<one sentence>\"}]. Use the line number the review gives. If it reports no genuine bug, output []." \
+  out=$( cd "$ed" && timeout "${EXTRACT_TIMEOUT:-90}" claude -p "Read review.txt. It is a code review. Extract ONLY findings that the review presents as a genuine BUG, security problem, or resource-handling error in the code — something that would misbehave at runtime. EXCLUDE anything the review frames as a nit, style, naming, typing or annotation preference, a missing test, missing documentation, a suggestion, or an informational note, however it is labelled. Output ONLY a JSON array and no prose: [{\"line\": <integer>, \"category\": \"security|correctness|resource-leak\", \"summary\": \"<one sentence>\"}]. Use the line number the review gives. If it reports no genuine bug, output []." \
          --setting-sources=project --output-format=stream-json --verbose < /dev/null 2>/dev/null \
        | jq -rs '[.[]|select(.type=="assistant")|.message.content[]?|select(.type=="text")|.text]|join("")' 2>/dev/null )
   printf '%s' "$out" | grep -o '\[[^][]*\]' | tail -1
 }
 
 score() { # <fixture> <findings>
-  local f="$1" found="$2"
+  local f="$1" found="$2" planted
   [ -n "$found" ] || found='[]'
   printf '%s' "$found" | jq -e . >/dev/null 2>&1 || found='[]'
+  # The denominator comes from ground truth and never from the scoring path.
+  #
+  # It used to fall back to {"hits":0,"planted":0,"fp":0} whenever the jq scoring failed, so a
+  # review that errored or timed out removed its own planted defect from the total instead of
+  # counting as a miss. That silently inflates recall for whichever arm fails more often, and it
+  # is why one arm reported 34 planted where the others reported 35 — a difference that read as a
+  # rounding detail and was actually four swallowed failures.
+  planted=$(jq --arg f "$f" '[.fixtures[]|select(.file==$f)|.planted[]?]|length' "$GT" 2>/dev/null)
+  [ -n "$planted" ] || planted=0
   jq -n --argjson g "$(jq --arg f "$f" '.fixtures[]|select(.file==$f)' "$GT")" \
         --argjson found "$found" --argjson tol "$TOL" '
     ($g.planted // []) as $p
     | { hits: ([$p[] | . as $pl | select(($found|map(select(((.line-$pl.line)|fabs)<=$tol))|length)>0)]|length),
         planted: ($p|length),
         fp: ([$found[] | . as $fd | select(($p|map(select(((($fd.line)-.line)|fabs)<=$tol))|length)==0)]|length) }' \
-    2>/dev/null || echo '{"hits":0,"planted":0,"fp":0}'
+    2>/dev/null || printf '{"hits":0,"planted":%s,"fp":0}' "$planted"
 }
 
 NFIX=$(jq -r '.fixtures|length' "$GT")
 RESULTS=""
+
+# Per-run results are appended to a log as they complete, and progress goes to stderr.
+#
+# The first version accumulated everything in a shell variable and printed one table at the very
+# end. A 120-review run then produced a zero-byte output file for ninety minutes with no way to
+# tell progress from a hang, and killing it — which is what eventually happened — threw away 83
+# completed reviews. Anything that takes hours has to be observable while it runs and survivable
+# when it does not.
+RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
+printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$RUNLOG"
+TOTAL_RUNS=$(( $(printf '%s' "$ARMS_CSV" | tr ',' ' ' | wc -w) * NFIX * SAMPLES ))
+DONE_RUNS=0
 for a in $(printf '%s' "$ARMS_CSV" | tr ',' ' '); do
   H=0; P=0; FP=0; ENT=0; RUNS=0
   for f in $(jq -r '.fixtures[].file' "$GT"); do
@@ -217,6 +242,11 @@ for a in $(printf '%s' "$ARMS_CSV" | tr ',' ' '); do
       FP=$((FP + $(printf '%s' "$sc" | jq -r '.fp')))
       [ "$ent" = yes ] && ENT=$((ENT+1))
       RUNS=$((RUNS+1))
+      DONE_RUNS=$((DONE_RUNS+1))
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$f" "$s" \
+        "$(printf '%s' "$sc" | jq -r '.hits')" "$(printf '%s' "$sc" | jq -r '.planted')" \
+        "$(printf '%s' "$sc" | jq -r '.fp')" "$ent" >> "$RUNLOG"
+      printf '\r  %s/%s  %-8s %-18s sample %s   ' "$DONE_RUNS" "$TOTAL_RUNS" "$a" "$f" "$s" >&2
     done
   done
   RESULTS="$RESULTS$a|$H|$P|$FP|$ENT|$RUNS
@@ -231,6 +261,7 @@ if [ "$JSON" = 1 ]; then
   exit 0
 fi
 
+printf '\n' >&2
 printf 'review-pathway benchmark — %s fixtures x %s sample(s), each harness through its own /review\n\n' "$NFIX" "$SAMPLES"
 printf '%-8s %-8s %-9s %-17s %s\n' "arm" "found" "planted" "false positives" "pathway entered"
 printf '%-8s %-8s %-9s %-17s %s\n' "--------" "--------" "---------" "-----------------" "---------------"
