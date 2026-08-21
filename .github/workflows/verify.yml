@@ -244,35 +244,6 @@ jobs:
       - name: Run the verification gate
         run: ./.claude/verify.sh
 
-  # Windows via Git Bash, which is what `shell: bash` selects on a windows runner and what a
-  # Windows user running these scripts actually has. Native PowerShell is not a target and the
-  # README says so; this proves the Git Bash and WSL-shaped path, which is the one people use.
-  #
-  # It gates like every other platform. It started as continue-on-error because Windows had
-  # never been supported and the job existed to report the truth rather than block merges; it
-  # went green in three commits, so the crutch is gone.
-  install-windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: What this runner actually has
-        run: |
-          bash --version | head -1
-          uname -s
-          for t in jq git sed find cp chmod mktemp shasum sha256sum; do
-            printf '%-12s %s\n' "$t" "$(command -v $t || echo MISSING)"
-          done
-
-      - name: Install matrix on Windows (Git Bash)
-        run: ./tests/install-matrix.sh
-
-      - name: Run the verification gate
-        run: ./.claude/verify.sh
-
   # Alpine, because BusyBox is not GNU. Its sed, grep, find and stat take different flags, and
   # there is no bash until you install it — which is exactly the shape of a slim container
   # image. Nothing else in this workflow would catch a GNU-ism.

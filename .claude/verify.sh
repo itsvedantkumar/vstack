@@ -1021,6 +1021,33 @@ else
   skip "failure tail redacts credentials" "jq not installed"
 fi
 
+# --- 26. the platforms the docs claim are the platforms CI actually runs -----------------------
+#
+# The README described a Windows lane in three places while the Windows job was failing, and
+# nothing connected the two. Support is a claim about what is tested, so the runner names in the
+# workflow and the runner names in the README have to be the same set, in both directions: a
+# platform CI stopped running must leave the docs, and a platform CI starts running should enter
+# them rather than being supported in silence.
+if [ -f .github/workflows/verify.yml ]; then
+  ci_runners=$(grep -oE '(runs-on|container): *[A-Za-z0-9:._-]+' .github/workflows/verify.yml \
+    | sed -E 's/^(runs-on|container): *//' | sort -u)
+  doc_runners=$(grep -ohE '\b(ubuntu|macos|windows|alpine)[:-][A-Za-z0-9.]+' README.md | sort -u)
+  errs=""
+  for r in $ci_runners; do
+    printf '%s\n' "$doc_runners" | grep -qxF "$r" \
+      || errs="$errs\n  CI runs $r, the README never names it"
+  done
+  for r in $doc_runners; do
+    printf '%s\n' "$ci_runners" | grep -qxF "$r" \
+      || errs="$errs\n  the README names $r, no CI job runs it"
+  done
+  [ -z "$errs" ] \
+    && ok "documented platforms match CI ($(printf '%s' "$ci_runners" | tr '\n' ' '))" \
+    || bad "documented platforms match CI" "$(printf 'support is a claim about what is tested:%b' "$errs")"
+else
+  skip "documented platforms match CI" "no .github/workflows/verify.yml"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

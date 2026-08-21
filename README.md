@@ -6,6 +6,16 @@ rather than telling you.
 [![verify](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml/badge.svg)](https://github.com/itsvedantkumar/vstack/actions/workflows/verify.yml)
 [![license](https://img.shields.io/badge/license-MIT%20%2B%20Apache--2.0-blue.svg)](LICENSE)
 [![plugin](https://img.shields.io/badge/claude%20plugin-vstack-6f42c1.svg)](#start-here-the-skills-alone)
+[![runs on](https://img.shields.io/badge/runs%20on-macOS%20%2B%20Linux-lightgrey.svg)](#what-runs-where)
+
+> **This is for Claude Code and nothing else.** Not Cursor, not Codex, not Aider, not a local
+> Llama or Qwen or DeepSeek, not an OpenAI or Gemini model behind a compatibility shim. Every
+> piece of it is built on machinery only Claude Code has: skills that the model loads by reading
+> their descriptions, the six hook event lanes, subagents, `skillOverrides`, `settings.json`,
+> plugin marketplaces, and the `claude` CLI's own flags. There is no adapter layer and none is
+> planned. If you are not running Claude Code, none of this does anything.
+>
+> **macOS and Linux.** Windows is not supported, and the reason is in [what runs where](#what-runs-where).
 
 Ask for a README and the writing skills load. Hand it a TypeScript file and the type-safety
 skill loads. Say "audit this three ways" and it fans out three subagents in one message. None of
@@ -15,10 +25,10 @@ That claim is easy to make and most setups make it. Here it is measured: `tests/
 runs 12 prompts against the real model and reports which attempt each one landed on, so the day
 routing starts eroding shows up as a number rather than a feeling.
 
-The same idea runs through the rest. Every one of the 27 checks in the verification gate has a
+The same idea runs through the rest. Every one of the 28 checks in the verification gate has a
 row in a suite that breaks what that check watches and requires the gate to go red naming it — a
 check nobody has watched fail is indistinguishable from a check that always passes. The
-installer is run into 19 throwaway home directories on Linux, macOS, Windows and Alpine on every
+installer is run into 22 throwaway home directories on Linux, macOS and Alpine on every
 push, because the only way to know an installer works is to run it and look at the files.
 
 **Two audits have been run against this repo by models other than the one that wrote it.** They
@@ -79,9 +89,10 @@ pins this repo to a tag you have read. It does nothing about the installers down
 the trade, stated plainly rather than left for you to work out.
 
 On macOS it installs Homebrew, the CLI tools, Conductor and the Claude Code CLI. On Linux it
-falls back to apt, dnf or apk and skips Conductor, which is a Mac app. Windows means Git Bash or
-WSL; the installer runs there and is tested in CI, but Conductor and the zsh wrapper are not
-part of it.
+falls back to apt, dnf or apk and skips Conductor, which is a Mac app. Windows is not supported.
+Every hook is a shell script, and the 600-mode check that protects `secrets.env` has no meaning
+on a filesystem without POSIX permissions, so there is no honest way to make the claim. WSL is
+Linux and the Linux lane covers it.
 
 Nothing here schedules a job, phones home, or updates itself in the background. `vstack update`
 shows you the incoming commits and the diff of every script the gate executes, and refuses to
@@ -307,7 +318,7 @@ tree: default, `CLAUDE_CONFIG_DIR`, a home path with a space, no `jq`, a bash us
 for idempotency, both uninstall paths, and an install over a home that already holds the user's
 own skills, agents, settings and MCP servers. Two more cases exercise the curl bootstrap and the
 plugin marketplace against the published repo, and skip with a reason when offline. It runs on
-Linux, macOS, Windows and Alpine in CI every push, and never touches your real home directory,
+Linux, macOS and Alpine in CI every push, and never touches your real home directory,
 so it is safe to run on the machine you work on.
 
 ## Credentials
@@ -383,13 +394,18 @@ commits and the full diff of every script the gate executes, and asks before mer
 re-recording trust hashes; without a terminal it refuses instead of assuming. The `--yes`
 flag exists for automation, and anything automated enough to use it is back to trust-on-pull.
 
-**macOS, Linux and Windows all run in CI on every push.** The install matrix runs on
-`ubuntu-latest`, `macos-latest` and `windows-latest`, and Linux additionally installs for real
-and fires the hooks. Windows means Git Bash: that is what `shell: bash` selects on a Windows runner, and it is what
-CI actually exercises. WSL is Linux and the Linux jobs cover that shape, but no job runs inside
-WSL itself and none tests a drive letter other than C:, so treat those as untested rather than
-supported. Native PowerShell is not
-a target: everything here is a shell script and none of it is being ported.
+## What runs where
+
+**macOS and Linux run in CI on every push. Windows is not supported.** The install matrix runs
+on `ubuntu-latest`, `macos-latest` and an `alpine:latest` container, and Linux additionally
+installs for real and fires the hooks. Alpine is there because BusyBox is not GNU and nothing
+else in the workflow would catch a GNU-only flag.
+
+Windows was dropped rather than left half-working. It had passed through Git Bash for three
+commits, but `secrets.env` is protected by a 600-mode check, and a filesystem without POSIX
+permission bits cannot enforce that. The lane could be made to go green; it could not be made
+to be true. WSL is Linux and the Linux jobs cover that shape, though no job runs inside WSL
+itself, so treat it as very likely rather than proven.
 
 Two things are still macOS-only, and neither is the installer. Conductor is a Mac app, so the
 `.conductor` lanes only mean something there. The `claude` shell wrapper is written in zsh and

@@ -334,8 +334,19 @@ elif printf '%s' "$AS" | jq -e '.authMethod=="claude.ai" and .apiProvider=="firs
 else
   bad "auth method" "not OAuth — may be billing API credits"
 fi
-printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1 \
-  && ok "forceLoginMethod enforced" || bad "forceLoginMethod" "not enforced"
+# Two claims, and only the first is vstack's. It ships forceLoginMethod in settings.json, which
+# is checkable on any machine. Whether the CLI is *enforcing* it can only be read from a signed-in
+# session, so on CI and on any fresh install this asked a question with no answer available and
+# read the silence as a failure.
+jq -e '.forceLoginMethod=="claudeai"' "$S" >/dev/null 2>&1 \
+  && ok "forceLoginMethod configured" || bad "forceLoginMethod" "not set in $S"
+if [ -z "$AS" ] || printf '%s' "$AS" | jq -e '.loggedIn == false' >/dev/null 2>&1; then
+  note "forceLoginMethod in effect" "unknown until you sign in"
+elif printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1; then
+  ok "forceLoginMethod in effect"
+else
+  bad "forceLoginMethod in effect" "the CLI is not honouring it"
+fi
 [ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
 jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true' "$S" >/dev/null 2>&1 \
   && ok "Conductor parity keys" || bad "Conductor parity keys" "drifted"

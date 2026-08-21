@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -69,6 +69,7 @@ files_for(){ case "$1" in
   23)  printf 'claude/hooks/guard-destructive.sh' ;;
   24)  printf 'claude/.claude-plugin/plugin.json' ;;
   25)  printf 'claude/hooks/failure-diagnose.sh' ;;
+  26)  printf 'README.md' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -100,6 +101,7 @@ label_for(){ case "$1" in
   23)  printf 'destructive guard decides correctly' ;;
   24)  printf 'declared version matches what installs' ;;
   25)  printf 'failure tail redacts credentials' ;;
+  26)  printf 'documented platforms match CI' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -179,6 +181,9 @@ exit 0
       # ships three lanes three different trees under one label
       sed -i.t 's/"version": "[0-9.]*"/"version": "1.4.0"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
+  26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
+      # passages describing a Windows lane, with the Windows job red.
+      perl -0pi -e 's/(runs\non `ubuntu-latest`)/runs\non `windows-latest`, `ubuntu-latest`/' README.md ;;
   25) # Put back the redactor that shipped for five versions: known token prefixes plus bare
       # NAME=value. It masked one of the nine shapes the check feeds it, and no gate could see
       # the other eight, because nothing ever handed the hook a secret.

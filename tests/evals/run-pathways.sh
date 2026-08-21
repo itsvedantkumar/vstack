@@ -69,23 +69,21 @@ ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/vstack-pathways.XXXXXX")" && pwd)
 trap 'rm -rf "$ROOT"' EXIT
 TOL=$(jq -r '.tolerance' "$GT")
 
+# The plain-request arm. It has to be the closest thing to `/review` that a person without any
+# harness would type, and nothing more.
+#
+# It used to carry three extra sentences: report only genuine defects, do not report style or
+# preference, report nothing if the changes are correct. The harness arms are invoked as a bare
+# `/review` and receive no such coaching, because appending anything to a slash command stops it
+# dispatching. So the baseline was being told to be restrained and then scored on its restraint,
+# and the retracted run in RESULTS.md is what that produced: a baseline at 100% precision against
+# two harnesses in the sixties.
+#
+# The extractor below drops nits, style notes and suggestions identically for every arm, so that
+# filtering already happens in one place. Doing it twice for one arm and once for the others is
+# the asymmetry. This prompt is now what it claims to be.
 read -r -d '' NEUTRAL <<'EOF' || true
-Review the uncommitted changes in this repository for defects.
-
-Report ONLY genuine defects: a bug, a security problem, or a resource-handling error that would
-actually bite in production. Do not report style, naming, typing, documentation, or preference.
-If the changes are correct, report nothing.
-
-Output ONLY a JSON array, no prose before or after, in exactly this shape:
-[{"line": <integer>, "category": "security|correctness|resource-leak", "summary": "<one sentence>"}]
-An empty array is a valid and sometimes correct answer.
-EOF
-
-read -r -d '' JSONTAIL <<'EOF' || true
-
-When you have finished, output ONLY a JSON array as the final message, no prose after it:
-[{"line": <integer>, "category": "security|correctness|resource-leak", "summary": "<one sentence>"}]
-Line numbers refer to the changed file. An empty array is valid if nothing is wrong.
+Review the uncommitted changes in this repository.
 EOF
 
 # Build a git repo whose HEAD is correct and whose working tree carries the defect, so /review
