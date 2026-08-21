@@ -219,7 +219,10 @@ echo
 # break back, and the suite printed FALSIFIABLE over a repo that still carried the defect. The
 # tree-unchanged check at the end cannot see that -- it compares the run against a start that was
 # already wrong. Only a baseline can.
-if ! base=$(./.claude/verify.sh 2>&1) || printf '%s' "$base" | grep -q '^FAIL  '; then
+# Captured to a variable and grepped from a here-string, never `printf ... | grep -q`. Under
+# `set -o pipefail` grep -q exits the moment it matches, the writer upstream takes SIGPIPE, and
+# the pipeline reports 141 -- which reads as "no FAIL found" and declares a red baseline green.
+if ! base=$(./.claude/verify.sh 2>&1) || grep -q '^FAIL  ' <<<"$base"; then
   printf 'FAIL  gate is not green before any mutation; nothing here would be evidence:\n%s\n' \
     "$(printf '%s' "$base" | grep -E '^(FAIL|VERIFICATION)' | sed 's/^/      /')"
   printf '\n0 passed, 1 failed\nNOT FALSIFIABLE\n'
@@ -245,7 +248,11 @@ for id in $CHECKS; do
   # assuming. Without tags there is nothing for it to compare, and demanding a FAIL it cannot
   # produce turns a correct skip into a red build.
   if [ "$id" = 24 ]; then
-    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+    # Not `verify.sh | grep -q`: verify writes for ~20s, grep -q exits on the first match, verify
+    # dies of SIGPIPE, and pipefail turns the whole pipeline into 141. That read as "the check did
+    # not skip", so this branch never fired and the row claimed a falsifiability it had not shown.
+    _probe=$(./.claude/verify.sh 2>&1)
+    if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (no tags to compare against; %s)\n' "$id" "$lbl"
       continue
     fi
@@ -256,7 +263,8 @@ for id in $CHECKS; do
       printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
       continue
     fi
-    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+    _probe=$(./.claude/verify.sh 2>&1)      # not a pipe: see the 141 note on check 24 above
+    if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (validator is not validating; %s)\n' "$id" "$lbl"
       continue
     fi
@@ -272,7 +280,7 @@ for id in $CHECKS; do
     out=$(./.claude/verify.sh 2>&1)
   fi
 
-  if printf '%s' "$out" | grep -q '^FAIL  '"$lbl"; then
+  if grep -q '^FAIL  '"$lbl" <<<"$out"; then
     pass "$id" "$lbl"
   else
     fail "$id" "$lbl" "$(printf '%s' "$out" | grep -E '^(FAIL|VERIF)' | sed 's/^/      got: /')"

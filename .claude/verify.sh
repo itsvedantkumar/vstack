@@ -961,7 +961,12 @@ PINEOF
     # failure mode it was written to prevent, reproduced inside itself.
     skip "declared version matches what installs" "no tags in this checkout (shallow clone?), so there is nothing to compare against"
   elif ! git rev-parse -q --verify "refs/tags/v$mv_" >/dev/null 2>&1; then
-    ok "declared version matches what installs (v$mv_ not yet tagged)"
+    # A declared-but-untagged version has no payload to diff against, so this branch compares
+    # nothing. It used to print "ok", which is the same defect the tagless branch above guards
+    # against, one elif lower down: a green that measured nothing, hidden from the skip census
+    # because only skips are counted there. Say skip, and the release unit has to tag before the
+    # check starts measuring again.
+    skip "declared version matches what installs" "v$mv_ is declared by the manifests but not tagged, so there is no payload to compare it against — tag the release and this starts measuring"
   else
     # Everything a lane actually delivers. Docs, tests and CI are deliberately excluded: they
     # change without changing what a stranger receives.
