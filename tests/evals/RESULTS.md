@@ -183,3 +183,25 @@ that means running real repository-scale tasks, not eight-line files.
 The `none` arm shows 34 planted rather than 35: one of its 40 runs failed to return, so its
 fixture's planted defect was not counted for that sample. It is reported as measured rather than
 adjusted.
+
+## A note on commit 3bbe618
+
+Its message says "Stop tracking compiled Python". It also carries the SWE-bench PASS_TO_PASS
+gate, which is a much more important change and deserved its own message: a `git add -A` in a
+chained preflight command swept it in. Recorded here rather than rewritten, because the commit
+is already pushed and an accurate note costs less than a force-push.
+
+The change itself: the first SWE-bench run returned 0/4 for all three arms, which is the
+signature of a broken harness rather than three identical failures. The pre-flight gate asked
+"do the target tests fail?", and a completely broken environment satisfies that too — one flask
+instance pulled a werkzeug too new for it, `from werkzeug.urls import url_quote` raised
+ImportError, every test failed, the instance was marked usable, and all three arms scored zero
+on a checkout where flask could not be imported.
+
+PASS_TO_PASS exists for this. Those tests already pass before anyone touches the code, so if
+they fail the environment is broken and any number from it measures the setup rather than the
+agent. A usable instance now needs its target tests failing AND a sample of its known-good tests
+passing.
+
+That is the second time in this benchmark that three identical zeroes looked like a result about
+the harnesses and was a result about my own scaffolding.
