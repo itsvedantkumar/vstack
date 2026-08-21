@@ -25,7 +25,7 @@ That claim is easy to make and most setups make it. Here it is measured: `tests/
 runs 12 prompts against the real model and reports which attempt each one landed on, so the day
 routing starts eroding shows up as a number rather than a feeling.
 
-The same idea runs through the rest. Every one of the 30 checks in the verification gate has a
+The same idea runs through the rest. Every one of the 31 checks in the verification gate has a
 row in a suite that breaks what that check watches and requires the gate to go red naming it — a
 check nobody has watched fail is indistinguishable from a check that always passes. The
 installer is run into 22 throwaway home directories on Linux, macOS and Alpine on every

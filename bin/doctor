@@ -299,7 +299,25 @@ else
   ok "vstack exports no credentials to shells"
 fi
 [ -n "$_amb_theirs" ] && p "your own secrets sourcing" "note:$_amb_theirs sources secrets.env, so every child process of those shells sees your tokens. The wrappers in ~/.config/agents/bin load what they need on their own, so this line is probably not needed."
-for w in cloudflare-mcp; do [ -x "$HOME/.config/agents/bin/$w" ] && ok "wrapper $w" || bad "wrapper $w" "missing"; done
+[ -x "$HOME/.config/agents/bin/cloudflare-mcp" ] && ok "wrapper cloudflare-mcp" || bad "wrapper cloudflare-mcp" "missing"
+echo "── mcp servers ──"
+# CJSON was computed at the top of this file and never read by anything. install.sh merges
+# vstack's MCP servers into it on every run and nothing checked the result, so the one lane that
+# writes to a file outside ~/.claude had no health check at all. A server that silently stopped
+# being registered would show up as a tool that quietly does not exist.
+if [ -n "$R" ] && [ -f "$R/mcp/servers.json" ] && [ -f "$CJSON" ]; then
+  missing=""
+  for m in $(jq -r 'keys[]' "$R/mcp/servers.json" 2>/dev/null); do
+    jq -e --arg m "$m" '.mcpServers | has($m)' "$CJSON" >/dev/null 2>&1 || missing="$missing $m"
+  done
+  [ -z "$missing" ] \
+    && ok "MCP servers registered ($(jq -r 'keys|length' "$R/mcp/servers.json") in $CJSON)" \
+    || bad "MCP servers" "not registered in $CJSON:$missing (re-run ./install.sh)"
+elif [ ! -f "$CJSON" ]; then
+  note "MCP servers" "$CJSON does not exist yet — Claude Code creates it on first run"
+else
+  note "MCP servers" "no vstack repo found, so there is nothing to compare against"
+fi
 echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
 echo "── memory ──"
 # claude-mem is a third-party plugin vstack configures if present, not something it installs.

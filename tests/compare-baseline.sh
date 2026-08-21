@@ -30,7 +30,6 @@
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
-SRC=$(pwd)
 
 JSON=0
 [ "${1:-}" = "--json" ] && JSON=1

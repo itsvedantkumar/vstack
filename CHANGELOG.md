@@ -6,7 +6,39 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
-## 1.8.0 — 2026-08-21
+## 1.8.0 — 2026-08-22
+
+**Two skill routings are mandatory now, not merely instructed.** Everything vstack did to route
+skills was instruction: the SessionStart digest spells out "any prose you write -> unslop", and
+descriptions carry their own triggers. `auto-trigger.sh` measures that landing on 12 cases, which
+is a weaker claim than "always". `claude/hooks/skill-mandate.sh` runs on Stop, reads the
+transcript for what actually happened, and blocks the turn when a rule went unmet. Writing
+`.md` requires `unslop`; writing `.ts` requires `typescript-best-practices`. Two rules, not
+twenty: the bar for a third is that the situation is decidable from a tool call rather than from
+judgement. It blocks at most twice a session and `VSTACK_NO_MANDATE=1` turns it off.
+
+**Windows is gone.** It had been green through Git Bash for three commits, but `secrets.env` is
+protected by a 600-mode check and a filesystem without POSIX permission bits cannot enforce it.
+The lane could be made to pass; it could not be made to be true. Check 26 now requires the runner
+names in CI and the platform names in the README to be the same set, in both directions.
+
+**The README says outright that this is for Claude Code and nothing else.** Not Cursor, not
+Codex, not a local model behind a compatibility shim. Every mechanism here is Claude Code's own
+and there is no adapter layer.
+
+**shellcheck is a gate.** This bundle is 29 shell scripts and almost nothing else. Warning level,
+and where a warning is wrong the suppression carries its reason on the line above. It found a
+pattern in the destructive guard that could never match, a variable in `doctor` computed for a
+check nobody ever wrote, and two dead assignments.
+
+**doctor checks the MCP lane, and that check immediately found that the lane never ran.** The
+merge required `~/.claude.json` to already exist, which is never true on a machine that has not
+started Claude Code yet — exactly the machine running the installer. A first install printed
+"run claude once, then re-run this", so every stranger who followed the README once, as
+instructed, finished with no MCP servers at all while the README said they ship. The file is
+created when absent now.
+
+## 1.8.0 (earlier entries) — 2026-08-21
 
 A fourth external audit found four ways this bundle destroyed configuration it did not own. All
 four are fixed, each with a test that fails without the fix.

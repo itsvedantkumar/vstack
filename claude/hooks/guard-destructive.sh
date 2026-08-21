@@ -81,6 +81,8 @@ if [ "$SIMPLE" = 1 ]; then
   case "$CMD" in
     rm\ *-*[rR]*[fF]*\ *|rm\ *-*[fF]*[rR]*\ *)
       for tok in $CMD; do
+        # shellcheck disable=SC2088  # matching the literal ~ the user typed; expanding it here would
+        # compare $HOME against $HOME and let `rm -rf ~` through.
         case "$tok" in
           /|/\*|'~'|'~/'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
             emit deny "[guard] recursive delete of / or your home directory. If you truly mean this, run it yourself outside the agent session." ;;
@@ -92,7 +94,10 @@ if [ "$SIMPLE" = 1 ]; then
   case "$CMD" in
     git\ push\ *--force*|git\ push\ *-f\ *|git\ push\ *-f)
       case "$CMD" in
-        *\ main*|*\ master*|*origin\ main|*origin\ master|*:main*|*:master*)
+        # `* main*` already covers `*origin main`, and `* master*` covers `*origin master`;
+        # both were listed and neither could ever be reached. The colon forms are not redundant:
+        # `git push --force origin HEAD:main` contains no space before "main".
+        *\ main*|*\ master*|*:main*|*:master*)
           emit deny "[guard] force-push to main or master. Push to a branch, or do it yourself outside the agent session." ;;
       esac ;;
   esac
@@ -130,7 +135,7 @@ case "$CMD" in
     _unsafe=0
     for tok in $CMD; do
       case "$tok" in
-        rm|-*|--*) continue ;;                       # the command and its flags
+        rm|-*) continue ;;                           # the command and its flags (-* covers --*)
       esac
       case "$tok" in
         node_modules|dist|build|target|coverage|.next|.turbo|.cache|.venv|__pycache__|.pytest_cache) continue ;;

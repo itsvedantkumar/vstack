@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -72,6 +72,7 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
+  29)  printf 'claude/hooks/format.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -106,6 +107,7 @@ label_for(){ case "$1" in
   26)  printf 'documented platforms match CI' ;;
   27)  printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
+  29)  printf 'shellcheck clean' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -185,6 +187,10 @@ exit 0
       # ships three lanes three different trees under one label
       sed -i.t 's/"version": "[0-9.]*"/"version": "1.4.0"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
+  29) # An unquoted expansion, which is the single most common way a shell script breaks on
+      # somebody else's machine: a path with a space in it silently becomes two arguments.
+      printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' \
+        >> claude/hooks/format.sh ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;

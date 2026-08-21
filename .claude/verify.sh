@@ -721,6 +721,9 @@ fi
 # prefix is expanded to $HOME before the match, so the first draft of this check compared
 # "~/.claude/CLAUDE.md" against "/Users/<me>/.claude/CLAUDE.md", matched nothing, and reported
 # every path in the repo as unmapped. The check was loud and completely wrong.
+# shellcheck disable=SC2088  # these tildes are match patterns, not paths: the strings being
+# matched are the literal "~/..." spellings that appear in documentation, so expanding them here
+# is exactly the bug this function was fixed for.
 runtime_path(){ # paths that exist at runtime but are created by Claude Code or by use, not install
   case "$1" in
     '~/.claude'|'~/.claude.json'|'~/.claude/settings.json'|'~/.claude/settings.local.json') return 0 ;;
@@ -735,6 +738,7 @@ runtime_path(){ # paths that exist at runtime but are created by Claude Code or 
   esac
   return 1
 }
+# shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
 src_for(){ # installed path -> the repo file install.sh copies there, or empty if unmapped
   case "$1" in
     '~/.claude/hooks/'*)        printf 'claude/hooks/%s'    "${1#'~/.claude/hooks/'}" ;;
@@ -748,6 +752,7 @@ src_for(){ # installed path -> the repo file install.sh copies there, or empty i
   esac
 }
 errs=""
+# shellcheck disable=SC2088  # the heredoc below greps for the literal "~/..." spelling in docs
 while IFS= read -r ref; do
   [ -n "$ref" ] || continue
   runtime_path "$ref" && continue
@@ -1118,7 +1123,8 @@ else
   # when grep exits early on a match, so every doc that WAS linked reported as an orphan -- the
   # same pipe-and-exit-status trap that has bitten this repository twice before.
   linkable=$(mktemp)
-  cat README.md CHANGELOG.md $(find docs -name '*.md') claude/skills/*/SKILL.md > "$linkable" 2>/dev/null
+  find docs -name '*.md' -exec cat {} + > "$linkable" 2>/dev/null
+  cat README.md CHANGELOG.md claude/skills/*/SKILL.md >> "$linkable" 2>/dev/null
   orphans=""
   for d in $docs_all; do
     base=${d##*/}
@@ -1138,6 +1144,26 @@ else
   [ -z "$orphans" ] \
     && ok "every doc is reachable ($(printf '%s' "$docs_all" | wc -l | tr -d ' ') under docs/)" \
     || bad "every doc is reachable" "$(printf 'nothing in this repository links to:%b' "$orphans")"
+fi
+
+# --- 29. every shell script passes shellcheck ------------------------------------------------
+#
+# This bundle is 27 shell scripts and almost nothing else, and the whole product is the claim
+# that they behave correctly on someone else's machine. The class of bug that keeps landing here
+# is not exotic -- an unquoted expansion, a pattern that can never match, a variable set for a
+# check nobody wrote -- and a linter finds all three for free.
+#
+# Warning level, not style: informational notes are opinions and this should fail on defects.
+# Where a warning is wrong the suppression carries a reason on the line above it, so the next
+# reader can see the argument rather than a bare disable.
+if command -v shellcheck >/dev/null 2>&1; then
+  sc_out=$(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null \
+    | while IFS= read -r f; do shellcheck -S warning -f gcc "$f" 2>/dev/null; done)
+  [ -z "$sc_out" ] \
+    && ok "shellcheck clean ($(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null | wc -l | tr -d ' ') scripts, warning level)" \
+    || bad "shellcheck clean" "$(printf '%s' "$sc_out" | sed 's/^/  /' | head -20)"
+else
+  skip "shellcheck clean" "shellcheck not installed (brew install shellcheck / apk add shellcheck)"
 fi
 
 echo

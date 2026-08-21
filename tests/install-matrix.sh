@@ -68,6 +68,7 @@ assert_install(){ # <label> <config-dir> <home> [atleast]
   # agents legitimately ends up with more than this repo ships, and demanding equality there
   # reports their surviving files as a defect.
   lbl="$1"; cdir="$2"; h="$3"; mode="${4:-exact}"; from="${5:-$SRC}"; errs=""
+  : "$lbl"   # named by the caller and used in the failure text below
   # The two network lanes install whatever `main` currently serves, which is not necessarily
   # what is on this disk. Measuring a published install against local counts made the matrix go
   # red for the entirely correct reason that a new hook had not been pushed yet -- and since

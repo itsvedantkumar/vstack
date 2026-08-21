@@ -353,6 +353,7 @@ elif [ "$DRY" = 0 ]; then
                    ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
       | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3})
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
+  # shellcheck disable=SC2088  # the third argument is a label printed to the operator
   if commit_json "$tmp" "$US" "~/.claude/settings.json"; then
     if [ "$BYPASS" = 1 ]; then
       tmp=$(mktemp)
@@ -371,8 +372,15 @@ fi
 CJ="$CJSON"
 if [ "$HAVE_JQ" = 0 ]; then
   say "skipped    MCP merge (no jq)"
-elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
-  cp "$CJ" "$BK/claude.json"
+elif [ "$DRY" = 0 ]; then
+  # The file is created when absent rather than skipped.
+  #
+  # This branch used to require $CJSON to already exist, which is never true on a machine that
+  # has not run Claude Code yet -- exactly the machine running this installer. The result was
+  # that a first install printed "run claude once, then re-run this" and every stranger who
+  # followed the README once, as instructed, ended up without a single MCP server. The README
+  # says these ship. They did not. bin/doctor now checks the same thing from the other side.
+  if [ -f "$CJ" ]; then cp "$CJ" "$BK/claude.json"; else printf '{}\n' > "$CJ"; fi
   tmp=$(mktemp)
   sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$tmp.servers"
   jq -s '.[0] as $cur | .[1] as $new | $cur | .mcpServers = (($cur.mcpServers // {}) * $new)' \
@@ -381,7 +389,7 @@ elif [ -f "$CJ" ] && [ "$DRY" = 0 ]; then
     && say "merged     MCP servers into $CJSON"
   rm -f "$tmp" "$tmp.servers"
 else
-  say "skipped    MCP merge (no $CJSON yet — run claude once, then re-run this)"
+  say "skipped    MCP merge (dry run)"
 fi
 
 # --- shell lane ----------------------------------------------------------------------------
