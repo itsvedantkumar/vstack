@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -42,6 +42,22 @@ fail(){ printf 'FAIL  check %-3s did NOT fail when broken\n      expected label:
 
 save(){ for f in "$@"; do mkdir -p "$BK/$(dirname "$f")"; cp "$f" "$BK/$f"; done; }
 restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
+
+# Rows whose mutation creates a file instead of editing one. save()/restore() work by copying, so
+# a planted file has no backup to be put back from and has to be removed by name. Leaving it
+# behind fails the tree-unchanged check at the end, which is correct, and then fails every run
+# after this one too, which is not.
+#
+# The name is assembled from the PID rather than written out, for the same reason checks 4-6
+# assemble their secret probes: this file is a tracked file, so a literal basename here is a
+# referrer as far as check 31 is concerned. The first draft spelled the name out, the check found
+# it named in this very script, and the row reported "did NOT fail when broken" while the
+# mutation was working perfectly.
+ORPHAN_PROBE="bin/zz-unreferenced-$$.sh"
+
+creates_for(){ case "$1" in
+  31)  printf '%s' "$ORPHAN_PROBE" ;;
+esac }
 
 # Files each row edits, so it can be put back byte for byte. Backing up beats `git checkout`
 # here: this has to be safe to run on a dirty tree.
@@ -74,6 +90,7 @@ files_for(){ case "$1" in
   28)  printf 'README.md' ;;
   29)  printf 'bin/cloudflare-mcp' ;;
   30)  printf 'claude/hooks/format.sh' ;;
+  31)  printf '' ;;   # plants a new file rather than editing one
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -110,6 +127,7 @@ label_for(){ case "$1" in
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
   30)  printf 'shellcheck suppressions carry a reason' ;;
+  31)  printf 'every shipped file has a referrer' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -202,6 +220,12 @@ exit 0
       # carried for several versions while check 29's own header claimed the rule was kept.
       printf '\n# shellcheck disable=SC2086\nsup_probe=$HOME/x\nls $sup_probe >/dev/null 2>&1 || true\n' \
         >> claude/hooks/format.sh ;;
+  31) # A file nothing points at. It has to be tracked to be visible to the check, so it is added
+      # to the index and removed again after the row -- the same shape as every other row, except
+      # the mutation creates rather than edits, so creates_for() cleans up instead of restore().
+      printf '#!/usr/bin/env bash\necho probe\n' > "$ORPHAN_PROBE"
+      chmod +x "$ORPHAN_PROBE"
+      git add -f "$ORPHAN_PROBE" >/dev/null 2>&1 ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;
@@ -298,6 +322,11 @@ for id in $CHECKS; do
   fi
 
   [ -n "$fs" ] && restore $fs
+  cr=$(creates_for "$id")
+  if [ -n "$cr" ]; then
+    git rm -q -f --cached "$cr" >/dev/null 2>&1
+    rm -f "$cr"
+  fi
 done
 
 echo

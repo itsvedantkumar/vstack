@@ -1254,6 +1254,36 @@ done <<<"$(git ls-files 2>/dev/null)"
   || bad "shellcheck suppressions carry a reason" \
          "$(printf 'a bare disable hides the argument from the next reader:%b' "$bare")"
 
+# --- 31. every shipped file has a referrer -----------------------------------------------------
+#
+# Check 28 does this for docs/, where a link to the containing directory counts. Everything else
+# in the tree had no such rule, and two files had been riding along for versions: a launchd
+# wrapper around the doctor that install.sh never installs and uninstall.sh never removes, and an
+# eval-loop driver nothing but its own header mentioned. Neither was reachable and neither was
+# visible to any check. They are not named here on purpose -- a basename in this comment is a
+# referrer as far as the grep below is concerned, which is exactly how the first draft of this
+# check passed over both of them.
+#
+# The limit, stated rather than hidden: a mention in prose counts. This finds files nothing points
+# at, not files pointed at only rhetorically.
+#
+# Skills, agents, commands and issue templates are excluded because the loader finds them by
+# directory: a referrer would be redundant there, not missing. docs/ is excluded because check 28
+# owns it with directory-link semantics this basename match cannot express.
+unref=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    claude/skills/*|claude/agents/*|claude/commands/*|.github/ISSUE_TEMPLATE/*|docs/*) continue ;;
+  esac
+  [ -n "$(git grep -l -F "${f##*/}" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
+    || unref="$unref\n  $f"
+done <<<"$(git ls-files 2>/dev/null)"
+[ -z "$unref" ] \
+  && ok "every shipped file has a referrer ($(git ls-files | grep -cvE '^(claude/(skills|agents|commands)/|\.github/ISSUE_TEMPLATE/|docs/)') outside the load-by-directory trees)" \
+  || bad "every shipped file has a referrer" \
+         "$(printf 'nothing in this repository names:%b\n  delete it, or give it a referrer -- a file nobody can find is a file nobody maintains' "$unref")"
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

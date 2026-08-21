@@ -44,6 +44,16 @@ regression.
 specific skill to auto-fire, inspects the `stream-json` transcript for
 `Skill` tool_use blocks, and reports PASS/FAIL per case.
 
+## evals/
+
+`evals/run.sh`, `evals/run-pathways.sh` and `evals/swebench/run.sh` score this bundle against
+other Claude Code setups and against unconfigured Claude Code. `evals/optimize.sh` drives the
+change-one-thing-and-re-measure loop on top of `run-pathways.sh`; it scores against
+`evals/holdout/` only through `--validate`, and never uses that set to decide whether to keep a
+change. `evals/RESULTS.md` records every run, including the retracted one.
+
+These cost real model calls and are not part of the gate.
+
 ## Run the tests
 
 ```bash
