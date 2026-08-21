@@ -6,6 +6,24 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.7.0 — 2026-08-21
+
+**The reviewer stops padding short diffs.** `code-reviewer.md` listed "naming, dead code,
+missing tests, style" as things to report and ran a TypeScript hard-check list — no `any`, no
+`console.log` — against whatever language it was handed. On a small Python change it duly
+produced typing nits and "no tests here", which crowds out the finding that matters. Findings
+are proportional to the change now, "no findings" is a complete review, and the hard checks only
+apply where the language has them.
+
+Found by benchmark rather than by opinion: a plain review request kept beating the harness on
+precision, and the reason was in the reviewer's own instructions.
+
+**A SWE-bench Lite harness** at `tests/evals/swebench/`. Real repositories, real bug reports,
+scored by the project's own FAIL_TO_PASS tests — SWE-bench's criterion, unchanged. The agent
+gets the problem statement and the repo, never the tests, the golden patch or the hints field.
+Instances whose environment will not build, or whose tests already pass, are excluded before any
+arm runs rather than counted as failures.
+
 ## 1.6.0 — 2026-08-21
 
 **A review benchmark, and its result: no difference.** `tests/evals/` sends an identical prompt
