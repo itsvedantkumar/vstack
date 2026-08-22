@@ -6,6 +6,31 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.2 — 2026-08-22
+
+**The overlay was injecting itself twice.** Claude Code merges hook arrays across settings layers
+rather than overriding them, so every repo carrying the committed `.claude/` overlay ran
+`~/.claude`'s injector and its own: session baseline, per-prompt digest and the whole of
+`CLAUDE.md`, twice per turn. Seven repos on this machine were doing it, and nothing caught it —
+`install.sh` dedupes within user scope and has no way to see across scopes.
+
+Deleting the committed copy is not available: a cloud sandbox clones the repo and has no
+`~/.claude`, so that copy is the only lane config reaches it by. The project copy stands down
+instead, and only while the user-scope copy is registered and doing the job. Escape hatch:
+`VSTACK_DUPE_SUPPRESS=0`.
+
+`CLAUDE.md` cannot be handled that way — Claude Code loads both files itself and no hook runs in
+between. So `overlay.sh` writes the project copy only where a sandbox could ever clone it, and
+clears a stale one otherwise. An overlay that merely stops writing leaves every repo it already
+touched duplicating forever. Override with `VSTACK_OVERLAY_CLOUD=1|0`.
+
+`doctor` gains `── hook scope overlap ──`, which runs both copies for real instead of grepping for
+the guard, and asserts the user-scope one still speaks — testing only the silent side would rate a
+wholly broken script as healthy. It looks at worktrees as well as main checkouts: coverage is a
+property of the committed tree, double-firing is a property of the file on disk.
+
+Checks 33 and 34, both falsifiable. 36 total.
+
 ## 1.13.1 — 2026-08-22
 
 **Instance handles on every agent**, adapted from [oh-my-pi](https://github.com/can1357/oh-my-pi).
