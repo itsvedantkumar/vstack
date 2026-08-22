@@ -1279,20 +1279,22 @@ done <<<"$(git ls-files 2>/dev/null)"
 # The limit, stated rather than hidden: a mention in prose counts. This finds files nothing points
 # at, not files pointed at only rhetorically.
 #
-# Skills, agents, commands and issue templates are excluded because the loader finds them by
-# directory: a referrer would be redundant there, not missing. docs/ is excluded because check 28
-# owns it with directory-link semantics this basename match cannot express.
+# Skills, agents, commands and everything under .github/ are excluded because their loader finds
+# them by path convention: GitHub reads PULL_REQUEST_TEMPLATE.md, dependabot.yml, CODEOWNERS and
+# the issue templates from fixed locations, so a referrer would be redundant there rather than
+# missing. docs/ is excluded because check 28 owns it with directory-link semantics this basename
+# match cannot express.
 unref=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
-    claude/skills/*|claude/agents/*|claude/commands/*|.github/ISSUE_TEMPLATE/*|docs/*) continue ;;
+    claude/skills/*|claude/agents/*|claude/commands/*|.github/*|docs/*) continue ;;
   esac
   [ -n "$(git grep -l -F "${f##*/}" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
     || unref="$unref\n  $f"
 done <<<"$(git ls-files 2>/dev/null)"
 [ -z "$unref" ] \
-  && ok "every shipped file has a referrer ($(git ls-files | grep -cvE '^(claude/(skills|agents|commands)/|\.github/ISSUE_TEMPLATE/|docs/)') outside the load-by-directory trees)" \
+  && ok "every shipped file has a referrer ($(git ls-files | grep -cvE '^(claude/(skills|agents|commands)/|\.github/|docs/)') outside the load-by-directory trees)" \
   || bad "every shipped file has a referrer" \
          "$(printf 'nothing in this repository names:%b\n  delete it, or give it a referrer -- a file nobody can find is a file nobody maintains' "$unref")"
 

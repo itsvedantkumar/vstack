@@ -213,6 +213,8 @@ skills without them.
 - [docs/provenance/research-v1.7.0.md](docs/provenance/research-v1.7.0.md) — the outside review that specified the design-quality floor
 - [claude/settings.project-keys](claude/settings.project-keys) — the keys the overlay is allowed to write
 - [CHANGELOG.md](CHANGELOG.md) — every release, and every defect that produced one
+- [CONTRIBUTING.md](CONTRIBUTING.md) — the evidence bar, and how to add a check
+- [SECURITY.md](SECURITY.md) — what this writes to your machine, and how to report a vulnerability
 
 ## Credits
 

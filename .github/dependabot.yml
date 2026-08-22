@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Actions only. This repository ships shell and Markdown; it has no package manifest to update,
+  # and the CI workflow is the one place a pinned third-party version lives.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
