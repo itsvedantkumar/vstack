@@ -86,9 +86,11 @@ fired, which is precisely why it would have survived until the payload grew.
 
 **Check 31 matched basenames, so a file nobody names could pass by sharing a name with one
 everybody does.** Every `README.md` in the tree counted as referenced by any mention of any
-`README.md`. It matches paths now. Demonstrated: an orphan at `ui-gate/doctor` is found by
-`git grep -l -F doctor` in eighteen places and was reported as referenced; by path it is
-reported as unreferenced, which it is. Row 31's probe is now assembled as
+`README.md`. It matches paths now. Demonstrated with an orphan planted under `ui-gate/` whose
+basename collides with a file named in eighteen places: the basename match called it referenced,
+the path match does not. The path is deliberately not written out here — doing so in an earlier
+draft of this entry gave the planted probe a referrer and made row 31 report "did NOT fail when
+broken" while the mutation was working perfectly. Row 31's probe is now assembled as
 `ui-gate/$(basename bin/doctor)` so it proves exactly that, and so the literal never appears in
 the file — a name spelled out here is itself a referrer.
 

@@ -101,8 +101,13 @@ restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
 # reasons. The old one: a literal name in this file is itself a referrer, which is how the first
 # draft reported "did NOT fail when broken" while the mutation worked perfectly. The new one:
 # since 1.15.0 check 31 matches paths instead of basenames, and this probe is what proves it --
-# ui-gate/doctor collides with bin/doctor, which is named in eighteen places, so the old
+# the assembled path collides on basename with a file named in eighteen places, so the old
 # basename match called it referenced and the path match does not.
+#
+# Then I spelled that path out in this comment and in the changelog, and the row reported "did
+# NOT fail when broken" while the mutation worked perfectly -- the same failure the paragraph
+# above documents, committed by the person writing the paragraph. Describe the probe; never
+# type it.
 ORPHAN_PROBE="ui-gate/$(basename bin/doctor)"
 
 creates_for(){ case "$1" in
@@ -522,7 +527,11 @@ echo
 # founding lesson, unapplied to the suite that proves verify.sh.
 DECLARED=0
 for _ in $CHECKS; do DECLARED=$((DECLARED+1)); done
-DECLARED=$((DECLARED+1))            # the tree-unchanged row at the end is a row too
+# Two rows report a result without being in CHECKS: the green-at-baseline probe before the loop
+# and the tree-unchanged comparison after it. The first version of this counted one of them and
+# reported "-1 declared row(s) reported nothing", which is an accounting bug announcing itself
+# in the negative -- the right behaviour for a counter nobody had checked against a known total.
+DECLARED=$((DECLARED+2))
 printf '%d declared, %d passed, %d failed, %d skipped\n' "$DECLARED" "$PASSED" "$FAILED" "$SKIPPED"
 if [ "$((PASSED + FAILED + SKIPPED))" -ne "$DECLARED" ]; then
   printf 'FAIL  row accounting: %d declared row(s) reported nothing\n' \
