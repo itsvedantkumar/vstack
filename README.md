@@ -94,10 +94,14 @@ verify is carried into the final report rather than disappearing between phases.
 
 ## What "proven" means here
 
-`.claude/verify.sh` runs 37 checks. `tests/gate-falsifiability.sh` breaks the repository once per
-check, requires the gate to go red naming that check, restores the tree byte for byte, and fails
-if anything was left behind. Check 16 fails if a check has no mutation row, so a check cannot be
-added without proof it can fail.
+`.claude/verify.sh` runs 37 checks. `tests/gate-falsifiability.sh` breaks the repository at least
+once per check — more than once where a check can fail in more than one way — requires the gate to
+go red naming that check, restores the tree byte for byte, and fails if anything was left behind.
+Check 16 fails if a check has no mutation row, so a check cannot be added without proof it can
+fail.
+
+Run it in a throwaway clone, not in a tree you are working in. It mutates real files, and while it
+runs the gate refuses to answer at all rather than report a planted defect as a finding.
 
 This is not decoration. Five checks in this repository have been caught passing while measuring
 nothing:
