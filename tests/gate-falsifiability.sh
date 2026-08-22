@@ -239,14 +239,14 @@ exit 0
         claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
-      perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;
+      perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;
   27) # Make the mandate unconditional. A gate that always blocks passes any test that only ever
       # checks that it blocks, which is why check 27 exercises both directions.
       perl -0pi -e 's/\[ -n "\$unmet" \] \|\| \{ rm -f "\$cnt_file"; exit 0; \}/unmet="\$unmet\\n  always"/' \
         claude/hooks/skill-mandate.sh ;;
   26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
       # passages describing a Windows lane, with the Windows job red.
-      perl -0pi -e 's/(runs\non `ubuntu-latest`)/runs\non `windows-latest`, `ubuntu-latest`/' README.md ;;
+      perl -0pi -e 's/CI runs `ubuntu-latest`/CI runs `windows-latest`, `ubuntu-latest`/' README.md ;;
   25) # Put back the redactor that shipped for five versions: known token prefixes plus bare
       # NAME=value. It masked one of the nine shapes the check feeds it, and no gate could see
       # the other eight, because nothing ever handed the hook a secret.
@@ -322,7 +322,22 @@ for id in $CHECKS; do
     # Nothing to edit: the toolchain check is about the environment, so remove jq from it.
     out=$(env PATH="$NOJQ" ./.claude/verify.sh 2>&1)
   else
+    # Fingerprint the files first. A mutation anchored to prose stops matching the moment the
+    # prose is rewritten, and then the row reports "did NOT fail when broken" -- which reads as a
+    # weak check when the truth is a mutation that landed nowhere. That has now happened three
+    # times: rows 11, 26 and 28, the last two on the same README rewrite. Distinguish the two
+    # cases instead of leaving the reader to guess.
+    _before=""
+    [ -n "$fs" ] && _before=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
     break_it "$id"
+    _after=""
+    [ -n "$fs" ] && _after=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
+    if [ -n "$fs" ] && [ "$_before" = "$_after" ]; then
+      printf 'FAIL  check %-3s mutation changed nothing (its pattern no longer matches %s)\n' "$id" "$fs"
+      FAILED=$((FAILED+1))
+      restore $fs
+      continue
+    fi
     out=$(./.claude/verify.sh 2>&1)
   fi
 
