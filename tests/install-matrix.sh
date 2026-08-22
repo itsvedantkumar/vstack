@@ -732,8 +732,10 @@ if want doctor-no-mutate; then
     # the destructive pairing, set locally so the case does not depend on the operator's config
     git -C "$T/work" config fetch.prune true
     git -C "$T/work" config fetch.pruneTags true
-    git -C "$T/work" push -q origin probe-main:refs/heads/probe-main 2>/dev/null
-    git -C "$T/work" branch -q --set-upstream-to=origin/probe-main 2>/dev/null
+    # push -u in one step. Setting the upstream separately depended on the push having created
+    # refs/remotes/origin/probe-main, which it did not do on the CI runners, and the case then
+    # failed on its own control with no way to see why from the log.
+    git -C "$T/work" push -u origin probe-main > "$T/push.log" 2>&1 || true
     git -C "$T/work" tag -a v9.9.9-local -m "never pushed" 2>/dev/null
     e=""
     # Two positive controls. Without them the case passes on any machine where the tag was never
@@ -741,7 +743,7 @@ if want doctor-no-mutate; then
     git -C "$T/work" rev-parse -q --verify refs/tags/v9.9.9-local >/dev/null 2>&1 \
       || e="$e; the probe tag was never created, so this case proves nothing"
     git -C "$T/work" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1 \
-      || e="$e; no upstream, so the code path under test never runs"
+      || e="$e; no upstream, so the code path under test never runs [$(tr '\n' ' ' < "$T/push.log" 2>/dev/null | cut -c1-160)]"
     HOME="$T" VSTACK_DIR="$T/work" "$SRC/bin/doctor" --drift > "$T/out" 2>&1
     grep -q 'no vstack repo found' "$T/out" 2>/dev/null \
       && e="$e; --drift refused to run, so it never reached the fetch this case is about"
