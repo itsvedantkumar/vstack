@@ -246,11 +246,16 @@ exit 0
       # red row points at the suppression and not at a syntax error.
       sed -i.t 's/VSTACK_DUPE_SUPPRESS:-1/VSTACK_DUPE_SUPPRESS:-0/' \
         claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
-  34) # Put the second CLAUDE.md back, which is the whole of the old behaviour: the policy in a
-      # project-memory path alongside the identical ~/.claude/CLAUDE.md. Adding the write rather
-      # than removing the policy.md one keeps the mutation on the duplication itself, so the row
-      # cannot pass on a broken overlay instead.
-      sed -i.t 's|^cp "\$SRC/claude/CLAUDE.md" "\$DEST/.claude/hooks/policy.md"$|cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/hooks/policy.md"; cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"|' \
+  34) # Stop the overlay clearing a .claude/CLAUDE.md it finds, which is the pre-v1.13.3 state:
+      # the policy sitting in a project-memory path beside the identical ~/.claude/CLAUDE.md.
+      #
+      # The obvious mutation -- add a second `cp` that writes .claude/CLAUDE.md -- is the one this
+      # row shipped with, and it proved nothing: the convergence `rm -f` five lines below deleted
+      # the planted file before the check ever looked, so the gate stayed green and the row
+      # reported a falsifiability it had not demonstrated. Delete the removal instead. The check
+      # plants a stale .claude/CLAUDE.md before overlaying, so this is exactly the defect it
+      # watches for, and nothing downstream can undo it.
+      sed -i.t '/^  rm -f "\$DEST\/\.claude\/CLAUDE\.md"$/d' \
         overlay.sh && rm -f overlay.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
