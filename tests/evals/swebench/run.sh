@@ -171,12 +171,14 @@ activate_arm() { # <arm>
   case "$1" in
     none) : ;;
     vstack) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1 ;;
-    vstack-terse) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1
-                  export VSTACK_TERSE=1 ;;
+    # Same install as vstack, with outputStyle forced back to Default. vstack ships Concise, so
+    # the only variable between these two arms is the register the model writes in.
+    vstack-default) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1
+                    jq '.outputStyle = "Default"' "$HOME/.claude/settings.json" > "$ROOT/s.json" \
+                      && mv "$ROOT/s.json" "$HOME/.claude/settings.json" ;;
     gstack) ( cd "$GSTACK_DIR" && ./setup --quiet >/dev/null 2>&1 ) || return 1 ;;
   esac
-  [ "$1" = vstack-terse ] || unset VSTACK_TERSE 2>/dev/null || true
-
+  
   # Positive control. Every arm asserts that what it installed is actually there and that the
   # other arm is not, because a benchmark whose arms silently share a config dir compares one
   # harness against itself and prints a number anyway.
@@ -184,7 +186,7 @@ activate_arm() { # <arm>
   case "$1" in
     none)
       [ "$n" -eq 0 ] || { printf 'INVALID none: %s skill(s) still present after deactivation\n' "$n" >&2; return 1; } ;;
-    vstack|vstack-terse)
+    vstack|vstack-default)
       local want; want=$(find "$SRC/claude/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
       [ "$n" -eq "$want" ] || { printf 'INVALID %s: %s skills installed, expected %s\n' "$1" "$n" "$want" >&2; return 1; }
       [ -d "$HOME/.claude/skills/gstack" ] && { printf 'INVALID %s: gstack is still installed\n' "$1" >&2; return 1; } ;;
