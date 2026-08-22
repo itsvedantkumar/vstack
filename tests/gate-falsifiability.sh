@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 18b 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -78,6 +78,7 @@ files_for(){ case "$1" in
   16)  printf 'tests/gate-falsifiability.sh' ;;
   17)  printf 'overlay.sh' ;;
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
+  18b) printf 'README.md' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
@@ -117,6 +118,7 @@ label_for(){ case "$1" in
   16)  printf 'falsifiability coverage' ;;
   17)  printf 'overlay ships project keys only' ;;
   18)  printf 'injected context bounded' ;;
+  18b) printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
@@ -172,6 +174,11 @@ exit 0
 ' claude/hooks/verify-gate.sh && rm -f claude/hooks/verify-gate.sh.t ;;
   15) sed -i.t 's/"skillOverrides": {/"skillOverrides": {\n    "claude-mem:do": "off",/' \
         claude/settings.json && rm -f claude/settings.json.t ;;
+  18b) # Move the anchor the published-figure comparison keys on, without touching the figures
+      # themselves. This is what cc76ba8 did by accident, and for eleven commits the check went on
+      # printing ok while comparing nothing. The row exists because the fix is an `else`, and an
+      # `else` nobody has seen fire is indistinguishable from the missing one it replaced.
+      sed -i.t 's| KB full / ~| KB total / ~|' README.md && rm -f README.md.t ;;
   16) sed -i.t 's/^CHECKS="0 /CHECKS="/' tests/gate-falsifiability.sh \
         && rm -f tests/gate-falsifiability.sh.t ;;
   17) # Restore the deletion overlay.sh used to do: strip every destination key that is not on

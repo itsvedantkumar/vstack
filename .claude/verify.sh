@@ -670,6 +670,14 @@ if command -v jq >/dev/null; then
       || errs="$errs\nREADME quotes ~$_qf KB for the full session cost; live is ~$_lf KB"
     awk -v a="$_qs" -v b="$_ls" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
       || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
+  else
+    # Absence of the anchor is the failure, not a reason to stop measuring. This guard was
+    # `if grep -q ANCHOR; then compare; fi` with no else, and cc76ba8 -- a README rewrite from 469
+    # lines to 226 -- moved the sentence it keys on. The comparison then did nothing for eleven
+    # commits while the check went on printing ok, and the same rewrite killed a second guard the
+    # same way. A gate whose anchor lives in prose degrades to silence the moment someone edits
+    # the prose, and prose gets edited.
+    errs="$errs\nREADME no longer publishes the ~N KB full / ~N KB plugin figures, so the published cost was compared against nothing -- restore the anchor or rewrite this to read the new one"
   fi
   [ -z "$errs" ] \
     && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
