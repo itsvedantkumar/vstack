@@ -2,6 +2,9 @@
 
 Written 2026-08-22. True when written, not maintained.
 
+What this changed about vstack, and the changes it explicitly did not license, are recorded
+separately in [what-we-changed-2026-08-22.md](what-we-changed-2026-08-22.md).
+
 This is a record of **other people's** published evidence. This project's own measurements live in
 `tests/evals/RESULTS.md` and are summarised, quarantined, in section 6 below. The two are kept
 apart on purpose: the failure this document exists to avoid is letting what we measured, what

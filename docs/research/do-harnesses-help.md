@@ -8,7 +8,9 @@ project's own benchmark harness, seven of which flattered vstack.
 > [`harness-value-literature-2026-08.md`](harness-value-literature-2026-08.md), a survey of ~70
 > published sources with per-claim confidence and sourcing. This file stays as the record of what
 > was measured *here*; that one records what other people measured. The hypotheses below are kept
-> with the verdict the literature returned on each.
+> with the verdict the literature returned on each. What the survey changed about vstack, and what
+> it deliberately did not, is in
+> [`what-we-changed-2026-08-22.md`](what-we-changed-2026-08-22.md).
 
 ## The question
 

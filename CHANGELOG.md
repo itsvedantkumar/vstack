@@ -6,6 +6,41 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.4 — 2026-08-22
+
+**Two skills stopped requiring skills that are not installed.** `executing-plans` and
+`writing-plans` each opened with a caveat saying sibling `superpowers:*` skills are not vendored
+here, then went on to issue `**REQUIRED SUB-SKILL:** Use superpowers:<name>` eight times in their
+bodies. Nothing in `~/.claude/skills` matches and no superpowers plugin is installed, so every one
+of those pointed at nothing.
+
+The wasted turn is the cheap part. The expensive part is that an agent told something is REQUIRED,
+which then turns out not to exist, learns that REQUIRED is soft, and carries that inference into
+every other mandatory instruction in the set. A word that means "you must" has to be reserved for
+things that are there. Where the target is vendored here the prefix is simply dropped
+(`superpowers:writing-plans` becomes `writing-plans`); where it is not, the directive is now plain
+prose describing the work to do.
+
+**The README publishes its context cost in a form the gate can still read.** Check 18 compares two
+published figures against a live probe of the session hook, guarded by a grep for
+`~N KB full / ~N KB plugin` with no `else` branch. The README stopped using that phrasing at
+cc76ba8 and the comparison silently stopped happening, while the check went on printing `ok` for
+eleven commits. The figures are back, verified falsifiable, and the cell now carries a comment
+naming what depends on it. That is a mitigation; the missing `else` is the actual bug and is not
+fixed here.
+
+Also newly stated: the per-prompt digest costs 305 B on every turn, which over a long session
+costs more than the session baseline does once, and both published figures are measured outside
+Conductor. Inside a workspace the baseline is 712 B smaller, because the hook skips its
+workspace-conventions block when `CONDUCTOR_WORKSPACE_PATH` is set.
+
+**Research.** [docs/research/harness-value-literature-2026-08.md](docs/research/harness-value-literature-2026-08.md)
+surveys roughly 70 published sources on whether a configuration-layer harness beats an unconfigured
+agent. On frontier models nothing published says it improves correctness, and two independent nulls
+at honest baselines say it does not; what the config layer measurably moves is cost and behaviour.
+[docs/research/what-we-changed-2026-08-22.md](docs/research/what-we-changed-2026-08-22.md) records
+what that licensed and, more usefully, the changes it did not.
+
 ## 1.13.3 — 2026-08-22
 
 **The policy document no longer ships as a second CLAUDE.md.** v1.13.2 stopped the hooks from
