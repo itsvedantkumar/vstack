@@ -1,6 +1,6 @@
 ---
 name: create-verification-skill
-description: "No scripted way to prove this repo's UI, CLI, or service actually works. Generates an executable .claude/verify.sh gate plus a verify-<app> skill and feature map. Use for 'add verification here'."
+description: "Nothing exists yet: this repo has no scripted proof its UI, CLI or service works. Generates the executable .claude/verify.sh gate, a verify-<app> skill, and a feature map."
 ---
 
 # Create a verification skill

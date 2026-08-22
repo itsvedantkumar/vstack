@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "First, and only when the shape is undecided: explore intent and requirements for new capability before any plan or test. Skip it for a bugfix or a change whose shape is known."
 ---
 
 > **Ported here, and some of what it names is not.** This skill comes from upstream, where it

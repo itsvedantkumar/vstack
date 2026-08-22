@@ -1,6 +1,6 @@
 ---
 name: maintain-verification-skill
-description: "A repo's verification skill, feature map, or .claude/verify.sh gate has drifted from the app. Audits every feature from source and live, ships proven fixes. Use for 'audit the verify skill'."
+description: "Something exists and has drifted: a repo's verify.sh gate, verification skill or feature map no longer matches the app. Audits every feature from source and live, ships proven fixes."
 ---
 
 # Maintain a verification skill

@@ -6,6 +6,45 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.18.0 — 2026-08-23
+
+**Six skill descriptions claimed each other's work.** The descriptions are what Claude Code
+matches a prompt against, so two skills sharing a trigger phrase is not a documentation problem,
+it is a dispatch problem. The worst pair carried the same two literal strings: `grill-me` and
+`interrogate` both said "tear this apart" and both said "what am I missing", which gives a
+description matcher no way to choose. Nothing was deleted. Each pair does genuinely different
+work and the defect was in the wording.
+
+Every rewrite puts the discriminator in the first clause, because that is the part a matcher
+weighs hardest and in each case it was buried or absent:
+
+- **Does the artifact exist yet.** `grill-me` is "before the thing exists" and keeps grill me,
+  poke holes, what am I missing. `interrogate` is "after the thing exists" and keeps tear this
+  apart. Neither phrase is now claimed twice.
+- **Before drafting versus after drafting.** `technical-writing` picks structure before a word is
+  written; `unslop` is the last pass over prose already on the page. Previously
+  `technical-writing`'s entire scope was a subset of `unslop`'s "any text you write".
+- **Nothing exists yet versus something has drifted.** `create-verification-skill` and
+  `maintain-verification-skill` had that distinction buried mid-sentence.
+- **Chain order, stated as first, second, third.** `brainstorming` now excludes itself from a
+  bugfix or any change whose shape is known, which is what dragged it into work it had no
+  business in. `writing-plans` is second, `test-driven-development` third and explicitly includes
+  bugfixes.
+- **`principle-prove-it-works` generates nothing.** It said "prove this works", which reads the
+  same as the skill that writes a verify.sh. It now says it is a habit, not a generated gate.
+- **UI timing foregrounded.** `component-registry` before writing a component, `ui-iterate` after
+  editing one with a dev server up, `impeccable` while polishing something that already renders.
+
+Total description bytes went from 4798 to 4721, a net reduction of 77, because descriptions are
+listed into every session and a disambiguation that costs context every turn is not free. Every
+description stays inside the 200-character cap check 3 enforces.
+
+What this does not claim: nothing here is measured. The collisions were found by reading the 28
+descriptions, and the fixture set at `~/vstack-dispatch/fixtures.jsonl` that would measure them
+has no harness yet, so there is no before-and-after activation rate and this entry does not
+report one. The justification is structural — a trigger phrase now belongs to one skill instead
+of two — and that is a weaker claim than a measurement.
+
 ## 1.17.0 — 2026-08-22
 
 **Merged with `doctor`'s release-reachability check.** The v1.15.0 audit concluded that check 24

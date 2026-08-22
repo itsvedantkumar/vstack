@@ -1,6 +1,6 @@
 ---
 name: interrogate
-description: Use before merging or shipping a change that only one reviewer (or none) has seen, especially auth, payments, or agent-written code, and on "tear this apart", "stress test this", "what am I missing".
+description: "After the thing exists: parallel reviewers over a diff one person or nobody has read, especially auth, payments or agent-written code. Fires on tear this apart."
 ---
 
 # Interrogate

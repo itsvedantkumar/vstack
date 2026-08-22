@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: "Second, once the shape is agreed and before code: turn a spec or requirements into a written multi-step plan."
 ---
 
 > **Ported here, and some of what it names is not.** This skill comes from upstream, where it

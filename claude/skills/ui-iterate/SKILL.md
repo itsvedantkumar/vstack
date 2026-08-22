@@ -1,6 +1,6 @@
 ---
 name: ui-iterate
-description: "Use after editing any UI file (.tsx/.jsx/.css/.vue/html) when a dev server runs: screenshot 375/768/1440px, self-critique hierarchy, spacing, states, fix and re-shoot before claiming done."
+description: "After editing a UI file (.tsx/.jsx/.css/.vue/html) with a dev server running: screenshot 375/768/1440px, critique hierarchy, spacing and states, fix and re-shoot."
 ---
 
 # ui-iterate — look at what you built before calling it done

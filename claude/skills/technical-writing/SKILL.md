@@ -1,6 +1,6 @@
 ---
 name: technical-writing
-description: "Use when writing or reviewing docs, RFCs, READMEs, PR descriptions, or commit messages: applies Diátaxis structure, Google developer style, STE instruction rules, and Global English syntax."
+description: "Before drafting a doc, RFC, README, PR description or commit message: pick the structure. Diataxis, Google developer style, STE instruction rules, Global English syntax."
 ---
 
 # Technical writing

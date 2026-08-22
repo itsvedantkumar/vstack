@@ -1,6 +1,6 @@
 ---
 name: principle-prove-it-works
-description: "Apply before declaring any task or fix done. Verify the real artifact — run it, read the actual value, inspect the diff — not a self-report, proxy, or 'it compiles.'"
+description: "Apply before declaring any task or fix done. A habit, not a generated gate: run the real artifact, read the actual value, inspect the diff. Never a self-report, proxy, or 'it compiles.'"
 ---
 
 # Prove It Works

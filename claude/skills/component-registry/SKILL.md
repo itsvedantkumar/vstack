@@ -1,6 +1,6 @@
 ---
 name: component-registry
-description: Use before hand-writing any UI component in a React/Tailwind repo - pull a vetted, accessible primitive from a shadcn-compatible registry (npx shadcn add); hand-roll only what no registry has.
+description: "Before writing a UI component in a React/Tailwind repo: pull a vetted accessible primitive from a shadcn-compatible registry (npx shadcn add). Hand-roll only what none has."
 ---
 
 # Component registry

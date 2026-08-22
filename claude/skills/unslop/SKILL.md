@@ -1,6 +1,6 @@
 ---
 name: unslop
-description: "Cut AI tells and add human voice to any text you write: docs, comments, commit messages, replies. Must always apply."
+description: "After prose is drafted, as the last pass over it: cut AI tells and restore human voice. Applies to every text you write, once there is text to edit."
 ---
 
 # Unslop
