@@ -94,7 +94,7 @@ verify is carried into the final report rather than disappearing between phases.
 
 ## What "proven" means here
 
-`.claude/verify.sh` runs 36 checks. `tests/gate-falsifiability.sh` breaks the repository once per
+`.claude/verify.sh` runs 37 checks. `tests/gate-falsifiability.sh` breaks the repository once per
 check, requires the gate to go red naming that check, restores the tree byte for byte, and fails
 if anything was left behind. Check 16 fails if a check has no mutation row, so a check cannot be
 added without proof it can fail.
@@ -205,7 +205,7 @@ repository does not run that repository's code.
 Locally:
 
 ```bash
-./.claude/verify.sh               # 36 checks
+./.claude/verify.sh               # 37 checks
 ./tests/gate-falsifiability.sh    # one mutation per check
 ./tests/install-matrix.sh         # 23 environment lanes
 ./tests/auto-trigger.sh           # 14 prompts through the real CLI

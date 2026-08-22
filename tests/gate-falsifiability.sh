@@ -18,11 +18,22 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 18b 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
-trap 'rm -rf "$BK" "$NOJQ"' EXIT
+# Announce that this tree is being mutated on purpose, so a concurrent verify.sh refuses to run
+# rather than reporting a mutation as a real failure. Three sessions sharing one checkout got
+# three plausible-looking wrong answers out of that window -- "README pins v1.13.3" when HEAD
+# plainly said v1.13.4, and so on. A wrong answer that reads as a finding is worse than an error.
+#
+# The lock lives in .git, not the worktree, so it can never show up in the tree-unchanged diff at
+# the end. It carries this pid, and verify.sh ignores a lock whose process is gone, so a killed
+# run cannot wedge the gate for everyone -- which matters, because this suite does get killed.
+LOCK="$(git rev-parse --git-dir 2>/dev/null)/vstack-falsifiability.lock"
+printf '%s\n' "$$" > "$LOCK" 2>/dev/null || LOCK=""
+trap 'rm -rf "$BK" "$NOJQ"; [ -n "$LOCK" ] && rm -f "$LOCK"' EXIT
+export VSTACK_FALSIFY=1
 # A PATH holding every system binary except jq, for the toolchain row.
 for d in /usr/bin /bin; do
   for f in "$d"/*; do n=${f##*/}; [ "$n" = jq ] || ln -sf "$f" "$NOJQ/$n" 2>/dev/null; done
@@ -74,6 +85,7 @@ files_for(){ case "$1" in
   12)  printf 'README.md' ;;
   13)  printf 'claude/.claude-plugin/plugin.json' ;;
   14)  printf 'claude/hooks/verify-gate.sh' ;;
+  14b) printf '.claude/verify.sh' ;;
   15)  printf 'claude/settings.json' ;;
   16)  printf 'tests/gate-falsifiability.sh' ;;
   17)  printf 'overlay.sh' ;;
@@ -114,6 +126,7 @@ label_for(){ case "$1" in
   12)  printf 'doc counts match tree' ;;
   13)  printf 'plugin manifest versions' ;;
   14)  printf 'stop-hook gate blocks' ;;
+  14b) printf 'the gate refuses a tree under mutation' ;;
   15)  printf 'skillOverrides' ;;
   16)  printf 'falsifiability coverage' ;;
   17)  printf 'overlay ships project keys only' ;;
@@ -179,6 +192,11 @@ exit 0
       # printing ok while comparing nothing. The row exists because the fix is an `else`, and an
       # `else` nobody has seen fire is indistinguishable from the missing one it replaced.
       sed -i.t 's| KB full / ~| KB total / ~|' README.md && rm -f README.md.t ;;
+  14b) # Honour a stale lock. A killed run leaves its lock behind, and a gate that refuses on a
+      # dead pid is wedged for everyone until someone deletes a file they do not know about --
+      # the failure mode that makes people delete locks reflexively and defeat the whole thing.
+      sed -i.t 's/ && kill -0 "$(cat "$_lk" 2>\/dev\/null)" 2>\/dev\/null//' \
+        .claude/verify.sh && rm -f .claude/verify.sh.t ;;
   16) sed -i.t 's/^CHECKS="0 /CHECKS="/' tests/gate-falsifiability.sh \
         && rm -f tests/gate-falsifiability.sh.t ;;
   17) # Restore the deletion overlay.sh used to do: strip every destination key that is not on

@@ -13,6 +13,27 @@ set -uo pipefail
 SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
+# Refuse to measure a tree that something else is deliberately breaking.
+#
+# tests/gate-falsifiability.sh mutates one payload file at a time and restores it. Anyone running
+# the gate inside that window gets a real FAIL naming a defect that does not exist, and it reads
+# exactly like a finding. Three sessions sharing this checkout chased three of them. Silence would
+# be worse and a plausible wrong answer is worse still, so say what is happening and exit non-zero.
+#
+# Skipped when the harness is the caller (it exports VSTACK_FALSIFY), and a lock whose process has
+# died is ignored rather than honoured -- a killed run must not wedge the gate for everyone.
+if [ -z "${VSTACK_FALSIFY:-}" ]; then
+  _lk="$(git rev-parse --git-dir 2>/dev/null)/vstack-falsifiability.lock"
+  if [ -f "$_lk" ] && kill -0 "$(cat "$_lk" 2>/dev/null)" 2>/dev/null; then
+    printf 'REFUSED  tests/gate-falsifiability.sh (pid %s) is mutating this working tree.\n' "$(cat "$_lk")"
+    printf '         Any result now would name a defect the harness planted. Wait for it to finish.\n'
+    exit 2
+  fi
+fi
+# Lets check 14b exercise the three paths above without invoking the whole gate -- and, more to
+# the point, without recursing: a nested full run would itself reach check 14b.
+if [ -n "${VSTACK_GUARD_PROBE:-}" ]; then echo "GUARD_PASSED"; exit 0; fi
+
 FAIL=0
 RAN=0
 SKIPPED=0
@@ -539,6 +560,61 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     || bad "stop-hook gate blocks" "$(printf '%b' "$errs")"
 else
   skip "stop-hook gate blocks" "jq or git not installed"
+fi
+
+# --- 14b. the gate refuses to measure a tree the harness is mutating --------------------------
+#
+# tests/gate-falsifiability.sh breaks one payload file at a time on purpose. A gate run inside
+# that window returns a real FAIL naming a defect nobody introduced, and it reads exactly like a
+# finding -- three sessions sharing this checkout chased three of them before the lock existed.
+#
+# All three paths are asserted because each one fails silently in its own way. No refusal is the
+# original bug. Refusing on a stale lock wedges the gate for everyone after a killed run, and this
+# suite does get killed. Refusing to the harness itself deadlocks it against its own lock.
+g_errs=""
+if command -v git >/dev/null 2>&1; then
+  _gd=$(git rev-parse --git-dir 2>/dev/null)
+  if [ -n "$_gd" ] && [ -w "$_gd" ]; then
+    _lkf="$_gd/vstack-falsifiability-probe.lock"
+    _saved=""
+    [ -f "$_gd/vstack-falsifiability.lock" ] && _saved=$(cat "$_gd/vstack-falsifiability.lock")
+    _probe(){ # lockpid, falsify -> "rc:output"
+      printf '%s\n' "$1" > "$_gd/vstack-falsifiability.lock"
+      _o=$(env ${2:+VSTACK_FALSIFY=1} VSTACK_GUARD_PROBE=1 bash "$SELF" 2>&1); _r=$?
+      rm -f "$_gd/vstack-falsifiability.lock"
+      printf '%s:%s' "$_r" "$(printf '%s' "$_o" | head -1)"
+    }
+    _live=$(_probe "$$" "")
+    case "$_live" in
+      2:REFUSED*) ;;
+      *) g_errs="$g_errs\n  a live lock did not stop the gate: got [$_live], want rc 2 and REFUSED" ;;
+    esac
+    # 999999 is chosen to be dead, and asserted dead rather than assumed -- a pid that happens to
+    # exist would turn this direction into a silent duplicate of the one above.
+    if kill -0 999999 2>/dev/null; then
+      g_errs="$g_errs\n  pid 999999 is alive on this machine, so the stale-lock case proves nothing"
+    else
+      _stale=$(_probe 999999 "")
+      case "$_stale" in
+        0:GUARD_PASSED*) ;;
+        *) g_errs="$g_errs\n  a stale lock wedged the gate: got [$_stale], want rc 0 and GUARD_PASSED" ;;
+      esac
+    fi
+    _self=$(_probe "$$" 1)
+    case "$_self" in
+      0:GUARD_PASSED*) ;;
+      *) g_errs="$g_errs\n  the harness was locked out by its own lock: got [$_self], want rc 0" ;;
+    esac
+    rm -f "$_lkf"
+    [ -n "$_saved" ] && printf '%s\n' "$_saved" > "$_gd/vstack-falsifiability.lock"
+    [ -z "$g_errs" ] \
+      && ok "the gate refuses a tree under mutation (3 paths: live, stale, harness)" \
+      || bad "the gate refuses a tree under mutation" "$(printf '%b' "$g_errs")"
+  else
+    bad "the gate refuses a tree under mutation" "no writable git dir, so the lock path could not be exercised"
+  fi
+else
+  skip "the gate refuses a tree under mutation" "git not installed"
 fi
 
 # --- 15. skillOverrides only names skills it can actually control ------------------------------
