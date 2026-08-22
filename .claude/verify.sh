@@ -438,8 +438,34 @@ done <<EOF
 $(printf '%s' "$NOUNS" | tr '|' '\n' | sed 's/?$//')
 EOF
 
-for f in README.md CHANGELOG.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
-         claude/skills/ATTRIBUTION.md claude/CLAUDE.md docs/how-skills-fire.md tests/README.md; do
+# Derived, not listed. This was a hand-maintained list of eight and it had grown by hand every
+# time somebody noticed a miss -- tests/README.md and docs/how-skills-fire.md were both late
+# additions, and tests/evals/RESULTS.md was the next one waiting to be noticed. That is exactly
+# the shape check 29 removed one check over: a list you have to remember to update is a list
+# that goes stale silently, and the remembering is the part that fails.
+#
+# Every tracked markdown and manifest is scanned except two trees, and the rule is one rule:
+# a document whose numbers are evidence about something other than this tree's shape today.
+# docs/provenance/** is dated internal handoffs -- they record what was true on the day, and
+# rewriting them to satisfy today's tree would be falsifying history. docs/research/** is
+# published evidence about other systems; its "15 agents" and "196 checks" are somebody else's
+# benchmark, and holding them to this repository's counts is a category error, not a finding.
+#
+# This is still an exclusion somebody has to maintain, and worth being honest about: a document
+# dropped into either tree is unscanned by design. It is two directories with a stated rule
+# rather than eight filenames with none, which is the improvement -- not a claim that the
+# problem is gone.
+doc_set=$(git ls-files '*.md' '*.json' 2>/dev/null | grep -vE '^docs/(provenance|research)/')
+ndocs=$(printf '%s' "$doc_set" | grep -c .)
+# A derived set can silently shrink to nothing, which would make this check pass by scanning no
+# documents at all -- the precise failure it exists to catch, turned on itself. So the set is
+# asserted before it is used.
+if [ "$ndocs" -lt 8 ] \
+|| ! grep -qx 'README.md' <<<"$doc_set" \
+|| ! grep -qx 'CHANGELOG.md' <<<"$doc_set"; then
+  errs="$errs\ninternal: the derived document set is $ndocs file(s) and does not contain both README.md and CHANGELOG.md, so this scanned nothing worth scanning"
+fi
+for f in $doc_set; do
   [ -f "$f" ] || continue
   if [ "$f" = CHANGELOG.md ]; then
     # Only the entries that describe what ships today: Unreleased, plus the section for the
@@ -468,7 +494,7 @@ EOF
     [ -n "$want" ] && [ "$num" != "$want" ] \
       && errs="$errs\n$f: claims '$claim', tree has $want"
   done <<EOF
-$(printf '%s' "$norm" | grep -oE "[0-9]+ ($NOUNS)" | sort -u)
+$(printf '%s' "$norm" | grep -oE "(^|[^\$[:alnum:]])[0-9]+ ($NOUNS)" | sed -E 's/^[^0-9]*//' | sort -u)
 EOF
 
   # table form: "| Commands | 14 |"

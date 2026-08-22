@@ -6,6 +6,25 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Check 12 scanned eight files, chosen by hand.** The list had grown by hand every time somebody
+noticed a miss — `tests/README.md` and `docs/how-skills-fire.md` were both late additions, and
+`tests/evals/RESULTS.md` was the next one waiting to be noticed. That is the shape check 29
+removed one check over: a list you have to remember to update is a list that goes stale silently,
+and the remembering is the part that fails. It is derived now, from every tracked markdown and
+manifest: 8 files to 133.
+
+Two trees are excluded, under one rule — a document whose numbers are evidence about something
+other than this tree's shape today. `docs/provenance/**` is dated internal handoffs;
+`docs/research/**` is published evidence about other systems, where "15 agents" is somebody
+else's benchmark and holding it to this repository's count is a category error rather than a
+finding. That is still an exclusion somebody maintains, and it is two directories with a stated
+rule instead of eight filenames with none — an improvement, not a solution.
+
+A derived set can shrink to nothing and pass by scanning nothing, which is the failure this
+check exists to catch turned on itself, so the set is asserted before it is used. The prose
+extractor also gained a `$`-guard: `claude/commands/release.md` contains `TYPE=$1` above `case
+$TYPE in`, which normalises to `$1 case` and matched `[0-9]+ case` against a tree of 14.
+
 **compare-baseline printed six comparisons and made five.** Its `row()` took an expected value
 that could be spelled `-` meaning "assert nothing", and exactly one row used it: the per-session
 context cost, which is the number the README publishes and therefore the row that most deserved
