@@ -46,7 +46,7 @@ Do not run phases 5 and 7 concurrently. Reviewers are only useful before the thi
 Batch independent Task calls into one message. Two reviewers reading the same diff have no reason
 to wait for each other.
 
-Report as a table: phase, agent, verdict, evidence. Evidence is a command and its output, not a
+Report as a table: phase, agent (call sign and instance handle), verdict, evidence. Evidence is a command and its output, not a
 summary of intent. Where a phase was skipped, say which and why.
 
 If any phase reports it could not verify something, that goes in the final report as unverified.

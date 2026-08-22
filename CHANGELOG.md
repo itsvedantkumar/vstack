@@ -6,6 +6,35 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.1 — 2026-08-22
+
+**Instance handles on every agent**, adapted from [oh-my-pi](https://github.com/can1357/oh-my-pi).
+Its `generateTaskName()` gives each spawned task a two-word `AdjectiveAnimal` identifier so its
+agent roster can tell concurrent instances apart. That is a different axis from a call sign: the
+call sign says which role spoke, the handle says which instance. When `/team` runs five reviewers
+over one diff, both are needed. Each agent now coins a handle at the start of a run and signs
+`REDLINE · SwiftFalcon`.
+
+**First head-to-head run on a fair gstack arm.** Four arms, four SWE-bench Lite instances, arms
+installed one at a time in the real home the way each project says to install it.
+
+| arm | resolved | median | total |
+|---|---|---|---|
+| none | 4/4 | 83s | 474s |
+| gstack | 4/4 | 94s | 492s |
+| vstack | 4/4 | 97s | 536s |
+| vstack-default | 4/4 | 103s | 924s |
+
+Every arm resolved every instance, which by this project's own rule is a harness problem rather
+than a finding: four arms agreeing perfectly means the instances do not discriminate. The
+pre-flight admits an instance when its environment builds and its target tests genuinely fail, and
+that is not a difficulty filter. No harness beat the unconfigured baseline, and all three added
+latency to it.
+
+The one signal worth keeping is that it is recorded and not believed yet: `vstack` on the Concise
+output style totalled 536s against `vstack-default` on Default at 924s. A single instance supplies
+almost all of that gap (273s against 572s), so it is one observation, not a result.
+
 ## 1.13.0 — 2026-08-22
 
 **The engineering team is code now, not copy.** Six new subagents bring it to 14: `product-owner`
