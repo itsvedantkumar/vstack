@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -94,6 +94,7 @@ files_for(){ case "$1" in
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
   35)  printf 'ui-gate/ui-gate.sh' ;;
   36)  printf 'tests/evals/lib/runlog.sh' ;;
+  37)  printf 'tests/evals/optimize.sh' ;;
   34)  printf 'overlay.sh' ;;
 esac }
 
@@ -137,6 +138,7 @@ label_for(){ case "$1" in
   34)  printf 'the policy document reaches a session exactly once' ;;
   35)  printf 'gates refuse a green on nothing measured' ;;
   36)  printf 'run logs are opened append-safe' ;;
+  37)  printf 'optimiser decides correctly' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -283,6 +285,12 @@ exit 0
       # times and threw away the previous arm each time.
       sed -i.t 's/if \[ -s "\$f" \]; then/if false; then/' tests/evals/lib/runlog.sh \
         && rm -f tests/evals/lib/runlog.sh.t ;;
+
+  37) # Put back the zero that reads as a finding. A run whose fixtures planted nothing scores
+      # f1 0.0000 instead of saying so, delta goes hugely negative, and the loop reverts a good
+      # change for being "measurably worse".
+      sed -i.t 's/INVALID zero planted defects[^"]*/0 0 0/' tests/evals/optimize.sh \
+        && rm -f tests/evals/optimize.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;

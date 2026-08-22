@@ -1699,6 +1699,61 @@ else
   bad "run logs are opened append-safe" "tests/evals/lib/runlog.sh is missing, so three harnesses are back to truncating"
 fi
 
+# --- 37. the optimiser decides correctly, and refuses to score a run that produced no data -----
+#
+# The fourth decider in this repository and the only one nobody tested. Checks 23, 27 and 32 all
+# drive their decider through its cases in both directions; optimize.sh's accept/revert/noise
+# branch had never executed at all -- --try hard-exits without .opt-state, and .opt-state has
+# never existed, so MIN_GAIN was asserted rather than measured and the code beneath it unrun.
+#
+# The scoring half matters more than the threshold. The old awk collapsed three situations into
+# "0 0 0": a run that genuinely scored zero, a run that produced no rows, and a run whose
+# fixtures planted no defects. Only the first is a result. The other two read as f1 0.0000,
+# which makes delta hugely negative, trips the revert branch, and tells you a good change "made
+# things measurably worse" -- a broken harness arguing against a correct edit.
+#
+# Offline and free: both functions are pure, so this spends no model allowance.
+o_errs=""
+if command -v awk >/dev/null 2>&1 && [ -f tests/evals/optimize.sh ]; then
+  # shellcheck source=/dev/null
+  eval "$(sed -n '/^f1_from_log() {/,/^}/p;/^decide() {/,/^}/p' tests/evals/optimize.sh)"
+  o_dir=$(mktemp -d)
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$o_dir/empty.tsv"
+  case "$(f1_from_log "$o_dir/empty.tsv")" in
+    INVALID*) ;; *) o_errs="$o_errs\n  a log with a header and no rows scored instead of reporting no data" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t0\t0\t0\tyes\n' > "$o_dir/noplant.tsv"
+  case "$(f1_from_log "$o_dir/noplant.tsv")" in
+    INVALID*) ;; *) o_errs="$o_errs\n  a run whose fixtures planted no defects scored 0 instead of reporting no data" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t0\t4\t0\tyes\n' > "$o_dir/zero.tsv"
+  case "$(f1_from_log "$o_dir/zero.tsv")" in
+    INVALID*) o_errs="$o_errs\n  a genuine score of zero was reported as no data; those are different findings" ;;
+    *) read -r _r _p _f <<<"$(f1_from_log "$o_dir/zero.tsv")"
+       [ "$_f" = "0.0000" ] || o_errs="$o_errs\n  a run that found none of 4 planted defects scored f1 $_f, expected 0.0000" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t4\t4\t0\tyes\n' > "$o_dir/perfect.tsv"
+  read -r _r _p _f <<<"$(f1_from_log "$o_dir/perfect.tsv")"
+  [ "$_f" = "1.0000" ] || o_errs="$o_errs\n  a run that found all 4 of 4 with no false positives scored f1 $_f, expected 1.0000"
+
+  # The decision, including the boundary an edit moves by accident.
+  [ "$(decide 0.50 0.60 0.05)" = keep ]   || o_errs="$o_errs\n  a +0.10 gain was not kept"
+  [ "$(decide 0.50 0.40 0.05)" = revert ] || o_errs="$o_errs\n  a -0.10 loss was not reverted"
+  [ "$(decide 0.50 0.52 0.05)" = noise ]  || o_errs="$o_errs\n  a +0.02 move inside the spread was treated as a result"
+  [ "$(decide 0.50 0.55 0.05)" = noise ]  || o_errs="$o_errs\n  exactly +MIN_GAIN was kept; the boundary is strictly greater than"
+
+  rm -rf "$o_dir"
+  [ -z "$o_errs" ] \
+    && ok "optimiser decides correctly (4 scoring cases, 4 decisions, no model calls)" \
+    || bad "optimiser decides correctly" "$(printf '%b' "$o_errs")"
+else
+  skip "optimiser decides correctly" "awk missing or tests/evals/optimize.sh absent"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

@@ -6,6 +6,26 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**The optimiser had never run, and its scorer could not tell zero from no data.** `--try`
+hard-exits without `.opt-state`, and `.opt-state` has never existed, so the accept/revert/noise
+branch and the `MIN_GAIN` threshold beneath it had never once executed. `MIN_GAIN` is now
+labelled what it is: a stated default of 0.05, uncalibrated, described in the header as "wider
+than the run-to-run spread observed here" when no run in this repository measured that spread.
+Calibrating it means three unchanged `--measure` runs; with `SAMPLES=3` over 8 fixtures a single
+f1 step is about 0.029, so 0.05 is the right order of magnitude and that is the most that can
+honestly be said for it.
+
+The scorer collapsed three situations into `0 0 0`: a run that genuinely scored zero, a run that
+produced no rows, and a run whose fixtures planted no defects. Only the first is a result. The
+other two read as f1 0.0000, which makes the delta hugely negative, trips the revert branch, and
+tells you a good change made things measurably worse — a broken harness arguing against a
+correct edit. They are distinct verdicts now and the three call sites refuse to score them.
+
+Check 37 drives both halves offline, at no model cost, and found a real defect in the boundary
+while doing it: `0.55 - 0.50` is `0.050000000000000044`, so a bare `d > g` called exactly
+`+MIN_GAIN` a keep. Which side of the threshold a change landed on depended on the bit pattern
+of two decimals rather than on the measurement.
+
 **Check 12 scanned eight files, chosen by hand.** The list had grown by hand every time somebody
 noticed a miss — `tests/README.md` and `docs/how-skills-fire.md` were both late additions, and
 `tests/evals/RESULTS.md` was the next one waiting to be noticed. That is the shape check 29
@@ -15,9 +35,9 @@ manifest: 8 files to 133.
 
 Two trees are excluded, under one rule — a document whose numbers are evidence about something
 other than this tree's shape today. `docs/provenance/**` is dated internal handoffs;
-`docs/research/**` is published evidence about other systems, where "15 agents" is somebody
-else's benchmark and holding it to this repository's count is a category error rather than a
-finding. That is still an exclusion somebody maintains, and it is two directories with a stated
+`docs/research/**` is published evidence about other systems, where a sentence counting the
+agents in somebody else's benchmark is not a claim about this tree, and holding it to this
+repository's count is a category error rather than a finding. That is still an exclusion somebody maintains, and it is two directories with a stated
 rule instead of eight filenames with none — an improvement, not a solution.
 
 A derived set can shrink to nothing and pass by scanning nothing, which is the failure this
