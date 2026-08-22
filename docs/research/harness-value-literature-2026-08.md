@@ -18,7 +18,9 @@ fields, not from the lanes' own claim fields, because the claim fields routinely
 ## 1. The direct answer
 
 **On current frontier models, there is no published evidence that a configuration-layer harness
-improves correctness, and three independent nulls at honest baselines say it does not.** The
+improves correctness, and two independent nulls at honest baselines say it does not.** (A third
+config-layer null exists and is excluded from that count: it never states its baseline, so it
+cannot be distinguished from a floor or ceiling artifact. See 3.4.) The
 measured effects of the config layer are elsewhere: on cost, usually upward; on *which* problems
 get solved rather than how many; and on behavioural integrity, where prompt-level text produces
 some of the largest effects in the entire literature.
@@ -45,10 +47,11 @@ destructive actions and regression rates by very large margins while leaving pas
 Section 4 is the strongest part of the case for a harness and it is almost entirely about
 behaviour rather than capability.
 
-**A null at ceiling is not a null.** Roughly a third of the "no difference" results in this
-literature sit at baselines above 85%, where nothing could have been detected. Every finding below
-carries its baseline for exactly this reason. This project already published three such results
-and called them nulls.
+**A null at ceiling is not a null.** Every finding below carries its baseline, because a
+"no difference" result is uninformative unless you know there was room to differ. The corpus
+contains real instances: a pentest comparison whose top arm sits at 92.3%, a config ablation
+sitting in a 74.4-76.0% band against a corpus maximum of 79.2%, and SWE-bench Verified itself at a
+reported 80.9% before retirement. This project published three of its own and called them nulls.
 
 ---
 
@@ -291,7 +294,8 @@ the last measured point.
 
 ### 3.4 The three config-layer nulls
 
-These are the results that most directly answer the question, and all three have honest baselines.
+These are the results that most directly answer the question. Two have honest baselines. The third
+does not state one at all, and is reported here rather than pooled.
 
 **The 288-run context-file ablation.** Claude Code with Sonnet 4.6 and Codex CLI with GPT-5.5, 17
 real tasks from merged PRs in three repos, three conditions (file removed / always in system
@@ -524,15 +528,31 @@ baselines, and it is not a claim about output quality.
 
 ### Supported by data
 
-**1. Weaker and mid-capability models.** Harness spread at fixed model is 27.4 points on Qwen
+Each rank carries its layer tag, because architectural evidence does not transfer to the config
+layer and section 11 draws on this list.
+
+**1. Weaker and mid-capability models.** *(layer: architectural.)* Harness spread at fixed model is 27.4 points on Qwen
 3.6-flash against 12.5 on GLM 5.1 over the same 350 tasks ([Claw-SWE-Bench](https://arxiv.org/html/2606.12344v1),
 page-fetched, high confidence). Harness-Bench reports stronger backends showing lower cross-harness
 variance. Note this points *against* harness value on frontier models, which is the opposite of how
 it is usually cited. Caveat: this is two model families of different sizes, not a fitted curve, and
 Terminal-Bench 2.0's widening spread has the opposite sign.
 
-**2. Cost, not correctness.** This is the best-evidenced finding in the entire sweep and nobody
-markets it. Three harnesses on the same model differ by 0 to 8 points in pass rate, with bootstrap
+**2. Cost, not correctness.** *(Both layers, and they must be kept apart.)* This is the
+best-evidenced finding in the entire sweep and nobody markets it.
+
+At the **config layer**, where the evidence is thinner but directly on point: context files cost
++20% and +23% inference for no correctness gain; the Superpowers bundle cost +40% tokens and +20%
+wall clock for +2.2 points; SkillsBench's Claude Code arm cost +29% for its +18.2 points; the CTF
+skills ablation spanned 60x in documentation tokens for a non-significant +8.9. One result points
+the other way and is unresolved: AGENTS.md presence associated with 28.6% lower median runtime and
+16.6% lower output tokens on real PR tasks, though that paper reports no statistical test and no
+absolute completion baseline ([arXiv 2601.20404](https://arxiv.org/abs/2601.20404), low
+confidence). The two disagree, probably because one measures agent-written PRs and the other
+SWE-bench with injected files, and nobody has reconciled them.
+
+At the **architectural layer**, where the numbers are much larger and are the ones usually quoted:
+three harnesses on the same model differ by 0 to 8 points in pass rate, with bootstrap
 CIs mostly including zero, while differing by up to **40.8x in tokens per solved task**
 ([arXiv 2607.22585](https://arxiv.org/html/2607.22585), 300 trials, baseline 48-50%, high
 confidence). SWE-Marathon: holding the model fixed, median tokens per trial varies **up to 12x**,
@@ -543,7 +563,7 @@ stayed flat around 30.5% while tokens rose 70%, 391K to 668K per task
 ([arXiv 2607.03691](https://arxiv.org/abs/2607.03691), Spearman rho 0.208 p=0.231, baseline
 23-39%, no ceiling).
 
-**3. Which instances, not how many.** A natural-language config harness on SWE-bench Verified: full
+**3. Which instances, not how many.** *(layer: config.)* A natural-language config harness on SWE-bench Verified: full
 config 74.4%, without runtime skill 76.0%, without harness skill 75.2%. **Both ablations beat the
 full config.** Agreement tables show over 110 of 125 instances identical between full and each
 ablation. The authors' own words: "Full IHR behaves more like a solved-set replacer than a uniform
@@ -554,7 +574,7 @@ shape.
 score is 79.2%, so roughly 4 points of visible headroom on n=125. Close to a ceiling artifact.
 Source: [arXiv 2603.25723](https://arxiv.org/html/2603.25723v1), medium confidence.*
 
-**4. Non-obvious project-specific knowledge.** Developer-written context files helped +2.4% overall
+**4. Non-obvious project-specific knowledge.** *(layer: config.)* Developer-written context files helped +2.4% overall
 (p=0.21) and only on niche repositories, while LLM-generated repository overviews scored -0.5% and
 -2%. Weak, not significant, but the sign is consistent and the mechanism is plausible: a file
 carries value only when it holds something the model does not already know, and for popular Python
@@ -562,7 +582,7 @@ repos it does not.
 
 ### Supported by reasoning only, and flagged as such
 
-**5. Long-horizon and multi-session work.** Every harness author says this is where the value lives.
+**5. Long-horizon and multi-session work.** *(layer: config, and unmeasured.)* Every harness author says this is where the value lives.
 The only horizon-linked measurement anyone has published is config-file adherence decaying at OR
 0.944 per generated function, which is adherence rather than correctness. No config-layer study in
 this sweep used anything but single-session, single-issue tasks. This ranking rests on a mechanism
@@ -570,7 +590,7 @@ argument, not on data.
 
 ### Negative on data
 
-**6. Extreme multi-file complexity produces a floor, not amplified benefit.** On 200
+**6. Extreme multi-file complexity produces a floor, not amplified benefit.** *(layer: architectural.)* On 200
 high-complexity feature tasks averaging 790 LOC across 15.7 files, swapping the harness under a
 fixed Opus 4.5 moved resolve rate by 0.5 points: Claude Code 11.0%, OpenHands 10.5%. The same
 models score 74.4% on SWE-bench and 5.2% on FeatureBench tasks drawn from the same repos. Past some
@@ -934,9 +954,13 @@ verification pass that killed six false "nobody has measured X" claims.
 8. **Config quantity at realistic scale.** SkillsBench's sweep tops out at "4 or more skills". Nobody
    has swept 10, 25 or 50 concurrently-listed skills to find where the listing itself goes
    net-negative.
-9. **A config layer on code review, defect detection, or false completion.** Every config-layer
-   study scores task resolution. The two metrics this project actually measured have no published
-   analogue at all.
+9. **A config layer on false completion, and on per-finding review precision.** Review thoroughness
+   *has* been manipulated at the config layer and scored against defect detection (section 7), so
+   that half is measured. What is not: no study scores an agent asserting completion against a red
+   suite, and no study measures per-finding precision, the fraction of emitted review comments that
+   are real, as a function of thoroughness instruction. Published work uses per-instance binary
+   verdicts throughout, so this project's 92%-against-73% number has no published analogue to
+   compare against.
 10. **Whether adherence decay applies to substantive instructions.** The OR 0.944 per-function decay
     was measured on a trivial annotation. For an always-on instruction file this is the
     load-bearing question.
@@ -1002,8 +1026,7 @@ never run. **Cite as reported, not reproduced.**
 
 Where this sits against the literature: our review precision drop is directionally consistent with a
 measured phenomenon (section 7) but larger in ratio than Claude-4.5-sonnet's published 1.3-1.4x, and
-crucially it came without the compensating drop in false acceptance that the published pattern
-shows. Our SWE-bench null under f2p-only scoring is a textbook ceiling artifact and carries no
+it came without the compensating drop in false acceptance that the published pattern shows. Our SWE-bench null under f2p-only scoring is a textbook ceiling artifact and carries no
 information. Our SWE-bench result under regression scoring is the only local measurement with an
 honest baseline, and it is a three-way tie at zero.
 
@@ -1071,8 +1094,11 @@ verifiable by inspection and are supported by the tail literature.
 
 **Cost belongs in every claim.** Cost is the best-measured harness effect in the entire literature
 and the one thing harness authors do publish, always about their own version history and never
-against a bare agent. +40% tokens for +2.2 points is a defensible trade or an indefensible one
-depending on the task, and the number should be visible.
+against a bare agent. The eye-watering numbers (12x tokens, 40.8x per solved task) are
+architectural and do not transfer. The config-layer numbers are smaller and still material: +20%
+to +40% tokens is the range across the studies that measured it, against effects that were not
+significant. +40% tokens for +2.2 points is a defensible trade or an indefensible one depending on
+the task, and the number should be visible either way.
 
 **Size is a lever with a measured wrong direction.** More skills scored worse than fewer.
 Comprehensive documentation scored at zero. Right skill fires 68.2% of the time with one candidate
