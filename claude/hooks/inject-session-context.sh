@@ -39,6 +39,32 @@ else
 fi
 [ -z "$event" ] || [ "$event" = "null" ] && event="SessionStart"
 
+# --- one voice per event ---------------------------------------------------------------
+# Claude Code MERGES hook arrays across settings layers instead of overriding them, so a repo
+# carrying the committed overlay ran ~/.claude's copy AND its own: every baseline block, digest
+# and directive twice, every turn, on this machine.
+#
+# Deleting the committed copy is not the fix — a cloud sandbox clones the repo and has no
+# ~/.claude, so that copy is the only lane config reaches it by. The project copy stands down
+# instead, and only while the user-scope copy is demonstrably doing the job.
+#
+# Each of the three tests earns its place. The */.claude/hooks/ shape keeps vstack's own source
+# copy at claude/hooks/ (no dot) emitting, which is what the gate pipes into. The self != global
+# test keeps ~/.claude's copy — which matches that same shape — alive. The grep proves the global
+# copy is actually registered, so a half-installed ~/.claude cannot silence every repo at once.
+if [ "${VSTACK_DUPE_SUPPRESS:-1}" = "1" ]; then
+  self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+  global="$HOME/.claude/hooks/inject-session-context.sh"
+  case "$self" in
+    */.claude/hooks/inject-session-context.sh)
+      if [ "$self" != "$global" ] && [ -f "$global" ] \
+         && grep -q 'inject-session-context\.sh' "$HOME/.claude/settings.json" 2>/dev/null; then
+        emit "$event"
+        exit 0
+      fi ;;
+  esac
+fi
+
 # Per-prompt digest: must stay tiny and fast (no git work) — it runs on every prompt.
 # The skills profile re-pins nothing per prompt; one session-start block is the
 # least a skill pack can inject and still work.

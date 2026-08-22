@@ -70,11 +70,38 @@ cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.c
 cp "$SRC"/claude/agents/*.md   "$DEST/.claude/agents/"
 cp "$SRC"/claude/commands/*.md "$DEST/.claude/commands/"
 
-# Global directives + statusline: a cloud sandbox has no ~/.claude, so the project copy is
-# the only lane these reach it by. .claude/CLAUDE.md is a recognized project-memory path.
-cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"
+# Global directives: a cloud sandbox has no ~/.claude, so the project copy is the only lane they
+# reach it by, and .claude/CLAUDE.md is a recognized project-memory path.
+#
+# On this machine, though, ~/.claude/CLAUDE.md holds the same bytes and Claude Code loads both —
+# the entire policy document, twice, every turn. So write it only where the cloud lane is real. A
+# repo with no remote, or one that gitignores .claude/, will never be cloned into a sandbox with
+# this file in it; locally the user-scope copy already covers it. VSTACK_OVERLAY_CLOUD=1|0 forces
+# the call when the heuristic guesses wrong.
+cloud="${VSTACK_OVERLAY_CLOUD:-auto}"
+case "$cloud" in
+  0|1) ;;
+  *) cloud=0
+     if git -C "$DEST" remote get-url origin >/dev/null 2>&1 \
+        && ! git -C "$DEST" check-ignore -q .claude 2>/dev/null; then cloud=1; fi ;;
+esac
+
+if [ "$cloud" = 1 ]; then
+  cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"
+  md="wrote   .claude/CLAUDE.md"
+elif git -C "$DEST" ls-files --error-unmatch .claude/CLAUDE.md >/dev/null 2>&1; then
+  # Tracked means someone committed it deliberately. Deleting a tracked file to save a kilobyte
+  # of context is not this script's call to make.
+  md="kept    .claude/CLAUDE.md (tracked — remove it yourself if you want it gone)"
+else
+  # Converge rather than merely stop: an earlier run left a copy here, and that copy IS the
+  # duplication. Re-running the overlay has to clear it.
+  rm -f "$DEST/.claude/CLAUDE.md"
+  md="skipped .claude/CLAUDE.md (no cloud lane — ~/.claude/CLAUDE.md covers this repo)"
+fi
 cp "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh" && chmod 755 "$DEST/.claude/statusline.sh"
-echo "wrote   .claude/CLAUDE.md + .claude/statusline.sh"
+echo "$md"
+echo "wrote   .claude/statusline.sh"
 if command -v jq >/dev/null; then
   tmp=$(mktemp)
   jq '.statusLine = {type:"command", command:"\"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\"", padding:0, refreshInterval:3}' \

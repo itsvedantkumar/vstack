@@ -1355,6 +1355,96 @@ else
   skip "grill trigger decides correctly" "jq missing or the session-context hook is not executable"
 fi
 
+# --- 33. the project overlay stands down when the user-scope hook is live ----------------------
+#
+# Claude Code merges hook arrays across settings layers rather than overriding them, so an
+# overlaid repo ran ~/.claude's injector and its own committed copy: everything twice, every turn.
+# The copy under a repo's .claude/ now suppresses itself when the user-scope one is registered.
+#
+# Tested in both directions and then some, because every way this can be wrong is silent. Testing
+# only that the project copy goes quiet would rate a script broken end to end as healthy; testing
+# only that the source copy still speaks would miss the duplication entirely. The sandbox case
+# below is the one that matters most in production: a cloud sandbox has no ~/.claude, and if the
+# suppression fires there the repo loses its only config lane and nobody sees an error.
+d_errs=""
+if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh ]; then
+  d_root=$(mktemp -d)
+  mkdir -p "$d_root/repo/.claude/hooks" "$d_root/withglobal/.claude/hooks" "$d_root/noglobal"
+  cp claude/hooks/inject-session-context.sh "$d_root/repo/.claude/hooks/"
+  cp claude/hooks/inject-session-context.sh "$d_root/withglobal/.claude/hooks/"
+  printf '{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"%s/.claude/hooks/inject-session-context.sh"}]}]}}' \
+    "$d_root/withglobal" > "$d_root/withglobal/.claude/settings.json"
+  d_ev='{"hook_event_name":"UserPromptSubmit","session_id":"dv1","prompt":"x"}'
+  d_ask(){ # home, script -> 1 if any context was injected
+    printf '%s' "$d_ev" | HOME="$1" "$2" 2>/dev/null | grep -c additionalContext
+  }
+  d_want(){ # home, script, expected, label
+    got=$(d_ask "$1" "$2")
+    [ "$got" = "$3" ] || d_errs="$d_errs\n  $4: got $got, want $3"
+  }
+  d_want "$d_root/withglobal" "$d_root/repo/.claude/hooks/inject-session-context.sh" 0 \
+    "a repo copy must go quiet while the user-scope copy is registered"
+  d_want "$d_root/noglobal" "$d_root/repo/.claude/hooks/inject-session-context.sh" 1 \
+    "a repo copy in a sandbox with no ~/.claude is the only lane and must still speak"
+  d_want "$d_root/withglobal" "$d_root/withglobal/.claude/hooks/inject-session-context.sh" 1 \
+    "the user-scope copy must not suppress itself"
+  d_want "$HOME" "./claude/hooks/inject-session-context.sh" 1 \
+    "this repo's source copy at claude/hooks/ is not an overlay and must still speak"
+  got=$(printf '%s' "$d_ev" | VSTACK_DUPE_SUPPRESS=0 HOME="$d_root/withglobal" \
+        "$d_root/repo/.claude/hooks/inject-session-context.sh" 2>/dev/null | grep -c additionalContext)
+  [ "$got" = 1 ] || d_errs="$d_errs\n  VSTACK_DUPE_SUPPRESS=0 did not turn the suppression off"
+  # Silence still has to be well-formed. A hook that exits printing nothing is not "quiet", it is
+  # a hook Claude Code logs as malformed on every single prompt.
+  printf '%s' "$d_ev" | HOME="$d_root/withglobal" \
+    "$d_root/repo/.claude/hooks/inject-session-context.sh" 2>/dev/null \
+    | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null 2>&1 \
+    || d_errs="$d_errs\n  the suppressed copy did not emit valid hook JSON"
+  rm -rf "$d_root"
+  [ -z "$d_errs" ] \
+    && ok "project overlay stands down when the user-scope hook is live (6 cases, both directions)" \
+    || bad "project overlay stands down when the user-scope hook is live" "$(printf '%b' "$d_errs")"
+else
+  skip "project overlay stands down when the user-scope hook is live" "jq missing or the session-context hook is not executable"
+fi
+
+# --- 34. overlay.sh writes CLAUDE.md only where the cloud lane is real -------------------------
+#
+# ~/.claude/CLAUDE.md and a repo's .claude/CLAUDE.md are byte-identical copies of the same source,
+# and Claude Code loads the first as user memory and the second as project memory — the whole
+# policy document twice, every turn. The project copy is worth that only where a sandbox will
+# actually clone it. No remote, or .claude gitignored, means no sandbox ever will.
+#
+# The removal case is the one to hold onto: an overlay that merely stops writing the file leaves
+# every previously overlaid repo duplicating forever, so re-running has to converge, not just
+# decline.
+o_errs=""
+if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+  o_dir=$(mktemp -d)/r
+  mkdir -p "$o_dir"
+  git -C "$o_dir" init -q 2>/dev/null
+  o_state(){ [ -f "$o_dir/.claude/CLAUDE.md" ] && echo present || echo absent; }
+  o_want(){ # expected, label
+    got=$(o_state)
+    [ "$got" = "$1" ] || o_errs="$o_errs\n  $2: got $got, want $1"
+  }
+  ./overlay.sh "$o_dir" >/dev/null 2>&1
+  o_want absent "a repo with no remote cannot reach a sandbox, so it gets no second copy"
+  git -C "$o_dir" remote add origin https://github.com/example/example.git 2>/dev/null
+  ./overlay.sh "$o_dir" >/dev/null 2>&1
+  o_want present "a repo with a remote needs the copy — it is the sandbox's only lane"
+  printf '.claude/\n' > "$o_dir/.gitignore"
+  ./overlay.sh "$o_dir" >/dev/null 2>&1
+  o_want absent "gitignoring .claude means it is never cloned, and the stale copy must be cleared"
+  VSTACK_OVERLAY_CLOUD=1 ./overlay.sh "$o_dir" >/dev/null 2>&1
+  o_want present "VSTACK_OVERLAY_CLOUD=1 overrides the heuristic"
+  rm -rf "$(dirname "$o_dir")"
+  [ -z "$o_errs" ] \
+    && ok "overlay.sh writes CLAUDE.md only where the cloud lane is real (4 cases, incl. convergence)" \
+    || bad "overlay.sh writes CLAUDE.md only where the cloud lane is real" "$(printf '%b' "$o_errs")"
+else
+  skip "overlay.sh writes CLAUDE.md only where the cloud lane is real" "jq or git missing"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

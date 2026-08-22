@@ -393,6 +393,28 @@ echo "── project coverage ──"
 # Every ACTIVE repo should carry the overlay lanes (.conductor run scripts + committed
 # .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo
 # with a commit in the last 45 days and no .conductor/settings.toml is an uncovered project.
+dupescanned=0; stale=""; probe=""; hseen=""
+# Second question, same enumeration: does the injector sitting in this directory know to stand
+# down? Deduped on the hook file rather than on the repo, and asked twice per iteration — once at
+# the directory itself and once at the main checkout it resolves to.
+#
+# Both calls earn their place. Coverage is a property of the committed tree, so judging it at the
+# main checkout is right, and resolving there is also the only way this scan learns about repos
+# outside the three glob roots. But double-firing is a property of the file on disk: a worktree
+# parked on a branch without the guard carries its own copy and injects a second time while the
+# main checkout it resolves to looks perfectly clean.
+dupe_look(){
+  h="$1/.claude/hooks/inject-session-context.sh"
+  [ -f "$h" ] || return 0
+  case " $hseen " in *" $h "*) return 0 ;; esac
+  hseen="$hseen $h"
+  dupescanned=$((dupescanned+1))
+  if grep -q 'VSTACK_DUPE_SUPPRESS' "$h"; then
+    [ -n "$probe" ] || probe="$h"
+  else
+    stale="$stale $(basename "$1")"
+  fi
+}
 cutoff=$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d 2>/dev/null)
 if [ -z "$cutoff" ]; then
   # Both date forms failing left cutoff empty, which skipped every repo, which left uncovered
@@ -407,6 +429,7 @@ else
   seen=""
   for r in "$HOME/Projects"/*/ "$HOME/conductor/repos"/*/ "$HOME/conductor/workspaces"/*/*/; do
     [ -e "$r/.git" ] || continue
+    dupe_look "${r%/}"
     # Resolve a worktree to the checkout it belongs to, and judge coverage there. Two reasons:
     # the overlay is committed, so fixing the main checkout fixes every workspace of that
     # project; and Conductor's workspaces are the only way this scan ever learns about repos
@@ -414,6 +437,7 @@ else
     # ~/Desktop, which no hardcoded root list here was ever going to guess.
     main=$(cd "$r" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd) || continue
     [ -n "$main" ] || continue
+    dupe_look "$main"
     case " $seen " in *" $main "*) continue ;; esac
     seen="$seen $main"
     last=$(git -C "$main" log -1 --format=%cs 2>/dev/null) || continue
@@ -433,6 +457,36 @@ else
   else
     bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
   fi
+fi
+echo "── hook scope overlap ──"
+# Claude Code MERGES hook arrays across settings layers instead of overriding them, so a repo
+# carrying the committed overlay ran ~/.claude's injector AND its own: baseline block, digest and
+# directives, twice per turn. The project copy stands down now — but a repo's copy is only as
+# current as its last `vstack overlay`, so the guard has to be confirmed per repo.
+stale=$(printf '%s' "$stale" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+if [ "$dupescanned" = 0 ]; then
+  note "project hook stands down" "no active repo carries a committed .claude injector — nothing scanned"
+elif [ -n "$stale" ]; then
+  bad "project hook stands down" "stale overlay, still double-fires: ${stale}(run 'vstack overlay <repo>')"
+else
+  # Grepping for the guard proves it is present, not that it fires. Run both copies for real and
+  # read what they actually emit. Testing only the silent side would rate a wholly broken script
+  # as healthy, so the user-scope copy has to be shown still speaking.
+  ev='{"hook_event_name":"UserPromptSubmit","session_id":"doctor","prompt":"x"}'
+  pout=$(printf '%s' "$ev" | "$probe" 2>/dev/null)
+  gout=$(printf '%s' "$ev" | "$HOME/.claude/hooks/inject-session-context.sh" 2>/dev/null)
+  perr=""
+  case "$pout" in
+    *additionalContext*) perr="project copy $probe still injects" ;;
+    *hookEventName*) ;;
+    *) perr="project copy emitted no valid hook JSON: ${pout:-<empty>}" ;;
+  esac
+  case "$gout" in
+    *additionalContext*) ;;
+    *) perr="${perr:+$perr; }user-scope copy went silent too — suppression is over-firing" ;;
+  esac
+  [ -z "$perr" ] && ok "project hook stands down ($dupescanned repos, both scopes probed)" \
+                 || bad "project hook stands down" "$perr"
 fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"

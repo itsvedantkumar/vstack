@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -91,7 +91,8 @@ files_for(){ case "$1" in
   29)  printf 'bin/cloudflare-mcp' ;;
   30)  printf 'claude/hooks/format.sh' ;;
   31)  printf '' ;;   # plants a new file rather than editing one
-  32)  printf 'claude/hooks/inject-session-context.sh' ;;
+  32|33) printf 'claude/hooks/inject-session-context.sh' ;;
+  34)  printf 'overlay.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -130,6 +131,8 @@ label_for(){ case "$1" in
   30)  printf 'shellcheck suppressions carry a reason' ;;
   31)  printf 'every shipped file has a referrer' ;;
   32)  printf 'grill trigger decides correctly' ;;
+  33)  printf 'project overlay stands down when the user-scope hook is live' ;;
+  34)  printf 'overlay.sh writes CLAUDE.md only where the cloud lane is real' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -237,6 +240,17 @@ exit 0
       # unfalsifiable while proving nothing about it.
       sed -i.t 's/VSTACK_GRILL_CHARS:-320/VSTACK_GRILL_CHARS:-0/' \
         claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
+  33) # Turn the suppression off by default, which is precisely the state the tree was in before
+      # it existed: the project copy and the user-scope copy both injecting, everything twice.
+      # Flipping the default rather than deleting the block keeps the mutation to one token, so a
+      # red row points at the suppression and not at a syntax error.
+      sed -i.t 's/VSTACK_DUPE_SUPPRESS:-1/VSTACK_DUPE_SUPPRESS:-0/' \
+        claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
+  34) # Write the second CLAUDE.md unconditionally, the old behaviour. Forcing the decision
+      # variable rather than restoring the old `cp` line leaves the removal path intact, so the
+      # row fails on the decision the check is about instead of on the plumbing around it.
+      sed -i.t 's/^cloud="${VSTACK_OVERLAY_CLOUD:-auto}"$/cloud=1/' \
+        overlay.sh && rm -f overlay.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;
