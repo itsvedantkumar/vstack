@@ -4,6 +4,12 @@ A research brief. Everything below is measured on this machine unless marked oth
 `tests/evals/RESULTS.md` before running anything; it records twelve defects found in this
 project's own benchmark harness, seven of which flattered vstack.
 
+> **The literature side of this question is now answered separately.** See
+> [`harness-value-literature-2026-08.md`](harness-value-literature-2026-08.md), a survey of ~70
+> published sources with per-claim confidence and sourcing. This file stays as the record of what
+> was measured *here*; that one records what other people measured. The hypotheses below are kept
+> with the verdict the literature returned on each.
+
 ## The question
 
 vstack and gstack both assume a harness improves on unconfigured Claude Code. Three benchmarks
@@ -15,10 +21,20 @@ project's history is that the checks are wrong more often than the things they c
 
 ## What is already measured
 
-**SWE-bench Lite, 4 arms, 4 instances.** All four arms resolved all four. Adding a
-`PASS_TO_PASS` regression check later showed those "resolutions" included patches that broke
-neighbouring tests, so the 100% was an artifact. A difficulty filter then kept 2 of 12 instances:
-unconfigured Claude Code already solves 10 of 12 outright.
+**SWE-bench Lite, 4 arms, 4 instances.** All four arms resolved all four under fail-to-pass-only
+scoring (`.audit/run/bench-1787372531.tsv`).
+
+Adding a `PASS_TO_PASS` regression check changed the result rather than qualifying it
+(`.audit/run/hard-1787395849.tsv`). Every arm drops to 0 of 2 resolved. On `flask-5063` all three
+fixed the target tests and broke **the same 2 of 20** neighbours; on `pytest-7168` all three
+scored 0 of 11 outright. So the ceiling is a property of the scorer, not of the task: once
+collateral damage counts there is ample headroom, no harness used it, and the identical failure
+across arms points at something the config layer never touched. This is the only local measurement
+with an honest baseline, and it is a three-way tie at zero.
+
+A difficulty filter then kept 2 of 12 instances, on the basis that unconfigured Claude Code already
+solves 10 of 12 outright. That 10-of-12 figure has no surviving raw rows on disk; treat it as
+reported, not reproduced.
 
 **Review pathway, 3 arms, 8 fixtures, 2 samples, 48 reviews.** Every arm passed a dispatch canary
 first.
@@ -42,34 +58,50 @@ effort. The baseline set up the environment and solved it anyway, every time.
 is at or near ceiling. A ceiling leaves no headroom to measure, and three benchmarks in a row have
 reported that as "no difference" when the honest statement is "this could not tell."
 
-## Hypotheses, and what would settle each
+## Hypotheses, and the verdict the literature returned
 
-**H1. The benefit is real but appears only past a complexity threshold.**
-The tasks measured are single-file, single-defect, with correctness pre-specified. Test on
-multi-file changes, tasks spanning more than one session, and repositories large enough that
-context management matters. Settled by: a task size where baseline resolve rate falls below about
-70%, then comparing arms there. If no arm separates even where baseline fails, H1 is dead.
+Full evidence and sourcing in [`harness-value-literature-2026-08.md`](harness-value-literature-2026-08.md).
+Each verdict below is a one-line summary of a section there, not a new measurement.
 
-**H2. The benefit is in variance, not the mean.**
-A harness may not raise the average outcome but may cut the tail: the catastrophic edit, the
-confidently wrong claim, the destroyed working tree. Means hide this entirely. Settled by:
-reporting p95 and worst case rather than medians, over enough runs to see a tail, and counting
-catastrophic outcomes separately from failed ones.
+**H1. The benefit is real but appears only past a complexity threshold. UNTESTED, and harder than
+it looks.** Nobody has estimated a scaffold-by-difficulty interaction on coding tasks. The nearest
+result is a pre-registered GAIA study where the scaffold effect *reverses sign* between difficulty
+levels for the same model. Two local complications: at extreme multi-file complexity the effect is
+a floor, not amplified benefit (FeatureBench, 11.0% vs 10.5% swapping harness under a fixed Opus
+4.5), and in a 45,769-task difficulty model only about 18% of tasks sit in the band where any
+intervention could move the outcome. An experiment that does not deliberately sample that band
+spends most of its budget on tasks decided before the harness loaded.
 
-**H3. The benefit is in the things that are not model output at all.**
-Guards, uninstall, drift detection, an unverified change being blocked. These are capability facts
-that need no benchmark, and vstack has them where gstack does not. Settled already, by inspection.
-The open question is whether they matter to outcomes anyone measures, or only to trust.
+**H2. The benefit is in variance, not the mean. HALF CONFIRMED, and the half that confirms is not
+statistical.** No published study anywhere reports a variance statistic for a coding agent with a
+config layer on versus off. Not one. But behavioural tails are measured and the effects are among
+the largest in the literature: prompt strictness moves test-exploitation from >85% to 1%, an
+anti-cheat block moves CTF cheating 33.0% to 8.5% at no cost to legitimate solves, and stripping
+consent declarations moves Claude Code's destructive out-of-scope rate from 0.0% to 17.1%.
+Config-layer text reliably suppresses *intentional* shortcut-taking and unreliably suppresses
+*unintentional* scope creep.
 
-**H4. Harnesses helped more on weaker models and the advantage has eroded.**
-Plausible and cheap to test: run the same benchmarks on a smaller model. If harness arms separate
-from baseline on the smaller model and not on the larger one, the honest claim becomes "a harness
-substitutes for model capability", which is a real finding and a diminishing one.
+**H3. The benefit is in the things that are not model output at all. CONFIRMED as the strongest
+remaining case.** This is where H2's real evidence lives, and it is the category the literature
+supports.
 
-**H5. The benefit is real and negative in places.**
-vstack lowered review precision, 4 false positives against 1. Thoroughness instructions may
-produce over-reporting. Settled by: checking whether the extra findings are wrong or merely
-out of scope, which is the exact confusion that forced this project to retract an earlier run.
+**H4. Harnesses helped more on weaker models and the advantage has eroded. SUPPORTED IN SIGN, NOT
+MONOTONIC.** Harness spread at fixed model is 27.4pp on a weak model against 12.5pp on a strong
+one; prompt compilation recovers +11.0pp on the weakest model and -1.2pp (n.s.) on the strongest.
+But SkillsBench's normalized gain is roughly flat across a 5x span of bare capability, and the
+*weakest* model of all has the smallest gain, so the curve is closer to an inverted U than to a
+clean decline. Note also: nobody has measured skill lift on any model newer than Opus 4.8, so this
+extrapolates past the last measured point, and Opus 5 is where our own null was run.
+
+**H5. The benefit is real and negative in places. CONFIRMED in direction, with a twist that makes
+our result worse.** More demanding review prompts measurably raise rejection of correct code across
+5 models and 3 benchmarks, and 87.2% of those spurious rejections are asserted logic defects with
+no falsifiable counterexample rather than style nitpicks. But in the published pattern the thorough
+prompt *buys* something: false acceptance falls as false rejection rises. Ours raised false
+positives at identical recall, meaning we paid over-correction's cost without its benefit. That is
+not what the literature predicts and the miss arm is worth re-checking. Adjacent and unflattering:
+in SkillsBench, more skills scored worse than fewer, "comprehensive" documentation scored +0.7pp,
+and agent-authored skills scored *below* no skills at all.
 
 ## Traps, all of which have already happened here
 

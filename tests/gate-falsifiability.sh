@@ -132,7 +132,7 @@ label_for(){ case "$1" in
   31)  printf 'every shipped file has a referrer' ;;
   32)  printf 'grill trigger decides correctly' ;;
   33)  printf 'project overlay stands down when the user-scope hook is live' ;;
-  34)  printf 'overlay.sh writes CLAUDE.md only where the cloud lane is real' ;;
+  34)  printf 'the policy document reaches a session exactly once' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -246,10 +246,11 @@ exit 0
       # red row points at the suppression and not at a syntax error.
       sed -i.t 's/VSTACK_DUPE_SUPPRESS:-1/VSTACK_DUPE_SUPPRESS:-0/' \
         claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
-  34) # Write the second CLAUDE.md unconditionally, the old behaviour. Forcing the decision
-      # variable rather than restoring the old `cp` line leaves the removal path intact, so the
-      # row fails on the decision the check is about instead of on the plumbing around it.
-      sed -i.t 's/^cloud="${VSTACK_OVERLAY_CLOUD:-auto}"$/cloud=1/' \
+  34) # Put the second CLAUDE.md back, which is the whole of the old behaviour: the policy in a
+      # project-memory path alongside the identical ~/.claude/CLAUDE.md. Adding the write rather
+      # than removing the policy.md one keeps the mutation on the duplication itself, so the row
+      # cannot pass on a broken overlay instead.
+      sed -i.t 's|^cp "\$SRC/claude/CLAUDE.md" "\$DEST/.claude/hooks/policy.md"$|cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/hooks/policy.md"; cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"|' \
         overlay.sh && rm -f overlay.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.

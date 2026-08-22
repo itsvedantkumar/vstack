@@ -52,17 +52,20 @@ fi
 # copy at claude/hooks/ (no dot) emitting, which is what the gate pipes into. The self != global
 # test keeps ~/.claude's copy — which matches that same shape — alive. The grep proves the global
 # copy is actually registered, so a half-installed ~/.claude cannot silence every repo at once.
-if [ "${VSTACK_DUPE_SUPPRESS:-1}" = "1" ]; then
-  self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
-  global="$HOME/.claude/hooks/inject-session-context.sh"
-  case "$self" in
-    */.claude/hooks/inject-session-context.sh)
-      if [ "$self" != "$global" ] && [ -f "$global" ] \
-         && grep -q 'inject-session-context\.sh' "$HOME/.claude/settings.json" 2>/dev/null; then
-        emit "$event"
-        exit 0
-      fi ;;
-  esac
+self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+global="$HOME/.claude/hooks/inject-session-context.sh"
+is_overlay=0
+case "$self" in
+  */.claude/hooks/inject-session-context.sh)
+    [ "$self" != "$global" ] && is_overlay=1 ;;
+esac
+global_live=0
+if [ -f "$global" ] && grep -q 'inject-session-context\.sh' "$HOME/.claude/settings.json" 2>/dev/null; then
+  global_live=1
+fi
+if [ "${VSTACK_DUPE_SUPPRESS:-1}" = "1" ] && [ "$is_overlay" = 1 ] && [ "$global_live" = 1 ]; then
+  emit "$event"
+  exit 0
 fi
 
 # Per-prompt digest: must stay tiny and fast (no git work) — it runs on every prompt.
@@ -204,6 +207,28 @@ WORKSPACE CONVENTIONS.
   \`\$(git rev-parse --git-common-dir)/info/exclude\`, append it before writing.
 - If the user asks for work unrelated to this branch, do not start it here; say so and offer
   a separate git worktree (\`claude -w <name>\`)."
+  fi
+fi
+
+# --- the policy document, for sandboxes only ---------------------------------------------
+# It used to travel as a second CLAUDE.md committed into the repo. That worked, and it also meant
+# ~/.claude/CLAUDE.md and .claude/CLAUDE.md held identical bytes on this machine and Claude Code
+# loaded both, as user memory and as project memory. Nothing could dedupe that: the client reads
+# both files itself and no hook runs in between.
+#
+# So the overlay ships the text as .claude/hooks/policy.md, which is not a memory path and is read
+# by nothing but this script, and the copy that already knows whether it is the only voice in the
+# room decides whether to speak it. A sandbox has no ~/.claude, so the overlay is the only lane and
+# it carries the policy. On a machine with the user-scope install, ~/.claude/CLAUDE.md carries it
+# and this appends nothing -- which is also why the condition is global_live rather than the
+# suppression switch: turning the switch off should restore the digest, not reintroduce a second
+# copy of the policy.
+if [ "${is_overlay:-0}" = 1 ] && [ "${global_live:-0}" = 0 ]; then
+  pol="$(dirname "$self")/policy.md"
+  if [ -r "$pol" ]; then
+    MSG="$MSG
+
+$(cat "$pol")"
   fi
 fi
 

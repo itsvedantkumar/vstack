@@ -6,6 +6,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.3 — 2026-08-22
+
+**The policy document no longer ships as a second CLAUDE.md.** v1.13.2 stopped the hooks from
+firing twice but left this: `~/.claude/CLAUDE.md` and a repo's `.claude/CLAUDE.md` held identical
+bytes, one loaded as user memory and one as project memory, so the whole document sat in context
+twice in every overlaid repo. Nothing could dedupe it from inside — Claude Code reads both files
+itself and no hook runs in between.
+
+So the overlay ships `.claude/hooks/policy.md`, which is not a memory path and is read by nothing
+but the session hook, and the copy that already knows whether it is the only voice in the room
+decides whether to speak it. A sandbox has no `~/.claude`, so the overlay carries the policy
+there; on a machine with the user-scope install it appends nothing. `overlay.sh` deletes any
+`.claude/CLAUDE.md` it finds, because an overlay that merely stops writing leaves every repo it
+already touched duplicating forever.
+
+The condition is "is the user-scope copy live", not "is suppression on". `VSTACK_DUPE_SUPPRESS=0`
+exists to get the digest back while debugging; if it also handed back a second policy it would
+hand back the bug.
+
+Check 34 is now "the policy document reaches a session exactly once", asserted in both
+directions — zero copies in a sandbox is a repo that lost its operating policy silently, two on
+this machine is what started this. `VSTACK_OVERLAY_CLOUD` is gone with the heuristic it gated.
+
 ## 1.13.2 — 2026-08-22
 
 **The overlay was injecting itself twice.** Claude Code merges hook arrays across settings layers

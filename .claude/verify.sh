@@ -1407,42 +1407,75 @@ else
   skip "project overlay stands down when the user-scope hook is live" "jq missing or the session-context hook is not executable"
 fi
 
-# --- 34. overlay.sh writes CLAUDE.md only where the cloud lane is real -------------------------
+# --- 34. the policy document reaches a session exactly once ------------------------------------
 #
-# ~/.claude/CLAUDE.md and a repo's .claude/CLAUDE.md are byte-identical copies of the same source,
-# and Claude Code loads the first as user memory and the second as project memory — the whole
-# policy document twice, every turn. The project copy is worth that only where a sandbox will
-# actually clone it. No remote, or .claude gitignored, means no sandbox ever will.
+# It used to ship as a second CLAUDE.md committed into every overlaid repo. ~/.claude/CLAUDE.md
+# holds the same bytes, .claude/CLAUDE.md is a project-memory path, and Claude Code loads both —
+# so the entire policy document was in context twice, in seven repos, and no hook could intervene
+# because the client reads both files itself.
 #
-# The removal case is the one to hold onto: an overlay that merely stops writing the file leaves
-# every previously overlaid repo duplicating forever, so re-running has to converge, not just
-# decline.
+# It now travels as .claude/hooks/policy.md, which nothing loads automatically, and the session
+# hook speaks it only where it is the only voice. That makes "exactly once" a property worth
+# asserting in both directions: zero copies in a sandbox is a repo that lost its operating policy
+# silently, and two copies on this machine is the bug that started this.
 o_errs=""
-if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
-  o_dir=$(mktemp -d)/r
-  mkdir -p "$o_dir"
+o_marker=$(head -1 claude/CLAUDE.md)
+if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_marker" ]; then
+  o_tmp=$(mktemp -d)
+  o_dir="$o_tmp/r"; mkdir -p "$o_dir"
   git -C "$o_dir" init -q 2>/dev/null
-  o_state(){ [ -f "$o_dir/.claude/CLAUDE.md" ] && echo present || echo absent; }
-  o_want(){ # expected, label
-    got=$(o_state)
-    [ "$got" = "$1" ] || o_errs="$o_errs\n  $2: got $got, want $1"
-  }
+  # A repo overlaid before this change: the file the overlay now has to clear.
+  mkdir -p "$o_dir/.claude"
+  printf 'stale project memory\n' > "$o_dir/.claude/CLAUDE.md"
   ./overlay.sh "$o_dir" >/dev/null 2>&1
-  o_want absent "a repo with no remote cannot reach a sandbox, so it gets no second copy"
-  git -C "$o_dir" remote add origin https://github.com/example/example.git 2>/dev/null
-  ./overlay.sh "$o_dir" >/dev/null 2>&1
-  o_want present "a repo with a remote needs the copy — it is the sandbox's only lane"
-  printf '.claude/\n' > "$o_dir/.gitignore"
-  ./overlay.sh "$o_dir" >/dev/null 2>&1
-  o_want absent "gitignoring .claude means it is never cloned, and the stale copy must be cleared"
-  VSTACK_OVERLAY_CLOUD=1 ./overlay.sh "$o_dir" >/dev/null 2>&1
-  o_want present "VSTACK_OVERLAY_CLOUD=1 overrides the heuristic"
-  rm -rf "$(dirname "$o_dir")"
+
+  [ -f "$o_dir/.claude/hooks/policy.md" ] \
+    || o_errs="$o_errs\n  the overlay did not ship .claude/hooks/policy.md"
+  cmp -s claude/CLAUDE.md "$o_dir/.claude/hooks/policy.md" 2>/dev/null \
+    || o_errs="$o_errs\n  the shipped policy.md is not the policy document"
+  [ -f "$o_dir/.claude/CLAUDE.md" ] \
+    && o_errs="$o_errs\n  the overlay left a .claude/CLAUDE.md behind — the duplication survives a re-run"
+
+  # Sandbox: no ~/.claude, so the overlay is the only lane and must carry the policy.
+  o_home="$o_tmp/empty"; mkdir -p "$o_home"
+  o_out=$(printf '{"hook_event_name":"SessionStart"}' \
+          | HOME="$o_home" "$o_dir/.claude/hooks/inject-session-context.sh" 2>/dev/null \
+          | jq -r '.hookSpecificOutput.additionalContext // ""')
+  case "$o_out" in
+    *"$o_marker"*) ;;
+    *) o_errs="$o_errs\n  a sandbox session got no policy at all — the overlay is its only lane" ;;
+  esac
+  # Every byte is paid on every session there, and check 18 cannot see this variant because it
+  # probes the source copy, which is not an overlay and never appends the policy.
+  o_sz=$(printf '%s' "$o_out" | wc -c | tr -d ' ')
+  [ "${o_sz:-0}" -le 6144 ] \
+    || o_errs="$o_errs\n  the sandbox session block is $o_sz bytes, over the 6144 cap"
+
+  # This machine: ~/.claude/CLAUDE.md carries the policy, so the overlay must not add a second.
+  o_gh="$o_tmp/withglobal"; mkdir -p "$o_gh/.claude/hooks"
+  cp claude/hooks/inject-session-context.sh "$o_gh/.claude/hooks/"
+  printf '{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"x/inject-session-context.sh"}]}]}}' \
+    > "$o_gh/.claude/settings.json"
+  o_dbl=$(printf '{"hook_event_name":"SessionStart"}' \
+          | VSTACK_DUPE_SUPPRESS=0 HOME="$o_gh" "$o_dir/.claude/hooks/inject-session-context.sh" 2>/dev/null \
+          | grep -c "$o_marker")
+  # Asserted with the suppression switched OFF on purpose. The escape hatch exists to restore the
+  # digest for debugging; if it also reintroduced a second policy it would hand back the original
+  # bug to anyone who used it.
+  [ "$o_dbl" = 0 ] \
+    || o_errs="$o_errs\n  the overlay spoke the policy while ~/.claude/CLAUDE.md also holds it"
+  # The user-scope copy must never append it either, or every non-overlaid repo doubles instead.
+  o_src=$(printf '{"hook_event_name":"SessionStart"}' \
+          | ./claude/hooks/inject-session-context.sh 2>/dev/null | grep -c "$o_marker")
+  [ "$o_src" = 0 ] \
+    || o_errs="$o_errs\n  the source copy appended the policy; only an overlay may carry it"
+
+  rm -rf "$o_tmp"
   [ -z "$o_errs" ] \
-    && ok "overlay.sh writes CLAUDE.md only where the cloud lane is real (4 cases, incl. convergence)" \
-    || bad "overlay.sh writes CLAUDE.md only where the cloud lane is real" "$(printf '%b' "$o_errs")"
+    && ok "the policy document reaches a session exactly once (sandbox $o_sz B, 6 cases)" \
+    || bad "the policy document reaches a session exactly once" "$(printf '%b' "$o_errs")"
 else
-  skip "overlay.sh writes CLAUDE.md only where the cloud lane is real" "jq or git missing"
+  skip "the policy document reaches a session exactly once" "jq or git missing, or the policy document is empty"
 fi
 
 echo

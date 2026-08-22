@@ -460,7 +460,7 @@ if want overlay; then
     printf 'x\n' > "$T/file.txt"; git -C "$T" add -A; git -C "$T" commit -qm init
     out=$("$SRC/overlay.sh" "$T" 2>&1); rc=$?
     e=""
-    for f in .claude/settings.json .claude/CLAUDE.md .claude/statusline.sh .claude/verify.sh \
+    for f in .claude/settings.json .claude/hooks/policy.md .claude/statusline.sh .claude/verify.sh \
              .claude/hooks/verify-gate.sh .conductor/settings.toml CLAUDE.md; do
       [ -e "$T/$f" ] || e="$e; missing $f"
     done

@@ -70,37 +70,25 @@ cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.c
 cp "$SRC"/claude/agents/*.md   "$DEST/.claude/agents/"
 cp "$SRC"/claude/commands/*.md "$DEST/.claude/commands/"
 
-# Global directives: a cloud sandbox has no ~/.claude, so the project copy is the only lane they
-# reach it by, and .claude/CLAUDE.md is a recognized project-memory path.
+# The policy document. It is NOT written as .claude/CLAUDE.md any more: that is a project-memory
+# path, ~/.claude/CLAUDE.md holds the same bytes, and Claude Code loads both — the whole document
+# twice, in every repo this had ever touched. No hook can dedupe that, because the client reads
+# both files itself.
 #
-# On this machine, though, ~/.claude/CLAUDE.md holds the same bytes and Claude Code loads both —
-# the entire policy document, twice, every turn. So write it only where the cloud lane is real. A
-# repo with no remote, or one that gitignores .claude/, will never be cloned into a sandbox with
-# this file in it; locally the user-scope copy already covers it. VSTACK_OVERLAY_CLOUD=1|0 forces
-# the call when the heuristic guesses wrong.
-cloud="${VSTACK_OVERLAY_CLOUD:-auto}"
-case "$cloud" in
-  0|1) ;;
-  *) cloud=0
-     if git -C "$DEST" remote get-url origin >/dev/null 2>&1 \
-        && ! git -C "$DEST" check-ignore -q .claude 2>/dev/null; then cloud=1; fi ;;
-esac
-
-if [ "$cloud" = 1 ]; then
-  cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/CLAUDE.md"
-  md="wrote   .claude/CLAUDE.md"
-elif git -C "$DEST" ls-files --error-unmatch .claude/CLAUDE.md >/dev/null 2>&1; then
-  # Tracked means someone committed it deliberately. Deleting a tracked file to save a kilobyte
-  # of context is not this script's call to make.
-  md="kept    .claude/CLAUDE.md (tracked — remove it yourself if you want it gone)"
-else
-  # Converge rather than merely stop: an earlier run left a copy here, and that copy IS the
-  # duplication. Re-running the overlay has to clear it.
+# It ships as .claude/hooks/policy.md instead, which nothing loads automatically, and the session
+# hook reads it and speaks it only where it is the only voice: a sandbox, which has no ~/.claude.
+# See the tail of claude/hooks/inject-session-context.sh.
+cp "$SRC/claude/CLAUDE.md" "$DEST/.claude/hooks/policy.md"
+# Converge, do not merely stop writing. Every repo overlaid before this change carries a
+# .claude/CLAUDE.md that IS the duplication, and leaving it in place fixes nothing. Where it is
+# tracked the removal shows up in git status for its owner to commit — which is the point, since
+# an uncommitted deletion never reaches the sandbox that was reading it.
+if [ -f "$DEST/.claude/CLAUDE.md" ]; then
   rm -f "$DEST/.claude/CLAUDE.md"
-  md="skipped .claude/CLAUDE.md (no cloud lane — ~/.claude/CLAUDE.md covers this repo)"
+  echo "removed .claude/CLAUDE.md (superseded by .claude/hooks/policy.md — commit the deletion)"
 fi
+echo "wrote   .claude/hooks/policy.md"
 cp "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh" && chmod 755 "$DEST/.claude/statusline.sh"
-echo "$md"
 echo "wrote   .claude/statusline.sh"
 if command -v jq >/dev/null; then
   tmp=$(mktemp)
