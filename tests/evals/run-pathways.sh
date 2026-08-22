@@ -342,12 +342,42 @@ RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
 printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$RUNLOG"
 TOTAL_RUNS=$(( $(printf '%s' "$ARMS_CSV" | tr ',' ' ' | wc -w) * NFIX * SAMPLES ))
 DONE_RUNS=0
+# Does this arm's command pathway dispatch at all?
+#
+# The previous gate asked whether a run left a Skill, Task or .claude file-read behind, and
+# reported every arm INVALID for two runs straight. It was never decidable that way. A dispatched
+# slash command leaves no marker in the transcript -- /probe produces the same event shape as a
+# plain prompt -- and whether /review delegates to a subagent is a decision the model makes, not
+# a fact about dispatch. Measuring a model's choice and calling it validity is how the first
+# version of this gate came to fail gstack for having a different architecture.
+#
+# What is decidable: install a command that prints a token, invoke it, and see whether the token
+# comes back. That proves the arm's command pathway works, in the arm's own install location,
+# without privileging any architecture. One call per arm.
+canary_ok() { # <arm> <dir> -> 0 if the arm's slash commands dispatch
+  local d="$1" tok="PATHWAY-OK-4417" out
+  mkdir -p "$d/.claude/commands"
+  printf -- '---\ndescription: canary\n---\nOutput exactly %s and nothing else.\n' "$tok" \
+    > "$d/.claude/commands/zz-canary.md"
+  out=$( cd "$d" && timeout 120 claude -p "/zz-canary" --setting-sources=user,project \
+           < /dev/null 2>/dev/null )
+  rm -f "$d/.claude/commands/zz-canary.md"
+  case "$out" in *"$tok"*) return 0 ;; *) return 1 ;; esac
+}
+
 backup_machine
 for a in $(printf '%s' "$ARMS_CSV" | tr ',' ' '); do
   H=0; P=0; FP=0; ENT=0; RUNS=0
 
   if ! activate_arm "$a"; then
     printf 'INVALID  %s: not installable on this machine; not run, not scored\n' "$a" >&2
+    continue
+  fi
+  cdir="$ROOT/canary-$a"; make_repo "$(jq -r '.fixtures[0].file' "$GT")" "$cdir"; install_arm "$a" "$cdir"
+  if canary_ok "$cdir"; then
+    printf 'ok       %s: slash commands dispatch in this arm\n' "$a" >&2
+  else
+    printf 'INVALID  %s: slash commands do not dispatch here; not run, not scored\n' "$a" >&2
     continue
   fi
 
@@ -384,13 +414,13 @@ fi
 
 printf '\n' >&2
 printf 'review-pathway benchmark — %s fixtures x %s sample(s), each harness through its own /review\n\n' "$NFIX" "$SAMPLES"
-printf '%-8s %-8s %-9s %-17s %s\n' "arm" "found" "planted" "false positives" "pathway entered"
+printf '%-8s %-8s %-9s %-17s %s\n' "arm" "found" "planted" "false positives" "delegation trace"
 printf '%-8s %-8s %-9s %-17s %s\n' "--------" "--------" "---------" "-----------------" "---------------"
 printf '%s' "$RESULTS" | while IFS='|' read -r a h p fp ent runs; do
   [ -n "$a" ] || continue
   if [ "$a" = none ]; then ep="n/a"; else
     ep="$ent/$runs"
-    [ "${ent:-0}" -eq 0 ] && ep="$ep  INVALID: its /review never engaged"
+    [ "${ent:-0}" -eq 0 ] && ep="$ep  (no subagent or skill-file trace; the command still ran)"
   fi
   printf '%-8s %-8s %-9s %-17s %s\n' "$a" "$h" "$p" "$fp" "$ep"
 done
