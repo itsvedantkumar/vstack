@@ -6,6 +6,41 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.0 — 2026-08-22
+
+**The engineering team is code now, not copy.** Six new subagents bring it to 14: `product-owner`
+writes acceptance criteria and an explicit out-of-scope list, `qa` exercises the real artifact
+against them, `ui-engineer` builds to the tokens already in the repo, `accessibility-auditor` runs
+axe per state and walks the tab order by hand, `performance-engineer` measures before and after and
+reverts anything inside the noise floor, and `release-manager` refuses to ship unverified work.
+
+`/team <goal>` runs the loop and holds the bar between phases. It will not let work reach
+`release-manager` until `qa` has exercised it, because a passing unit test is a different claim.
+
+The mechanism is the argument. A virtual engineering team built as Markdown instructions to one
+conversation is one context that can talk itself out of its own findings. Fourteen subagents each
+have their own context window, tool allowlist and model, so a reviewer cannot be argued down by the
+conversation that produced the code.
+
+**Each agent carries its own standards.** Not a shared checklist: a dossier of what that role
+judges against and what it rejects. `ui-engineer` has a type scale, a 4px spacing base, semantic
+colour tokens, motion durations, and a list of things to reject in its own output.
+`accessibility-auditor` has the WCAG 2.2 AA rules that actually come up, in frequency order.
+`performance-engineer` has budgets with numbers and a rule that anything inside the measured noise
+floor is not a result. `code-reviewer`, `security-auditor`, `qa` and `design-reviewer` likewise.
+The point is opinionated defaults a reader can disagree with specifically, rather than a general
+instruction to do good work.
+
+**Call signs.** Each agent signs its report: SCOPE, ATLAS, SCOUT, PIXEL, MULE, HARNESS, PROOF,
+REDLINE, WARDEN, LOUPE, RAMP, STOPWATCH, ROOT, SHIPWRIGHT. The frontmatter `name` stays functional,
+because that is what dispatch routes on and a human name carries no routing signal. The call sign
+makes a report attributable and a follow-up routable.
+
+**Concise output style, and auto-upgrade.** `outputStyle` is now `Concise` and
+`autoUpdatesChannel` is `latest`. Concise needs CLI 2.1.237 or later, which the stable channel did
+not have. It lives in the system prompt, so it is cached, unlike the per-prompt register line it
+replaces, and it keeps error reports and destructive-action confirmations verbatim.
+
 ## 1.12.1 — 2026-08-22
 
 `bin/doctor` classifies `autoMode`, `editorMode` and `verbose` as user-scope. The CLI sets them,
