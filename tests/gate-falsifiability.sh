@@ -35,7 +35,8 @@ if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2
   TREE_BEFORE=$(git status --porcelain -- . 2>/dev/null)
 fi
 
-PASSED=0; FAILED=0
+PASSED=0
+SKIPPED=0; FAILED=0
 pass(){ printf 'ok    check %-3s falsifiable (%s)\n' "$1" "$2"; PASSED=$((PASSED+1)); }
 fail(){ printf 'FAIL  check %-3s did NOT fail when broken\n      expected label: %s\n%s\n' \
         "$1" "$2" "${3:-}"; FAILED=$((FAILED+1)); }
@@ -367,19 +368,19 @@ for id in $CHECKS; do
     _probe=$(./.claude/verify.sh 2>&1)
     if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (no tags to compare against; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
   fi
 
   if [ "$id" = 19 ]; then
     if ! command -v claude >/dev/null 2>&1; then
       printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
     _probe=$(./.claude/verify.sh 2>&1)      # not a pipe: see the 141 note on check 24 above
     if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (validator is not validating; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
   fi
 
@@ -394,13 +395,28 @@ for id in $CHECKS; do
     # weak check when the truth is a mutation that landed nowhere. That has now happened three
     # times: rows 11, 26 and 28, the last two on the same README rewrite. Distinguish the two
     # cases instead of leaving the reader to guess.
-    _before=""
-    [ -n "$fs" ] && _before=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
-    break_it "$id"
-    _after=""
-    [ -n "$fs" ] && _after=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
-    if [ -n "$fs" ] && [ "$_before" = "$_after" ]; then
-      printf 'FAIL  check %-3s mutation changed nothing (its pattern no longer matches %s)\n' "$id" "$fs"
+    # Fingerprinted per file, not over the concatenation. Rows 1, 18 and 29 each mutate two
+    # files now -- two lanes of a check that makes two promises -- and a combined hash goes on
+    # matching as long as either lane still lands, which is precisely the rot this detector
+    # exists to catch, one level finer. Naming the file that stopped changing is also the whole
+    # value of the message.
+    _stale=""
+    if [ -n "$fs" ]; then
+      _before=""
+      for _f in $fs; do _before="$_before$(shasum < "$_f" 2>/dev/null | cut -d' ' -f1) "; done
+      break_it "$id"
+      _i=0
+      for _f in $fs; do
+        _i=$((_i+1))
+        _b=$(printf '%s' "$_before" | cut -d' ' -f"$_i")
+        _a=$(shasum < "$_f" 2>/dev/null | cut -d' ' -f1)
+        [ "$_b" = "$_a" ] && _stale="$_stale $_f"
+      done
+    else
+      break_it "$id"
+    fi
+    if [ -n "$_stale" ]; then
+      printf 'FAIL  check %-3s mutation changed nothing in:%s (its pattern no longer matches)\n' "$id" "$_stale"
       FAILED=$((FAILED+1))
       restore $fs
       continue
@@ -435,6 +451,18 @@ if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2
 fi
 
 echo
-printf '%d passed, %d failed\n' "$PASSED" "$FAILED"
+# The accounting verify.sh carries, in the twin that enforces it. This printed "N passed, 0
+# failed / FALSIFIABLE" with no declared count and no skip line, so rows 19 and 24 could
+# `continue` out and the summary read exactly like a run that proved every row. verify.sh's own
+# founding lesson, unapplied to the suite that proves verify.sh.
+DECLARED=0
+for _ in $CHECKS; do DECLARED=$((DECLARED+1)); done
+DECLARED=$((DECLARED+1))            # the tree-unchanged row at the end is a row too
+printf '%d declared, %d passed, %d failed, %d skipped\n' "$DECLARED" "$PASSED" "$FAILED" "$SKIPPED"
+if [ "$((PASSED + FAILED + SKIPPED))" -ne "$DECLARED" ]; then
+  printf 'FAIL  row accounting: %d declared row(s) reported nothing\n' \
+    "$((DECLARED - PASSED - FAILED - SKIPPED))"
+  FAILED=$((FAILED+1))
+fi
 [ "$FAILED" -eq 0 ] && echo "FALSIFIABLE" || echo "NOT FALSIFIABLE"
 [ "$FAILED" -eq 0 ]

@@ -641,7 +641,22 @@ if [ -f tests/gate-falsifiability.sh ]; then
   nid=0
   for i in $(grep -oE '^# --- [0-9]+b?\.' "$SELF" | sed 's/^# --- //; s/\.$//'); do
     nid=$((nid+1))
-    case "$cov" in *" $i "*) ;; *) errs="$errs\ncheck $i has no row in tests/gate-falsifiability.sh" ;; esac
+    case "$cov" in
+      *" $i "*) ;;
+      *) errs="$errs\ncheck $i is not listed in CHECKS= in tests/gate-falsifiability.sh" ;;
+    esac
+    # Listing is not a row. This asserted membership in the CHECKS string and nothing else, so
+    # an id could be added there with no break_it and no label_for and this check stayed green;
+    # the omission surfaced only when somebody ran the suite, which is the thing this check
+    # exists to make unnecessary. All three arms, or it is not falsifiable.
+    grep -qE "^  $i\)" <<<"$(sed -n '/^label_for(){/,/^esac }/p' tests/gate-falsifiability.sh)" \
+      || errs="$errs\ncheck $i has no label_for arm, so no row can match its FAIL line"
+    # A row falsifies its check by editing a file or by changing the environment the gate runs
+    # in -- check 0 is about the toolchain, so its row strips jq from PATH instead of editing
+    # anything. Both count; neither existing does not.
+    grep -qE "^  $i\)" <<<"$(sed -n '/^break_it(){/,/^esac }/p' tests/gate-falsifiability.sh)" \
+      || grep -qE "\[ \"\\\$id\" = $i \]" tests/gate-falsifiability.sh \
+      || errs="$errs\ncheck $i has neither a break_it arm nor an environment branch, so nothing ever breaks it"
   done
   [ -z "$errs" ] && ok "falsifiability coverage ($nid checks)" \
     || bad "falsifiability coverage" "$(printf '%b' "$errs")"
@@ -905,11 +920,39 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     now=$(jq -r 'keys[]' claude/settings.json | sort -u)
     errs=""
     for k in $(printf '%s' "$retired" | jq -r '.[]?' 2>/dev/null); do
-      printf '%s\n' "$now"  | grep -qx "$k" && errs="$errs\n$k: still shipped in claude/settings.json, so it is not retired"
-      printf '%s\n' "$ever" | grep -qx "$k" || errs="$errs\n$k: claude/settings.json has never shipped it — not this repo's key to delete"
+      grep -qx "$k" <<<"$now"  && errs="$errs\n$k: still shipped in claude/settings.json, so it is not retired"
+      grep -qx "$k" <<<"$ever" || errs="$errs\n$k: claude/settings.json has never shipped it — not this repo's key to delete"
     done
-    [ -z "$errs" ] && ok "RETIRED names only retired keys ($(printf '%s' "$retired" | jq -r 'length') entries)" \
-      || bad "RETIRED names only retired keys" "$(printf '%b' "$errs")"
+    nret=$(printf '%s' "$retired" | jq -r 'length')
+
+    # RETIRED ships empty, which is correct: this repository currently retires nothing. But an
+    # empty list means the loop above never runs, and "ok (0 entries)" then reads like a
+    # measurement of zero rather than the absence of one -- a green with no evidence under it,
+    # which is the shape this whole gate exists to remove. Skipping instead would be honest and
+    # would still measure nothing.
+    #
+    # So measure the decider, the way checks 23, 27, 32 and 37 do. Two synthetic keys, one of
+    # each kind, run through the same two comparisons the loop uses. A key still shipping must
+    # be rejected as not retired; a key this repository has never shipped must be rejected as
+    # not ours to delete. If those stop deciding correctly, the loop would not catch a real
+    # retirement either, and that is true whether or not RETIRED currently has anything in it.
+    ctl=""
+    _live=$(printf '%s\n' "$now" | head -1)
+    if [ -n "$_live" ]; then
+      grep -qx "$_live" <<<"$now" || ctl="$ctl\n  control: a key claude/settings.json ships right now was not seen as still shipped"
+    else
+      ctl="$ctl\n  control: claude/settings.json has no keys, so this compared nothing"
+    fi
+    grep -qx 'zz-never-a-real-key' <<<"$ever" \
+      && ctl="$ctl\n  control: a key this repository has never shipped was reported as having shipped"
+
+    if [ -n "$ctl" ]; then
+      bad "RETIRED names only retired keys" "$(printf '%b' "$ctl")"
+    else
+      [ -z "$errs" ] \
+        && ok "RETIRED names only retired keys ($nret entries, decider verified both directions)" \
+        || bad "RETIRED names only retired keys" "$(printf '%b' "$errs")"
+    fi
   fi
 else
   skip "RETIRED names only retired keys" "jq or git not installed"
@@ -1461,9 +1504,15 @@ if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh 
   g_want gv2 "$g_med"   1 "a substantive first prompt gets grilled"
   g_want gv2 "$g_med"   0 "the same prompt later in the session is under the long threshold"
   g_want gv2 "$g_long"  1 "any prompt long enough to be a plan gets grilled"
-  ( export VSTACK_NO_GRILL=1
-    got=$(g_ask gv3 "$g_long")
-    [ "$got" = 0 ] || printf 'ESCAPE_FAILED\n' ) | grep -q ESCAPE_FAILED \
+  # Captured, not piped. Every other `| grep -q` in this file fails in the safe direction -- a
+  # 141 reads as "no match" and invents a failure somebody will investigate. This one was the
+  # exception: 141 on a match would skip the `&&` and report a broken VSTACK_NO_GRILL as green.
+  # The payload is one short line so it never fired in practice, which is exactly why it would
+  # have survived until the payload grew.
+  _esc=$( export VSTACK_NO_GRILL=1
+          got=$(g_ask gv3 "$g_long")
+          [ "$got" = 0 ] || printf 'ESCAPE_FAILED\n' )
+  grep -q ESCAPE_FAILED <<<"$_esc" \
     && g_errs="$g_errs\n  VSTACK_NO_GRILL=1 did not turn it off"
   # The digest runs on every prompt and has a byte cap of its own (check 18). Measure the fired
   # form too: the unfired one is what check 18 probes, so a grill line that blew the budget

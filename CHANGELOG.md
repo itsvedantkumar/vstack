@@ -6,6 +6,38 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**The falsifiability suite had no accounting of its own.** It printed `N passed, 0 failed /
+FALSIFIABLE` with no declared count and no skip line, so rows 19 and 24 could `continue` out and
+the summary read exactly like a run that had proved every row. That is verify.sh's own founding
+lesson, never applied to the suite that proves verify.sh. It reports `declared, passed, failed,
+skipped` now and fails when they do not add up.
+
+Its no-op detector also fingerprinted a row's files together rather than separately. Rows 1, 18
+and 29 each mutate two files now — two lanes of a check that makes two promises — and a combined
+hash goes on matching as long as either lane still lands, which is the exact rot the detector
+exists to catch, one level finer. Per file, and it names the file that stopped changing.
+
+**Check 16 asserted that an id was listed, not that a row existed.** An id could be added to
+`CHECKS=` with no `break_it` and no `label_for` and check 16 stayed green; the omission surfaced
+only when somebody ran the suite, which is the thing check 16 exists to make unnecessary. All
+three arms are required now, counting an environment branch as a mutation — check 0's row strips
+jq from `PATH` rather than editing a file, and that is a real way to break a check. It found a
+gap on its first run.
+
+**Check 21 printed `ok` over an empty list.** `RETIRED` ships empty, which is correct — nothing
+is retired — so its loop never ran and `ok (0 entries)` read like a measurement of zero rather
+than the absence of one. Skipping would have been honest and would still have measured nothing,
+so it measures the decider instead, the way checks 23, 27, 32 and 37 do: a key the repository
+ships right now must be seen as still shipped, and a key it has never shipped must not be
+reported as having shipped.
+
+**The last two `| grep -q` pipes in the unsafe direction.** Under `set -o pipefail` a `grep -q`
+that matches early kills the writer with SIGPIPE and the pipeline returns 141. Most instances
+here fail in the safe direction — 141 reads as "no match" and invents a failure somebody
+investigates. Check 32's escape-hatch probe was the exception: a 141 on a match would skip the
+`&&` and report a broken `VSTACK_NO_GRILL` as green. Its payload is one short line, so it never
+fired, which is precisely why it would have survived until the payload grew.
+
 **Check 31 matched basenames, so a file nobody names could pass by sharing a name with one
 everybody does.** Every `README.md` in the tree counted as referenced by any mention of any
 `README.md`. It matches paths now. Demonstrated: an orphan at `ui-gate/doctor` is found by
