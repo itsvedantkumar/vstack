@@ -6,6 +6,8 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.14.0 — 2026-08-22
+
 **ui-gate reported OK over nothing, and doctor --drift reported no drift over nothing.**
 `./ui-gate/ui-gate.sh docs` printed `9 declared, 0 ran, 0 passed, 0 failed, 9 skipped` and then
 `UI GATE OK`, exit 0 — the accounting rule above it is satisfied at RAN=0, and FAILED is 0
