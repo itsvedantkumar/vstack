@@ -707,6 +707,47 @@ if want uninstall-clean; then
     || bad "uninstall removes vstack and keeps your own settings" "${e#; }"
 fi
 
+# --- doctor --drift does not mutate the repo it inspects ---------------------------------------
+# A bare `git fetch` is not read-only: it does whatever ~/.gitconfig says. With fetch.prune and
+# fetch.pruneTags true -- a common pairing -- it deletes every local tag and remote-tracking
+# branch the remote does not have. doctor --drift ran one, and during the 1.9.1 audit it silently
+# destroyed an unpushed release tag, after which the release check reported ok for a version
+# whose tag was already gone. Ambient config must not be able to turn an inspection into an edit.
+if want doctor-no-mutate; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "doctor --drift leaves the repo alone" "git not installed"
+  else
+    T="$ROOT/nomutate"; mkdir -p "$T"
+    # A real vstack checkout, because --drift refuses to run against anything else and a scratch
+    # repo made it bail before ever reaching the fetch -- which is how the first version of this
+    # case passed against the unfixed doctor.
+    git clone -q "$SRC" "$T/work" 2>/dev/null
+    git init -q --bare "$T/remote.git"
+    git -C "$T/work" remote set-url origin "$T/remote.git"
+    git -C "$T/work" config user.email t@example.com; git -C "$T/work" config user.name t
+    # the destructive pairing, set locally so the case does not depend on the operator's config
+    git -C "$T/work" config fetch.prune true
+    git -C "$T/work" config fetch.pruneTags true
+    git -C "$T/work" push -q origin HEAD:refs/heads/main 2>/dev/null
+    git -C "$T/work" branch -q --set-upstream-to=origin/main 2>/dev/null
+    git -C "$T/work" tag -a v9.9.9-local -m "never pushed" 2>/dev/null
+    e=""
+    # Two positive controls. Without them the case passes on any machine where the tag was never
+    # created or where --drift declined to run, which is the shape of every fake green here.
+    git -C "$T/work" rev-parse -q --verify refs/tags/v9.9.9-local >/dev/null 2>&1 \
+      || e="$e; the probe tag was never created, so this case proves nothing"
+    git -C "$T/work" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1 \
+      || e="$e; no upstream, so the code path under test never runs"
+    HOME="$T" VSTACK_DIR="$T/work" "$SRC/bin/doctor" --drift > "$T/out" 2>&1
+    grep -q 'no vstack repo found' "$T/out" 2>/dev/null \
+      && e="$e; --drift refused to run, so it never reached the fetch this case is about"
+    git -C "$T/work" rev-parse -q --verify refs/tags/v9.9.9-local >/dev/null 2>&1 \
+      || e="$e; doctor --drift deleted an unpushed local tag"
+    [ -z "$e" ] && ok "doctor --drift leaves the repo alone" \
+      || bad "doctor --drift leaves the repo alone" "${e#; }"
+  fi
+fi
+
 # --- overlay does not delete settings the target repo owns -------------------------------------
 # It used to delete every key vstack ships that is not on the project allowlist, on the theory
 # that it was cleaning up its own past overlays. It cannot know that. A repository that

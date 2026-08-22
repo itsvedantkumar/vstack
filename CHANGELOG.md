@@ -22,8 +22,20 @@ setup-machine.sh now sets the flag, idempotently: it reads first and rewrites on
 is not already set, because claude-mem auto-updates rewrite hooks.json and revert it. Measured on
 a scratch HOME: doctor goes from one red line and DRIFT to 23 ok, 0 red, 6 notes.
 
-v1.9.0 is tagged and describes a payload carrying this defect. It is left in place rather than
-moved, because a tag somebody may have fetched is not a thing to rewrite. Use v1.9.1.
+**doctor --drift deleted an unpushed release tag.** It ran a bare `git fetch` in the vstack
+checkout to work out how far behind the remote it was. A bare fetch is not read-only: it does
+whatever ~/.gitconfig says, and with fetch.prune and fetch.pruneTags set true it deletes every
+local tag and remote-tracking branch the remote does not have. During this audit it destroyed the
+v1.9.1 tag seconds after it was created, and the release check then reported ok for a version
+whose tag was already gone.
+
+Every flag is spelled out now, so ambient config cannot turn an inspection into an edit. The new
+doctor-no-mutate case in the install matrix clones a real checkout, sets that config pairing
+locally, plants an unpushed tag and asserts it survives. It carries three controls, because the
+first version of the case bailed before reaching the fetch and passed against the unfixed doctor.
+
+v1.9.0 is tagged and describes a payload carrying the claude-mem defect. It is left in place
+rather than moved, because a tag somebody may have fetched is not a thing to rewrite. Use v1.9.1.
 
 ## 1.9.0 — 2026-08-22
 
