@@ -31,11 +31,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../../.." || exit 1
 SRC=$(pwd)
 DATA="$SRC/tests/evals/swebench/light.json"
 
-N=3; ARMS_CSV="none,vstack,gstack"; PYVER="${PYVER:-3.11}"
+N=3; HARD=0; ARMS_CSV="none,vstack,gstack"; PYVER="${PYVER:-3.11}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --n) N="$2"; shift 2 ;;
     --arms) ARMS_CSV="$2"; shift 2 ;;
+    --hard) HARD=1; shift ;;
     -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -56,7 +57,7 @@ case "$ARMS_CSV" in *gstack*) [ -d "$GSTACK_DIR" ] || { echo "note: dropping gst
 
 ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/swebench.XXXXXX")" && pwd)
 RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
-printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\n' > "$RUNLOG"
+printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\tp2p_broken\tp2p_total\n' > "$RUNLOG"
 echo "log: $RUNLOG" >&2
 
 setup_repo() { # <index> <dir> -> 0 usable, 1 unusable
@@ -77,6 +78,9 @@ setup_repo() { # <index> <dir> -> 0 usable, 1 unusable
 
 f2p_list() { jq -r ".[$1].FAIL_TO_PASS | if type==\"string\" then fromjson else . end | .[]" "$DATA"; }
 p2p_list() { jq -r ".[$1].PASS_TO_PASS | if type==\"string\" then fromjson else . end | .[0:5][]" "$DATA"; }
+# The scoring pass samples wider than the pre-flight one. Pre-flight only needs enough signal to
+# know the environment builds; scoring needs to know whether the patch broke anything.
+p2p_score_list() { jq -r ".[$1].PASS_TO_PASS | if type==\"string\" then fromjson else . end | .[0:20][]" "$DATA"; }
 
 # PASS_TO_PASS is the environment check, and leaving it out made every instance look usable.
 #
@@ -89,6 +93,16 @@ p2p_list() { jq -r ".[$1].PASS_TO_PASS | if type==\"string\" then fromjson else 
 # So a usable instance must ALSO have its PASS_TO_PASS tests passing: those are tests that
 # already work, so if they fail the environment is broken rather than the code. A sample of
 # five is enough to catch an import error without paying for the whole suite.
+run_p2p_score() { # <dir> <index> -> "pass total", wider sample, used after the patch
+  local d="$1" i="$2" pass=0 tot=0 t
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    tot=$((tot+1))
+    ( cd "$d" && timeout 240 .venv/bin/python -m pytest -x -q "$t" >/dev/null 2>&1 ) && pass=$((pass+1))
+  done < <(p2p_score_list "$i")
+  printf '%s %s' "$pass" "$tot"
+}
+
 run_p2p() { # <dir> <index> -> "pass total"
   local d="$1" i="$2" pass=0 tot=0 t
   while IFS= read -r t; do
@@ -262,6 +276,45 @@ echo "  usable instances: $NUSE" >&2
 [ "$NUSE" -gt 0 ] || { echo "no usable instances; nothing to measure" >&2; exit 1; }
 
 # --- the runs ----------------------------------------------------------------------------------
+# --- difficulty filter ------------------------------------------------------------------------
+#
+# --hard keeps only the instances unconfigured Claude Code cannot already solve.
+#
+# Without it the first run put four arms at 4/4 and told us nothing. Validity and difficulty are
+# different filters: the pre-flight admits an instance whose environment builds and whose target
+# tests genuinely fail, which says nothing about whether it is hard. A set every arm solves has no
+# power to separate them, and reporting that as "no harness beat baseline" overstates it -- the
+# honest statement is that the measurement could not tell.
+#
+# The baseline run is real work that also produces the baseline column, so nothing is wasted.
+if [ "$HARD" = 1 ]; then
+  backup_machine
+  activate_arm none || { echo "cannot activate the baseline arm" >&2; exit 1; }
+  KEEP=""
+  for i in $USABLE; do
+    id=$(jq -r ".[$i].instance_id" "$DATA")
+    d="$ROOT/hard-$id"
+    setup_repo "$i" "$d" || { rm -rf "$d"; continue; }
+    ( cd "$d" && timeout 900 claude -p "Fix this bug in this repository. Change the source, not the tests.
+
+$(jq -r ".[$i].problem_statement" "$DATA")" --setting-sources=project --permission-mode bypassPermissions \
+        --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
+    read -r p t <<< "$(run_tests "$d" "$i")"
+    read -r pp pt <<< "$(run_p2p_score "$d" "$i")"
+    if [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && [ "$((pt - pp))" -eq 0 ]; then
+      printf '  baseline solved %-34s excluded as too easy\n' "$id" >&2
+    else
+      printf '  baseline failed %-34s kept\n' "$id" >&2
+      KEEP="$KEEP $i"
+    fi
+    rm -rf "$d"
+  done
+  USABLE="$KEEP"
+  NUSE=$(printf '%s' "$USABLE" | wc -w | tr -d ' ')
+  printf 'hard set: %s instance(s) the baseline could not solve\n' "$NUSE" >&2
+  [ "$NUSE" -gt 0 ] || { echo "no instances survived the difficulty filter; widen --n" >&2; exit 1; }
+fi
+
 backup_machine
 for arm in $(echo "$ARMS_CSV" | tr ',' ' '); do
   if ! activate_arm "$arm"; then
@@ -296,9 +349,15 @@ $prob" --setting-sources=project --permission-mode bypassPermissions \
         --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
     secs=$(( $(date +%s) - t0 ))
     read -r p t <<< "$(run_tests "$d" "$i")"
-    [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && res=1 || res=0
-    printf '%s\t%s\t%s\t%s\t%s\tok\t%s\n' "$arm" "$id" "$res" "$p" "$t" "$secs" >> "$RUNLOG"
-    printf '  %-8s %-34s resolved=%s (%s/%s) %ss\n' "$arm" "$id" "$res" "$p" "$t" "$secs" >&2
+    # Collateral damage. run_p2p existed and only ever ran in pre-flight, so a patch that fixed
+    # the target test by breaking four others scored exactly the same as one that did not. That
+    # is the difference a review phase is supposed to make, and nothing was measuring it.
+    read -r pp pt <<< "$(run_p2p_score "$d" "$i")"
+    broke=$((pt - pp))
+    [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && [ "$broke" -eq 0 ] && res=1 || res=0
+    printf '%s\t%s\t%s\t%s\t%s\tok\t%s\t%s\t%s\n' "$arm" "$id" "$res" "$p" "$t" "$secs" "$broke" "$pt" >> "$RUNLOG"
+    printf '  %-14s %-34s resolved=%s (f2p %s/%s, broke %s of %s p2p) %ss\n' \
+      "$arm" "$id" "$res" "$p" "$t" "$broke" "$pt" "$secs" >&2
     # Unresolved runs are kept. Deleting them left nothing to inspect when every arm scored zero,
     # which is exactly when you need to look at what the agent actually did.
     if [ "$res" = 1 ]; then rm -rf "$d"; else rm -rf "$d/.venv"; fi
@@ -308,13 +367,14 @@ done
 echo
 echo "SWE-bench Lite — $NUSE usable instance(s) per arm"
 echo
-printf '%-8s %-12s %-8s %s\n' "arm" "resolved" "rate" "median s"
-printf '%-8s %-12s %-8s %s\n' "--------" "------------" "------" "--------"
-awk -F'\t' 'NR>1 && $6=="ok"{n[$1]++; r[$1]+=$3; s[$1]=s[$1]" "$7}
+printf '%-15s %-12s %-8s %-10s %s\n' "arm" "resolved" "rate" "median s" "p2p broken"
+printf '%-15s %-12s %-8s %-10s %s\n' "---------------" "------------" "------" "--------" "----------"
+awk -F'\t' 'NR>1 && $6=="ok"{n[$1]++; r[$1]+=$3; s[$1]=s[$1]" "$7; b[$1]+=$8}
   END{for(a in n){k=split(s[a],v," ");
     for(x=1;x<k;x++)for(y=1;y<=k-x;y++)if(v[y]+0>v[y+1]+0){z=v[y];v[y]=v[y+1];v[y+1]=z}
-    printf "%-8s %-12s %-8s %s\n", a, r[a]"/"n[a], sprintf("%.0f%%",100*r[a]/n[a]), v[int((k+1)/2)]}}' "$RUNLOG"
+    printf "%-15s %-12s %-8s %-10s %s\n", a, r[a]"/"n[a], sprintf("%.0f%%",100*r[a]/n[a]), v[int((k+1)/2)], b[a]+0}}' "$RUNLOG"
 echo
-echo "Resolved means every FAIL_TO_PASS test passes after the agent's patch. Instances whose"
+echo "Resolved means every FAIL_TO_PASS test passes AND no sampled PASS_TO_PASS test regressed."
+echo "A patch that fixes the target by breaking neighbours is not a fix. Instances whose"
 echo "environment would not build, or whose tests already passed, were excluded before any arm"
 echo "ran rather than counted as failures."
