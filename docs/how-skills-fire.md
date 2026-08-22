@@ -74,7 +74,7 @@ its own.
 
 `tests/auto-trigger.sh` runs real prompts through the CLI and reports which skills fired. A
 version of the hook that dropped the routing table in favour of "the descriptions are the
-triggers" was measured against 12 cases:
+triggers" was measured against 14 cases:
 
 | Hook version | Result |
 |---|---|

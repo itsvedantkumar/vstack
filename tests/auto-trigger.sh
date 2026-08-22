@@ -347,6 +347,29 @@ run_case \
   "principle-make-operations-idempotent" \
   ""
 
+run_case \
+  "grill-my-plan" \
+  "Here is my plan: migrate the whole database in one cutover this Saturday. Poke holes in it before I start — what am I missing?" \
+  "grill-me" \
+  ""
+
+# Terraform on purpose, and it is worth saying why rather than leaving a bland prompt behind.
+#
+# The obvious case to write was "Find a skill for reviewing pull requests." It fires 3 of 3 on
+# opus and 0 of 3 on sonnet, which is the model this suite pins: sonnet routes it to review-pr,
+# because "reviewing pull requests" names a skill that is installed and the request reads as
+# asking for the work rather than for the search. Terraform has no competing skill installed, so
+# the sentence can only be read as discovery, and it lands 3 of 3 on both.
+#
+# That is a real limit of description-based dispatch and not one to paper over: where the domain
+# in the request collides with an installed skill, the weaker model picks the domain. The
+# description leads with DISCOVER or INSTALL for exactly this reason.
+run_case \
+  "find-a-skill" \
+  "What skills exist for working with Terraform? Search for one I can install." \
+  "find-skills" \
+  ""
+
 run_negative_case \
   "negative-arithmetic" \
   "What is 17 times 23? Just the number." \

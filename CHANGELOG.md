@@ -32,7 +32,15 @@ the cap is truncated in the listing, which is exactly how a skill silently stops
 line. Upstream's `agents/openai.yaml` files are dropped from both — this bundle targets Claude
 Code and nothing else.
 
-Skill count 26 → 28.
+Both are measured, not assumed. `tests/auto-trigger.sh` grows to 14 cases, and the find-skills
+case is the interesting one. The obvious prompt to write was "Find a skill for reviewing pull
+requests"; it fires 3 of 3 on opus and 0 of 3 on sonnet, which is the model the suite pins,
+because sonnet routes it to `review-pr` — the domain in the sentence names an installed skill and
+the request reads as asking for the work rather than for the search. A domain with no competing
+skill lands 3 of 3 on both. That limit of description-based dispatch is written into the case
+rather than hidden by a blander prompt.
+
+Skill count 26 → 28. Test cases 12 → 14.
 
 ## 1.9.1 — 2026-08-22
 
@@ -115,7 +123,7 @@ mutation row.
 
 **Two skill routings are mandatory now, not merely instructed.** Everything vstack did to route
 skills was instruction: the SessionStart digest spells out "any prose you write -> unslop", and
-descriptions carry their own triggers. `auto-trigger.sh` measures that landing on 12 cases, which
+descriptions carry their own triggers. `auto-trigger.sh` measures that landing on 14 cases, which
 is a weaker claim than "always". `claude/hooks/skill-mandate.sh` runs on Stop, reads the
 transcript for what actually happened, and blocks the turn when a rule went unmet. Writing
 `.md` requires `unslop`; writing `.ts` requires `typescript-best-practices`. Two rules, not

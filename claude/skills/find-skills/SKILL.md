@@ -1,6 +1,6 @@
 ---
 name: find-skills
-description: Use when the user asks how do I do X, is there a skill for X, or wants to extend what the agent can do. Searches the agent-skills ecosystem before you write a capability from scratch.
+description: The user wants to DISCOVER or INSTALL a skill, not have the task done now: find a skill for X, is there a skill for X, what skills exist for X, install a skill. Searches the ecosystem.
 ---
 
 > Ported from vercel-labs/skills (MIT). This skill drives `npx skills`, which vstack does not
