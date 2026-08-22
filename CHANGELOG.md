@@ -6,6 +6,36 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.11.0 — 2026-08-22
+
+**grill-me fires on its own.** Two triggers, both decidable in the UserPromptSubmit hook without
+judgement: the first substantive prompt of a session (120 characters or more, so "fix this typo"
+does not open an interview), and any prompt of 320 characters or more, on the grounds that a
+prompt that long is a plan whether or not it says so. `VSTACK_NO_GRILL=1` turns it off,
+`VSTACK_GRILL_CHARS` moves the long threshold.
+
+Deliberately not a Stop-hook mandate. Blocking the end of every long-prompt turn that did not
+grill would fire constantly, and this setup already records the rule it runs on: a guard that nags
+gets switched off, which is worse than one that is merely probable.
+
+Check 32 tests it on its decisions in both directions, the way checks 23 and 27 test the
+destructive guard and the skill mandate. It also measures the fired digest, because check 18 only
+ever probed the unfired one — a grill line that blew the 512-byte budget would have gone unseen.
+Measured at 312 bytes. The fixtures are built to length rather than written and hoped over: the
+first draft came in at 120 and 169 characters against thresholds of 120 and 320, and the check
+reported two failures that were its own.
+
+**Non-Claude harness instructions removed.** `impeccable`'s hook and live references carried
+Cursor, Codex and GitHub Copilot branches; `brainstorming`'s visual companion carried Copilot and
+Gemini CLI launch paths; `executing-plans` named Codex as an alternative; the doctor command's
+description advertised Codex glue. This bundle targets Claude Code and nothing else, so an adapter
+branch is not a feature, it is a claim the repo does not honour. Attribution mentions stay: those
+record where a skill came from, which is a different thing.
+
+**LICENSE detects as MIT again.** The file carried a mixed-license attribution paragraph after the
+MIT text, which defeats GitHub's SPDX classifier — the repo showed "other" rather than MIT. The
+paragraph moved to NOTICE, which already exists for exactly this.
+
 ## 1.10.0 — 2026-08-22
 
 **Two skills added, both wired to fire on their situation.**

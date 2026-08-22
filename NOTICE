@@ -23,3 +23,15 @@ mapped to Anthropic's, `Task` calls to the `Agent` tool, cloud-only parameters t
 local execution, and frontmatter trimmed to this repo's name + description
 convention. The impeccable skill vendors SKILL.md and its reference files only,
 without the upstream repo's slash commands, subagents or helper scripts.
+
+
+## Skill licensing
+
+Skills under claude/skills/ carry mixed licenses depending on where they came from.
+Most are ported from pstack (github.com/cursor/plugins) under MIT — see
+claude/skills/LICENSE.pstack. A handful are ported from Superpowers
+(github.com/obra/superpowers), also MIT; that notice and one more from
+ehmo/platform-design-skills are reproduced in LICENSE.mit-upstream. Two — `impeccable` and `agent-browser` — are
+ported from Apache-2.0 sources; see LICENSE.apache-2.0 and NOTICE at the repo root. The
+rest are original to this repo and covered by the MIT license above. See
+claude/skills/ATTRIBUTION.md for the exact per-skill breakdown.

@@ -1296,6 +1296,58 @@ done <<<"$(git ls-files 2>/dev/null)"
   || bad "every shipped file has a referrer" \
          "$(printf 'nothing in this repository names:%b\n  delete it, or give it a referrer -- a file nobody can find is a file nobody maintains' "$unref")"
 
+# --- 32. the grill trigger decides correctly ---------------------------------------------------
+#
+# Same shape as checks 23 and 27: a hook that decides is tested on its decisions, in both
+# directions. A trigger that always fires is a trigger nobody keeps, and one that never fires is
+# indistinguishable from not having written it. The threshold cases are the ones worth pinning,
+# because they are the ones a future edit moves by accident.
+g_errs=""
+g_dir="${TMPDIR:-/tmp}/vstack-grill-verify.$$"
+g_ask(){ # session, prompt -> 1 if the grill line was injected
+  TMPDIR="$g_dir" VSTACK_NO_GRILL="${VSTACK_NO_GRILL:-0}" \
+    printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s","prompt":"%s"}' "$1" "$2" \
+    | TMPDIR="$g_dir" ./claude/hooks/inject-session-context.sh 2>/dev/null \
+    | grep -c 'GRILL: run the grill-me skill'
+}
+g_want(){ # session, prompt, expected, label
+  got=$(g_ask "$1" "$2")
+  [ "$got" = "$3" ] || g_errs="$g_errs\n  $4: got $got, want $3"
+}
+if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh ]; then
+  mkdir -p "$g_dir"
+  # Built to length rather than written and hoped over. The first draft of these fixtures came in
+  # at 120 and 169 characters against thresholds of 120 and 320, so the long case was not long and
+  # the boundary case sat exactly on the line -- the check reported two failures that were its own.
+  g_short="fix the typo"
+  g_med=$(printf 'refactor the auth middleware %.0s' 1 2 3 4 5)
+  g_long=$(printf 'rebuild the billing pipeline with retries and idempotency %.0s' 1 2 3 4 5 6)
+  [ "${#g_short}" -lt 120 ] && [ "${#g_med}" -ge 120 ] && [ "${#g_med}" -lt 320 ] \
+    && [ "${#g_long}" -ge 320 ] \
+    || g_errs="$g_errs\n  the fixtures do not straddle the thresholds they are testing (short=${#g_short} med=${#g_med} long=${#g_long})"
+  g_want gv1 "$g_short" 0 "a short first prompt must not open an interview"
+  g_want gv2 "$g_med"   1 "a substantive first prompt gets grilled"
+  g_want gv2 "$g_med"   0 "the same prompt later in the session is under the long threshold"
+  g_want gv2 "$g_long"  1 "any prompt long enough to be a plan gets grilled"
+  ( export VSTACK_NO_GRILL=1
+    got=$(g_ask gv3 "$g_long")
+    [ "$got" = 0 ] || printf 'ESCAPE_FAILED\n' ) | grep -q ESCAPE_FAILED \
+    && g_errs="$g_errs\n  VSTACK_NO_GRILL=1 did not turn it off"
+  # The digest runs on every prompt and has a byte cap of its own (check 18). Measure the fired
+  # form too: the unfired one is what check 18 probes, so a grill line that blew the budget
+  # would never have been seen by it.
+  g_sz=$(TMPDIR="$g_dir" printf '{"hook_event_name":"UserPromptSubmit","session_id":"gv4","prompt":"%s"}' "$g_long" \
+         | TMPDIR="$g_dir" ./claude/hooks/inject-session-context.sh 2>/dev/null \
+         | jq -r '.hookSpecificOutput.additionalContext // ""' | wc -c | tr -d ' ')
+  [ "${g_sz:-0}" -le 512 ] || g_errs="$g_errs\n  the fired digest is $g_sz bytes, over the 512 cap"
+  rm -rf "$g_dir"
+  [ -z "$g_errs" ] \
+    && ok "grill trigger decides correctly (5 cases, both directions, fired digest $g_sz B)" \
+    || bad "grill trigger decides correctly" "$(printf '%b' "$g_errs")"
+else
+  skip "grill trigger decides correctly" "jq missing or the session-context hook is not executable"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

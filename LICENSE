@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Skills under claude/skills/ carry mixed licenses depending on where they came from.
-Most are ported from pstack (github.com/cursor/plugins) under MIT — see
-claude/skills/LICENSE.pstack. A handful are ported from Superpowers
-(github.com/obra/superpowers), also MIT; that notice and one more from
-ehmo/platform-design-skills are reproduced in LICENSE.mit-upstream. Two — `impeccable` and `agent-browser` — are
-ported from Apache-2.0 sources; see LICENSE.apache-2.0 and NOTICE at the repo root. The
-rest are original to this repo and covered by the MIT license above. See
-claude/skills/ATTRIBUTION.md for the exact per-skill breakdown.

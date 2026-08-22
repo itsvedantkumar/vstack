@@ -1,5 +1,5 @@
 ---
-description: Health-check the agent setup (hooks, subagents, secrets, wrappers, Codex glue, role card)
+description: Health-check the agent setup (hooks, subagents, secrets, wrappers, role card)
 ---
 1. Check whether `~/.config/agents/bin/doctor` exists and is executable.
 2. If it exists: run `~/.config/agents/bin/doctor --mcp` and report any ✖ drift with the one-line fix.

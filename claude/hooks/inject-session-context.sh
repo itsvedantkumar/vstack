@@ -47,8 +47,45 @@ if [ "$event" = "UserPromptSubmit" ]; then
     emit "$event"
     exit 0
   fi
+  # Grilling, on two triggers.
+  #
+  # A long prompt is a plan whether or not it says so, and the first substantive request of a
+  # session is the one where a bad assumption is cheapest to catch and most expensive to keep.
+  # Both are decidable here without judgement: one is a character count, the other is whether
+  # this session has been seen before.
+  #
+  # Deliberately not a Stop-hook mandate. Blocking the end of every long-prompt turn that did not
+  # grill would fire constantly, and compare-baseline already records the rule this setup runs
+  # on: a guard that nags gets switched off, which is worse than one that is merely probable.
+  # This injects an instruction at the moment it applies and leaves the model to act on it.
+  #
+  # VSTACK_NO_GRILL=1 turns it off. VSTACK_GRILL_CHARS moves the long-prompt threshold.
+  grill=""
+  if [ "${VSTACK_NO_GRILL:-0}" != "1" ] && [ -n "$JQ" ]; then
+    _p=$(printf '%s' "$in" | "$JQ" -r '.prompt // empty' 2>/dev/null)
+    _n=${#_p}
+    _sid=$(printf '%s' "$in" | "$JQ" -r '.session_id // empty' 2>/dev/null)
+    _seen=""
+    if [ -n "$_sid" ]; then
+      _dir="${TMPDIR:-/tmp}/vstack-grill"
+      mkdir -p "$_dir" 2>/dev/null
+      # Pruned by age rather than on exit: there is no hook event for "session ended", and a
+      # marker directory that only grows is a slow leak on a machine that runs many sessions.
+      find "$_dir" -type f -mmin +720 -delete 2>/dev/null
+      _mark="$_dir/$(printf '%s' "$_sid" | tr -cd 'A-Za-z0-9_-')"
+      [ -e "$_mark" ] && _seen=1
+      : > "$_mark" 2>/dev/null
+    fi
+    # First substantive prompt of the session, or any prompt long enough to be a plan. The
+    # 120-character floor on the first one keeps "fix this typo" from opening an interview.
+    if [ "$_n" -ge "${VSTACK_GRILL_CHARS:-320}" ] \
+       || { [ -z "$_seen" ] && [ "$_n" -ge 120 ]; }; then
+      grill='
+GRILL: run the grill-me skill on this request now, before any code or plan. Not optional.'
+    fi
+  fi
   emit "$event" 'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
-DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'
+DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'"$grill"
   exit 0
 fi
 

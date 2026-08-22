@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -91,6 +91,7 @@ files_for(){ case "$1" in
   29)  printf 'bin/cloudflare-mcp' ;;
   30)  printf 'claude/hooks/format.sh' ;;
   31)  printf '' ;;   # plants a new file rather than editing one
+  32)  printf 'claude/hooks/inject-session-context.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -128,6 +129,7 @@ label_for(){ case "$1" in
   29)  printf 'shellcheck clean' ;;
   30)  printf 'shellcheck suppressions carry a reason' ;;
   31)  printf 'every shipped file has a referrer' ;;
+  32)  printf 'grill trigger decides correctly' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -226,6 +228,15 @@ exit 0
       printf '#!/usr/bin/env bash\necho probe\n' > "$ORPHAN_PROBE"
       chmod +x "$ORPHAN_PROBE"
       git add -f "$ORPHAN_PROBE" >/dev/null 2>&1 ;;
+  32) # Make it fire on everything. A trigger that always fires is the failure this check exists
+      # for, and it is the one an edit reaches for first -- lowering a threshold looks harmless.
+      #
+      # sed on the default, not perl on the whole condition. \Q quotes metacharacters but does not
+      # stop interpolation, so perl read $_n as one of its own variables, substituted empty, and
+      # the pattern matched nothing -- a mutation that lands nowhere reports the check as
+      # unfalsifiable while proving nothing about it.
+      sed -i.t 's/VSTACK_GRILL_CHARS:-320/VSTACK_GRILL_CHARS:-0/' \
+        claude/hooks/inject-session-context.sh && rm -f claude/hooks/inject-session-context.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;
