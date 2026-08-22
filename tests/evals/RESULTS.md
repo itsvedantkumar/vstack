@@ -137,6 +137,12 @@ is a defect class this says nothing about.
 
 ## RETRACTED — Run of 2026-08-21 — 8 fixtures, 5 samples per arm (120 reviews)
 
+> **The gstack row is worse than unfair, it is meaningless.** See "Four more ways this
+> benchmark favoured its author" below: gstack's `/review` names helper scripts under
+> `~/.claude/skills/gstack/` 85 times, the harness installs at project scope, and that directory
+> has never existed on this machine. Every gstack number ever recorded here came from a pathway
+> whose helpers were all `command not found`.
+>
 > **These numbers are unfair to both harnesses and are retracted.** The scoring counted a
 > reviewer's nits, style notes and "no tests here" observations as false positives, while the
 > baseline had been explicitly instructed not to make such observations at all. So the precision
@@ -234,3 +240,117 @@ only thing all the arms share.**
 
 Unresolved runs are now kept rather than deleted, because the moment you most need to look at
 what the agent did is the moment everything scored zero.
+
+
+## Four more ways this benchmark favoured its author — 2026-08-22
+
+Found by auditing the harness rather than running it. Each is stated with the command that
+produced it. Three of the four make vstack look better than it is; the fourth makes it look
+worse, and it is listed here for the same reason as the others.
+
+### 7. The gstack arm's helper scripts have never existed
+
+`gstack/review/SKILL.md` refers to `~/.claude/skills/gstack/...` 85 times, mostly executables
+under `bin/`. `install_arm` copies gstack's skill directories into the fixture's *project* scope,
+which does not create that path, and gstack has never been installed at user scope on this
+machine.
+
+```
+$ git clone --depth 1 https://github.com/garrytan/gstack /tmp/gstack-fresh   # 85fd9db
+$ grep -c '\.claude/skills/gstack' /tmp/gstack-fresh/review/SKILL.md
+85
+$ ls -d ~/.claude/skills/gstack
+ls: no such file or directory
+```
+
+So every gstack review in every run recorded above executed a pathway whose every helper
+invocation failed. The retracted n=5 table scored that wreckage at 68.6% recall and published it
+as a comparison.
+
+`run-pathways.sh` now refuses an arm that declares paths which do not exist, before it sends a
+single prompt:
+
+```
+$ GSTACK_DIR=/tmp/gstack-fresh tests/evals/run-pathways.sh --samples 1 --arms gstack
+INVALID  gstack: declares 114 path(s) that do not exist on this machine; not run, not scored
+```
+
+The same check reports nothing for `none` and `vstack`, so it is detecting a broken arm rather
+than flagging everything.
+
+### 8. The gstack arm was handed a nested copy of the entire gstack repository
+
+`find "$GSTACK_DIR" -maxdepth 2 -name SKILL.md` was meant to find each skill's manifest. gstack
+keeps a 34 KB `SKILL.md` at its repository root, which matches at depth 1, so `cp -R $(dirname
+"$m")` copied the whole checkout — `.git`, every other skill, the lot — into
+`.claude/skills/<reponame>` as one skill.
+
+```
+$ find /tmp/gstack-fresh -maxdepth 2 -name SKILL.md | wc -l
+54
+$ find /tmp/gstack-fresh -maxdepth 1 -name SKILL.md
+/tmp/gstack-fresh/SKILL.md
+```
+
+Now `-mindepth 2 -maxdepth 2`.
+
+### 9. The validity gate could not fail
+
+`pathway_entered` read `.slash_commands[]` out of the session's `init` event. That field lists the
+commands the session **registered**, not the ones it invoked, so it returned yes for every arm in
+every run.
+
+```
+$ mkdir -p $D/.claude/commands && cat > $D/.claude/commands/probe.md   # a command never invoked
+$ cd $D && claude -p "What is 2+2? Answer with the number only." \
+    --setting-sources=project --output-format=stream-json --verbose \
+  | jq -rs '[.[]|select(.subtype=="init")|.slash_commands[]?]|map(select(.=="probe"))|length'
+1
+```
+
+A validity check that cannot fail is the same thing as no validity check. The replacement counts
+three signals from the transcript, any one of which is engagement: a `Skill` or `Task` call, a
+read under the arm's own `.claude` tree, or a `Bash` command running something out of it. The
+first covers vstack's subagent style, the other two cover gstack's inline style, so it does not
+privilege one architecture the way the version before last did.
+
+### 10. No vstack arm has ever included vstack's routing
+
+`install_arm` copied skills, commands and agents. It never copied `claude/hooks/` or applied the
+project settings. `skill-mandate.sh` and `inject-session-context.sh` are the mechanism by which
+vstack routes work to a skill; without them the arm is a directory of skill files with nothing
+steering the model toward them.
+
+That is the exact configuration the first benchmark on this page already measured, where zero
+`Skill` calls fired across sixty runs and no arm beat baseline. Every vstack number here is of
+vstack-without-its-routing. The arm now gets the hooks and `overlay.sh`.
+
+This one cuts against vstack rather than for it. It is listed because the rule is that harness
+defects get published, not that unflattering ones do.
+
+## Why there is no new number on this page
+
+The four defects above are fixed, and the harness is fairer than it has ever been. It was not
+re-run, for two reasons, and neither is a result.
+
+A fair gstack arm cannot be built on this machine yet. Its pathway needs
+`~/.claude/skills/gstack/`, which means either installing a competitor's toolchain into the real
+home directory for the duration of a run, or rewriting its absolute paths to point at the project
+copy. The first contaminates the `none` and `vstack` arms, which read user scope too. The second
+edits the competitor. A per-arm scratch `HOME` would solve it, except that authentication here is
+claude.ai OAuth held in the macOS keychain rather than a file, so a scratch home is an
+unauthenticated one:
+
+```
+$ HOME=$(mktemp -d) claude -p "Say OK" --setting-sources=project
+Not logged in · Please run /login
+$ claude -p "Say OK" --setting-sources=project
+OK
+```
+
+That is benchmark bug 1 in a new costume, and running the suite before solving it would publish a
+fourth number produced by a broken gstack arm.
+
+The second reason is simpler: the run was not authorised. A six-arm, five-sample pass is roughly
+480 model calls, and this account is a Max subscription rather than metered API billing, so the
+cost is plan allowance rather than dollars. It is still not mine to spend without being asked.

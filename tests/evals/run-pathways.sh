@@ -110,17 +110,50 @@ install_arm() { # <arm> <dir>
     vstack)
       for x in "$SRC"/claude/skills/*/; do [ -d "$x" ] && cp -R "${x%/}" "$sk/"; done
       cp "$SRC"/claude/commands/*.md "$cm/" 2>/dev/null
-      mkdir -p "$d/.claude/agents" && cp "$SRC"/claude/agents/*.md "$d/.claude/agents/" 2>/dev/null ;;
+      mkdir -p "$d/.claude/agents" && cp "$SRC"/claude/agents/*.md "$d/.claude/agents/" 2>/dev/null
+      # Hooks and project settings, which no vstack arm had ever been given. skill-mandate.sh and
+      # inject-session-context.sh ARE vstack's routing: without them the arm is the skill files
+      # sitting on disk with nothing steering the model toward them, which is the configuration
+      # the very first benchmark already measured and found indistinguishable from baseline.
+      # Every published vstack number to date is of vstack-without-its-routing.
+      mkdir -p "$d/.claude/hooks" && cp "$SRC"/claude/hooks/*.sh "$d/.claude/hooks/" 2>/dev/null
+      chmod 755 "$d"/.claude/hooks/*.sh 2>/dev/null
+      [ -x "$SRC/overlay.sh" ] && "$SRC/overlay.sh" "$d" >/dev/null 2>&1
+      ;;
     gstack)
       # The WHOLE skill directory, not just SKILL.md. gstack's /review reads sibling files —
       # specialists/, checklist.md, design-checklist.md — and copying only the manifest left its
       # pathway unable to run. It scored zero and was marked INVALID, which is the right outcome
       # for a broken arm and would have been a disgraceful thing to publish as a result.
-      find "$GSTACK_DIR" -maxdepth 2 -name SKILL.md 2>/dev/null | while IFS= read -r m; do
+      #
+      # -mindepth 2, not -maxdepth 2 alone. gstack keeps a 34 KB SKILL.md at its repo root, which
+      # matched at depth 1, so `cp -R $(dirname)` copied the entire checkout -- .git, every other
+      # skill, the lot -- into $sk/<reponame> as a single nested skill. Measured on 85fd9db:
+      # 54 matches at depth <= 2, one of them the repo itself.
+      find "$GSTACK_DIR" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | while IFS= read -r m; do
         d0=$(dirname "$m"); n=$(basename "$d0")
         cp -R "$d0" "$sk/$n" 2>/dev/null
       done ;;
   esac
+}
+
+# Every path an arm declares as something it will execute or read, checked for existence before
+# a single prompt is sent.
+#
+# This is the check that was missing. gstack's review pathway names ~/.claude/skills/gstack/bin/
+# helpers 85 times; that directory does not exist unless gstack was installed at user scope, and
+# the harness installs at project scope. So every gstack run ever recorded here executed a
+# pathway whose helpers were all `command not found`, scored the wreckage, and published it as a
+# comparison. An arm that cannot run is INVALID. It is not a low score.
+dangling_refs() { # <dir> -> one path per line, empty if the arm is sound
+  local d="$1"
+  [ -d "$d/.claude" ] || return 0
+  grep -rhoE '(~|\$HOME)/\.claude/[A-Za-z0-9._/-]+' "$d/.claude" 2>/dev/null \
+    | sort -u \
+    | while IFS= read -r p; do
+        case "$p" in "~"*) real="$HOME${p#\~}" ;; '$HOME'*) real="$HOME${p#\$HOME}" ;; *) real="$p" ;; esac
+        [ -e "$real" ] || printf '%s\n' "$p"
+      done
 }
 
 run_arm() { # <arm> <dir> -> findings TAB pathway_entered
@@ -151,7 +184,27 @@ run_arm() { # <arm> <dir> -> findings TAB pathway_entered
     # marked INVALID for having a different — perfectly reasonable — implementation style. A
     # validity check that only recognises the author's own architecture is not a validity check,
     # it is a thumb on the scale.
-    entered=$(printf '%s' "$raw" | jq -rs '[.[]|select(.subtype=="init")|.slash_commands[]?]|map(select(.=="review"))|length' 2>/dev/null)
+    #
+    # And it is not "was the command registered" either, which is all the previous version
+    # measured. `.slash_commands` in the init event lists what the session REGISTERED, not what
+    # it invoked. Measured directly: a project with a /probe command that the prompt never
+    # mentions still reports probe in slash_commands, count 1. So this gate returned yes for
+    # every arm in every run and could not fail -- a validity check that cannot fail is the same
+    # thing as no validity check, which is the defect this whole file exists to avoid.
+    #
+    # Three signals, any one of which counts, and none of which privileges a particular
+    # architecture: a Skill or Task call naming something the arm installed, a file read under
+    # the arm's own .claude tree, or a Bash command that runs something out of it. The first
+    # covers vstack's subagent style, the second and third cover gstack's inline style.
+    entered=$(printf '%s' "$raw" | jq -rs --arg d "$d" '
+      [ .[] | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") ]
+      | map(
+          if   (.name=="Skill" or .name=="Task") then 1
+          elif ((.name=="Read" or .name=="Grep" or .name=="Glob")
+                and ((.input.path // .input.file_path // .input.pattern // "") | contains($d + "/.claude"))) then 1
+          elif (.name=="Bash" and ((.input.command // "") | contains($d + "/.claude"))) then 1
+          else 0 end)
+      | add // 0' 2>/dev/null)
     [ "${entered:-0}" -gt 0 ] && entered=yes || entered=no
   fi
   # Extraction is a separate, identical pass for every arm.
@@ -230,8 +283,26 @@ RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
 printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$RUNLOG"
 TOTAL_RUNS=$(( $(printf '%s' "$ARMS_CSV" | tr ',' ' ' | wc -w) * NFIX * SAMPLES ))
 DONE_RUNS=0
+DANGLING_REPORT=""
 for a in $(printf '%s' "$ARMS_CSV" | tr ',' ' '); do
   H=0; P=0; FP=0; ENT=0; RUNS=0
+
+  # Soundness before spend. Build the arm once, list every path it declares that does not exist,
+  # and refuse to run it at all if any do. Sixty gstack reviews were once bought and scored on an
+  # arm whose every helper was `command not found`; this costs one directory build and would have
+  # stopped that before the first prompt.
+  probe_dir="$ROOT/probe-$a"
+  make_repo "$(jq -r '.fixtures[0].file' "$GT")" "$probe_dir"; install_arm "$a" "$probe_dir"
+  dang=$(dangling_refs "$probe_dir")
+  if [ -n "$dang" ]; then
+    DANGLING_REPORT="$DANGLING_REPORT$a	$(printf '%s' "$dang" | tr '\n' ' ')
+"
+    printf 'INVALID  %s: declares %s path(s) that do not exist on this machine; not run, not scored\n' \
+      "$a" "$(printf '%s\n' "$dang" | grep -c .)" >&2
+    printf '%s\n' "$dang" | sed 's/^/           /' >&2
+    continue
+  fi
+
   for f in $(jq -r '.fixtures[].file' "$GT"); do
     for s in $(seq 1 "$SAMPLES"); do
       d="$ROOT/$a-${f%.py}-$s"

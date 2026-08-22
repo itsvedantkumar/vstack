@@ -722,14 +722,18 @@ if want doctor-no-mutate; then
     # repo made it bail before ever reaching the fetch -- which is how the first version of this
     # case passed against the unfixed doctor.
     git clone -q "$SRC" "$T/work" 2>/dev/null
+    # CI checks out a PR merge ref, so the clone lands on a detached HEAD and
+    # --set-upstream-to has no branch to attach to. Name one explicitly rather than inheriting
+    # whatever the source checkout happened to be sitting on.
+    git -C "$T/work" checkout -q -B probe-main 2>/dev/null
     git init -q --bare "$T/remote.git"
     git -C "$T/work" remote set-url origin "$T/remote.git"
     git -C "$T/work" config user.email t@example.com; git -C "$T/work" config user.name t
     # the destructive pairing, set locally so the case does not depend on the operator's config
     git -C "$T/work" config fetch.prune true
     git -C "$T/work" config fetch.pruneTags true
-    git -C "$T/work" push -q origin HEAD:refs/heads/main 2>/dev/null
-    git -C "$T/work" branch -q --set-upstream-to=origin/main 2>/dev/null
+    git -C "$T/work" push -q origin probe-main:refs/heads/probe-main 2>/dev/null
+    git -C "$T/work" branch -q --set-upstream-to=origin/probe-main 2>/dev/null
     git -C "$T/work" tag -a v9.9.9-local -m "never pushed" 2>/dev/null
     e=""
     # Two positive controls. Without them the case passes on any machine where the tag was never
