@@ -117,7 +117,7 @@ while measuring nothing. The first five:
 - Two mutations stopped matching after a prose rewrite and reported the checks as unfalsifiable.
   The suite now distinguishes "this check is weak" from "this mutation landed nowhere".
 
-The v1.15.0 audit found thirteen more, and they fall into four shapes worth naming:
+The v1.16.0 audit found thirteen more, and they fall into four shapes worth naming:
 
 - **An anchor in prose that a prose edit moved.** Check 18's comparison of the README's
   context-cost figure was guarded by a grep for a sentence the same commit reworded into a table
@@ -163,9 +163,9 @@ cd vstack
 **Pinned to a release, reading the script first.**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.15.0/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.16.0/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                        # about 100 lines
-VSTACK_REF=v1.15.0 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.16.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Check 24 fails if a version named in these docs is not a tag that exists. It was added after this

@@ -6,6 +6,8 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.16.0 — 2026-08-22
+
 **Check 18's anchor moved to the row's label.** Two sessions revived this check independently on
 the same afternoon and the merge kept the better half of each: the floors (128 / 1024 / 512
 against measured 305 / 3655 / 2178, far below the caps because they answer "did the hook say
