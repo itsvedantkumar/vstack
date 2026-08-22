@@ -1,6 +1,6 @@
 # Skill attribution
 
-vstack ships 26 skills from five sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 1 from Vercel Labs, and 2 original to this repo.
+vstack ships 28 skills from six sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 2 from Vercel Labs, 1 from Matt Pocock, and 2 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 
@@ -48,7 +48,7 @@ commands, subagents, or helper scripts. The frontmatter is trimmed to vstack's
 `scripts/*.mjs` helpers and `impeccable-*` subagents refer to pieces that are not vendored —
 the `reference/degraded/` playbooks cover the subagent roles inline.
 
-## From Vercel Labs (1)
+## From Vercel Labs (2)
 
 `agent-browser` — headless per-workspace browser automation: open, viewport, screenshot,
 accessibility-tree snapshots with `@eN` refs, click/fill by ref. Backs the ui-iterate loop
@@ -62,6 +62,30 @@ at runtime. The vendored version instead inlines the command sequences verified 
 upstream's README (Quick Start, Commands, Sessions), trims the frontmatter to vstack's
 `name` + quoted situation description, and drops upstream's `allowed-tools` and
 `hidden: true` keys. Only SKILL.md is vendored — no upstream code ships in this repo.
+
+`find-skills` — searches the open agent-skills ecosystem and installs what it finds, so a
+capability that already exists as a skill is not written from scratch.
+
+Source: [vercel-labs/skills](https://github.com/vercel-labs/skills), MIT. Author: Vercel Labs.
+
+It drives `npx skills`, which this repo does not vendor. The port says so at the top of the
+skill: the commands need network access and a working npm, and nothing is bundled. Check 22
+fails a skill that tells the model to run something the port does not ship without disclosing it.
+
+## From Matt Pocock (1)
+
+`grill-me` — a round-based interview that maps a plan as a decision tree and works the frontier
+one round at a time, asking every currently-answerable question with a recommended answer.
+
+Source: [mattpocock/skills](https://github.com/mattpocock/skills), MIT. Author: Matt Pocock.
+
+Upstream splits this in two. `productivity/grill-me` is a seven-line stub that sets the
+frontmatter flag opting a skill out of model invocation and forwards to `productivity/grilling`,
+which holds the method. A skill opted out of model invocation cannot auto-fire; it is reachable
+only by typing the slash command. Since the point of carrying it here is that it fires on the
+situation, the port ships the method directly under the name the marketplace page uses, and check
+3 enforces that the flag stays off. Upstream's `agents/openai.yaml` files are dropped in both
+skills: this bundle targets Claude Code and nothing else.
 
 ## What was removed, and why
 

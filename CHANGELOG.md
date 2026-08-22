@@ -6,6 +6,34 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.10.0 — 2026-08-22
+
+**Two skills added, both wired to fire on their situation.**
+
+`grill-me`, from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). A round-based
+interview that maps a plan as a decision tree and works the frontier one round at a time, asking
+every currently-answerable question with a recommended answer attached.
+
+Upstream splits it in two: a seven-line `grill-me` stub that sets the frontmatter flag opting a
+skill out of model invocation, forwarding to a `grilling` skill that holds the method. A skill
+opted out of model invocation cannot auto-fire — it is reachable only by typing the slash command
+— so porting the stub would have shipped the one thing it is carried here to do. The method ships
+directly under the name the marketplace page uses, and check 3 fails if that flag ever comes back.
+
+`find-skills`, from [vercel-labs/skills](https://github.com/vercel-labs/skills) (MIT). Searches
+the open agent-skills ecosystem when the user asks whether something can be done, so a capability
+that already exists is not written from scratch. It drives `npx skills`, which this repo does not
+vendor; the port says so at the top of the skill, which is what check 22 requires.
+
+Both descriptions were written to the 200-character listing cap rather than trimmed to it
+afterwards. The first drafts came in at 238 and 261 and check 3 caught both: a description past
+the cap is truncated in the listing, which is exactly how a skill silently stops firing.
+`claude/CLAUDE.md` names the two situations directly, since that file is the always-on routing
+line. Upstream's `agents/openai.yaml` files are dropped from both — this bundle targets Claude
+Code and nothing else.
+
+Skill count 26 → 28.
+
 ## 1.9.1 — 2026-08-22
 
 **A fresh bootstrap ended on a red line.** setup-machine.sh installs claude-mem, bin/doctor has
@@ -344,7 +372,7 @@ that turned up.
 
 **Installs where Claude Code actually looks.** `install.sh` hardcoded `~/.claude`, but Claude
 Code reads `$CLAUDE_CONFIG_DIR` when it is set. Anyone with it pointed elsewhere — containers,
-VMs, separate profiles — got all 26 skills and every hook written into a directory Claude Code
+VMs, separate profiles — got all 28 skills and every hook written into a directory Claude Code
 never opens, with hook paths baked to match, and a success message. `install.sh`, `uninstall.sh`
 and `doctor` now resolve it, and `.claude.json` follows it.
 

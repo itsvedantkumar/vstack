@@ -9,6 +9,6 @@ OUTPUT STYLE: Be maximally concise and to-the-point. Lead with what happened / w
 
 GitHub via `gh` CLI, deploys via `vercel`/`wrangler` CLI — prefer CLIs over MCPs (more token-efficient).
 
-Skills auto-fire on their situation — never wait for a slash command; their listing descriptions are the triggers. For any feature/change, proactively chain: brainstorming → writing-plans → test-driven-development → executing-plans → principle-prove-it-works (enforced by the verify.sh Stop-hook gate); auto-apply the rest without being asked.
+Skills auto-fire on their situation — never wait for a slash command; their listing descriptions are the triggers. A plan or decision you want torn apart → grill-me, before you build it. A capability you are about to write from scratch → find-skills first. For any feature/change, proactively chain: brainstorming → writing-plans → test-driven-development → executing-plans → principle-prove-it-works (enforced by the verify.sh Stop-hook gate); auto-apply the rest without being asked.
 
 Token + delegation discipline arrives via the SessionStart hook and a two-line per-prompt digest — not restated here.
