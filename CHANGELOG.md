@@ -6,6 +6,25 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.17.0 — 2026-08-22
+
+**Merged with `doctor`'s release-reachability check.** The v1.15.0 audit concluded that check 24
+structurally cannot tell whether the tag it verifies is fetchable by a stranger, because the only
+honest answer needs a network call and a gate that needs the network to be honest is a gate that
+gets disabled. That conclusion was right about check 24 and wrong about the system. The
+constraint is that `.claude/verify.sh` stays hermetic, not that nobody may ask, and `doctor`
+already talks to the network — so the question moved there.
+
+The distinction is worth keeping, because it applies to the other two timing dependencies as
+well. Two of check 24's three are unfixable *in check 24* and neither is unfixable outright: the
+remote one moves to a tool allowed to make network calls, and ref durability moves further out
+still, to a git config on the machine (`fetch.prune` and `fetch.pruneTags`, both true globally)
+that no check in any repository can defend against. The useful question is not whether something
+can be checked but which tool is allowed to check it, and a gate that must stay hermetic is not
+the whole system.
+
+`doctor` reads DRIFT on this machine until the tags are pushed. That is the check working.
+
 ## 1.16.0 — 2026-08-22
 
 **Check 18's anchor moved to the row's label.** Two sessions revived this check independently on
@@ -256,6 +275,21 @@ What this does not yet support: the three fixes above were each watched going re
 mutation before being made green, but the falsifiability suite fingerprints a row's files
 together, so it detects both lanes of a widened row rotting and not one of them. Per-file
 fingerprinting is not in this release.
+
+## 1.13.5 — 2026-08-22
+
+**`doctor` now asks whether a stranger can actually fetch the release we claim to ship.** Check 24
+proves the declared version is tagged *in this repository*. It cannot prove the tag exists on the
+remote, because that means a network call and the gate has to stay offline and hermetic. So the
+question moved to `doctor`, which already talks to the network.
+
+It was not academic. Every tag from v1.13.2 on lived only on this machine while README.md handed
+strangers a URL built from it — check 24 green and the documented install path a 404, at the same
+moment, for four releases. Two true statements about different things, and nothing compared them.
+
+An unreachable network is a note, never a pass and never a failure. Being offline is not drift,
+and it is not evidence that the release is fetchable either. No remote configured is also a note:
+a repo can be local by design.
 
 ## 1.13.4 — 2026-08-22
 
