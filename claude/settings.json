@@ -1,37 +1,14 @@
 {
-  "model": "claude-opus-5[1m]",
-  "effortLevel": "high",
-  "fastMode": true,
-  "skillListingMaxDescChars": 200,
-  "skillListingBudgetFraction": 0.016,
-  "skillOverrides": {
-    "xlsx": "off",
-    "docx": "off",
-    "pptx": "off",
-    "build-mcp-server": "off",
-    "dataviz": "name-only",
-    "pdf": "name-only",
-    "skill-creator": "name-only",
-    "update-config": "name-only",
-    "keybindings-help": "name-only",
-    "fewer-permission-prompts": "name-only",
-    "claude-in-chrome": "name-only",
-    "init": "name-only",
-    "loop": "name-only",
-    "schedule": "name-only",
-    "run": "name-only",
-    "simplify": "name-only",
-    "security-review": "name-only"
-  },
-  "precomputeCompactionEnabled": true,
-  "promptSuggestionEnabled": false,
+  "agentPushNotifEnabled": true,
+  "autoUpdatesChannel": "latest",
   "awaySummaryEnabled": false,
-  "spinnerTipsEnabled": false,
-  "prefersReducedMotion": true,
-  "showTurnDuration": true,
-  "switchModelsOnFlag": true,
   "cleanupPeriodDays": 14,
+  "effortLevel": "high",
   "enableWorkflows": true,
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true,
+    "typescript-lsp@claude-plugins-official": true
+  },
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "300000",
     "BASH_MAX_TIMEOUT_MS": "900000",
@@ -40,6 +17,9 @@
     "MCP_TIMEOUT": "10000",
     "MCP_TOOL_TIMEOUT": "60000"
   },
+  "fastMode": true,
+  "fileCheckpointingEnabled": true,
+  "forceLoginMethod": "claudeai",
   "hooks": {
     "SessionStart": [
       {
@@ -112,17 +92,38 @@
       }
     ]
   },
-  "enabledPlugins": {
-    "claude-mem@thedotmack": true,
-    "typescript-lsp@claude-plugins-official": true
-  },
-  "forceLoginMethod": "claudeai",
-  "autoUpdatesChannel": "stable",
-  "tui": "fullscreen",
-  "theme": "auto",
-  "preferredNotifChannel": "terminal_bell",
-  "fileCheckpointingEnabled": true,
-  "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
+  "model": "claude-opus-5[1m]",
+  "outputStyle": "Concise",
+  "precomputeCompactionEnabled": true,
+  "preferredNotifChannel": "terminal_bell",
+  "prefersReducedMotion": true,
+  "promptSuggestionEnabled": false,
+  "remoteControlAtStartup": true,
+  "showTurnDuration": true,
+  "skillListingBudgetFraction": 0.016,
+  "skillListingMaxDescChars": 200,
+  "skillOverrides": {
+    "xlsx": "off",
+    "docx": "off",
+    "pptx": "off",
+    "build-mcp-server": "off",
+    "dataviz": "name-only",
+    "pdf": "name-only",
+    "skill-creator": "name-only",
+    "update-config": "name-only",
+    "keybindings-help": "name-only",
+    "fewer-permission-prompts": "name-only",
+    "claude-in-chrome": "name-only",
+    "init": "name-only",
+    "loop": "name-only",
+    "schedule": "name-only",
+    "run": "name-only",
+    "simplify": "name-only",
+    "security-review": "name-only"
+  },
+  "spinnerTipsEnabled": false,
+  "switchModelsOnFlag": true,
+  "theme": "auto",
+  "tui": "fullscreen"
 }
