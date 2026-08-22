@@ -140,9 +140,9 @@ cd vstack
 **Pinned to a release, reading the script first.**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.13.3/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.13.4/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                        # about 100 lines
-VSTACK_REF=v1.13.3 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.13.4 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Check 24 fails if a version named in these docs is not a tag that exists. It was added after this
@@ -229,10 +229,10 @@ rather than asking a model what it would do.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent per session | 0 B | ~3.6 KB full / ~2.1 KB plugin |
+| Context spent per session | 0 B | ~3.6 KB total / ~2.1 KB plugin |
 | Context spent per prompt, after that | 0 B | 305 B |
 
-<!-- Check 18 in .claude/verify.sh parses the two "~N KB full / ~N KB plugin" figures above and
+<!-- Check 18 in .claude/verify.sh parses the two "~N KB total / ~N KB plugin" figures above and
      compares them against a live probe of the hook. Reword that cell and the check stops
      comparing. It has happened once already, at cc76ba8, and went unnoticed for eleven commits. -->
 
