@@ -239,6 +239,12 @@ if [ "${SELFTEST:-0}" = "1" ]; then
   [ "$before" = "$after" ] || { printf '  FAIL  restore left %s skills, started with %s\n' "$after" "$before"; fails=$((fails+1)); }
   if "$SRC/bin/doctor" >/dev/null 2>&1; then printf '  ok    doctor green after restore\n'
   else printf '  FAIL  doctor is red after restore\n'; fails=$((fails+1)); fi
+  # Strays. A gstack arm left an empty ~/.claude/skills/skills behind and every existing check
+  # was blind to it: the count matched, doctor was green, drift was clean. Compare the entry set,
+  # not its size.
+  stray=$(comm -13 <(ls "$MACHINE_BK/skills" 2>/dev/null | sort) <(ls "$HOME/.claude/skills" 2>/dev/null | sort))
+  if [ -z "$stray" ]; then printf '  ok    no stray entries under ~/.claude/skills\n'
+  else printf '  FAIL  arm cycle left behind: %s\n' "$(printf '%s' "$stray" | tr '\n' ' ')"; fails=$((fails+1)); fi
   [ "$fails" -eq 0 ] && { echo; echo "SELFTEST OK"; exit 0; } || { echo; echo "SELFTEST FAILED ($fails)"; exit 1; }
 fi
 
@@ -315,6 +321,23 @@ $(jq -r ".[$i].problem_statement" "$DATA")" --setting-sources=project --permissi
   [ "$NUSE" -gt 0 ] || { echo "no instances survived the difficulty filter; widen --n" >&2; exit 1; }
 fi
 
+# Pre-patch PASS_TO_PASS baseline, per instance, on the same sample scoring uses. Anything
+# already failing here is the instance's problem and not the agent's, and counting it as a
+# regression made every arm look equally destructive.
+declare_base() { :; }
+for i in $USABLE; do
+  id=$(jq -r ".[$i].instance_id" "$DATA")
+  d="$ROOT/basep2p-$id"
+  if setup_repo "$i" "$d"; then
+    read -r bp bt <<< "$(run_p2p_score "$d" "$i")"
+    eval "BASE_P2P_$i=$bp"
+    printf '  baseline p2p %-34s %s/%s pass before any patch\n' "$id" "$bp" "$bt" >&2
+  else
+    eval "BASE_P2P_$i="
+  fi
+  rm -rf "$d"
+done
+
 backup_machine
 for arm in $(echo "$ARMS_CSV" | tr ',' ' '); do
   if ! activate_arm "$arm"; then
@@ -349,11 +372,18 @@ $prob" --setting-sources=project --permission-mode bypassPermissions \
         --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
     secs=$(( $(date +%s) - t0 ))
     read -r p t <<< "$(run_tests "$d" "$i")"
-    # Collateral damage. run_p2p existed and only ever ran in pre-flight, so a patch that fixed
-    # the target test by breaking four others scored exactly the same as one that did not. That
-    # is the difference a review phase is supposed to make, and nothing was measuring it.
+    # Collateral damage, counted against a baseline taken on the SAME sample.
+    #
+    # The first version compared a 20-test scoring sample against a 5-test pre-flight sample, so
+    # tests 6 to 20 were never shown to pass before the patch and any that were already red were
+    # counted as regressions. All three arms reported "broke 2 of 20" on the same instance, which
+    # is the tell: independent agents do not damage identically. base_p2p is now captured per
+    # instance before any arm runs, on the same list, and only pass-to-fail counts.
     read -r pp pt <<< "$(run_p2p_score "$d" "$i")"
-    broke=$((pt - pp))
+    base_ok=$(eval "printf '%s' \"\${BASE_P2P_$i:-}\"")
+    [ -n "$base_ok" ] || base_ok="$pt"
+    broke=$((base_ok - pp))
+    [ "$broke" -lt 0 ] && broke=0
     [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && [ "$broke" -eq 0 ] && res=1 || res=0
     printf '%s\t%s\t%s\t%s\t%s\tok\t%s\t%s\t%s\n' "$arm" "$id" "$res" "$p" "$t" "$secs" "$broke" "$pt" >> "$RUNLOG"
     printf '  %-14s %-34s resolved=%s (f2p %s/%s, broke %s of %s p2p) %ss\n' \
