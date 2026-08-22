@@ -729,10 +729,23 @@ if command -v jq >/dev/null; then
   errs=""
   probe(){ printf '{"hook_event_name":"%s"}' "$1" | env CONDUCTOR_WORKSPACE_PATH="${3:-}" ${2:+VSTACK_PROFILE=$2} \
            bash claude/hooks/inject-session-context.sh 2>/dev/null | wc -c | tr -d ' '; }
-  chk(){ [ "$2" -le "$3" ] || errs="$errs\n$1: $2 bytes exceeds the $3 byte cap"; }
-  chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)" 512
-  chk "session baseline"       "$(probe SessionStart '' '')"    4096
-  chk "skills profile"         "$(probe SessionStart skills 1)" 2560
+  # Both bounds, and the floor is the one that matters. Every assertion here used to be an upper
+  # cap, so a hook emitting ZERO bytes satisfied all three: `ok injected context bounded (digest
+  # 0 B, baseline 0 B)` for a session that receives no operating policy at all. The figure
+  # comparison below was the only thing standing between that and a green, and it is a
+  # consistency test between two things that can both be wrong -- update the README to say
+  # ~0.0 KB and the whole check passes with a dead hook. Verified: that exact pair printed ok.
+  #
+  # Floors are deliberately far below the measured sizes (305 / 3655 / 2178). They are not a
+  # second cap and must not fire when someone trims a sentence; they answer "did the hook say
+  # anything at all", which nothing else here asks.
+  chk(){ # label value floor cap
+    [ "$2" -ge "$3" ] || errs="$errs\n$1: $2 bytes is under the $3 byte floor -- the hook emitted nothing or nearly nothing"
+    [ "$2" -le "$4" ] || errs="$errs\n$1: $2 bytes exceeds the $4 byte cap"
+  }
+  chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)"  128  512
+  chk "session baseline"       "$(probe SessionStart '' '')"    1024 4096
+  chk "skills profile"         "$(probe SessionStart skills 1)"  512 2560
   # The README publishes these byte counts as the cost column of its comparison table. A number
   # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
   # keeps finding in its own docs — so the published figures are read back and compared.
