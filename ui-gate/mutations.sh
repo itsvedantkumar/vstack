@@ -42,7 +42,19 @@ if ! printf '%s' "$base" | grep -q 'UI GATE OK'; then
   printf 'FAIL  the clean fixture does not pass; nothing below would be evidence\n%s\n' "$base"
   exit 1
 fi
-printf 'ok    clean fixture passes at baseline\n\n'
+printf 'ok    clean fixture passes at baseline\n'
+
+# The other direction, and the one that was missing. A gate is only evidence if it can withhold
+# its verdict, and this one could not: against a directory with no interface files in it, all
+# nine rules skipped, the accounting was satisfied at RAN=0, and it printed UI GATE OK and
+# exited 0. Every mutation below would have been just as green on an empty directory.
+empty=$(mktemp -d "$W/empty.XXXXXX")
+nr=$("$GATE" "$empty" 2>&1)
+if grep -q 'UI GATE OK' <<<"$nr"; then
+  printf 'FAIL  the gate reports OK over a target with no UI files; nothing below is evidence\n%s\n' "$nr"
+  exit 1
+fi
+printf 'ok    gate withholds its verdict when no rule ran\n\n'
 
 # Every declared rule, read out of the gate itself so the two cannot drift apart.
 RULES=$(sed -n '/^for r in /,/^done$/p' "$GATE" | tr ' \\;\n' '\n' | grep -E '^[A-Z0-9]+-[A-Z-]+$')

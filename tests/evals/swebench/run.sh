@@ -57,7 +57,8 @@ case "$ARMS_CSV" in *gstack*) [ -d "$GSTACK_DIR" ] || { echo "note: dropping gst
 
 ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/swebench.XXXXXX")" && pwd)
 RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
-printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\tp2p_broken\tp2p_total\n' > "$RUNLOG"
+. "$SRC/tests/evals/lib/runlog.sh"
+open_runlog "$RUNLOG" "$(printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\tp2p_broken\tp2p_total')" || exit 2
 echo "log: $RUNLOG" >&2
 
 setup_repo() { # <index> <dir> -> 0 usable, 1 unusable
@@ -324,7 +325,6 @@ fi
 # Pre-patch PASS_TO_PASS baseline, per instance, on the same sample scoring uses. Anything
 # already failing here is the instance's problem and not the agent's, and counting it as a
 # regression made every arm look equally destructive.
-declare_base() { :; }
 for i in $USABLE; do
   id=$(jq -r ".[$i].instance_id" "$DATA")
   d="$ROOT/basep2p-$id"

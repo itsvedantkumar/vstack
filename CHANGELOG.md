@@ -6,6 +6,255 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Check 18's anchor moved to the row's label.** Two sessions revived this check independently on
+the same afternoon and the merge kept the better half of each: the floors (128 / 1024 / 512
+against measured 305 / 3655 / 2178, far below the caps because they answer "did the hook say
+anything at all") and the two-figure comparison from one side, the label anchor from the other.
+
+It keys on `| Context spent per session ` and parses the figures out of that row, rather than
+keying on the figures themselves. The figures are exactly what people edit — the anchor moved
+twice, the second time during this audit while the fix was being written, in a commit titled
+"put back the anchor my own mutation test moved". The label states what the row means and
+outlives a rewrite of what the row says. Three outcomes now carry three messages: row missing,
+row present with unparseable figures, figures present and wrong. Conflating the first two sends
+the next reader looking for a row that is in front of them.
+
+Row 18c is the floor's mutation. The floors were proven by a hand-run, which by this
+repository's own standard is not evidence; the row stubs the hook to `exit 0` and requires all
+three floors to name it.
+
+**Dead code removed.** `declare_base() { :; }` in `tests/evals/swebench/run.sh` was defined,
+empty, and called from nowhere — a stub left behind when the PASS_TO_PASS baseline moved inline.
+A sweep of every tracked shell file for functions defined and never called found this one and
+nothing else; the other candidates were dispatched by name from a quoted list, which the first
+version of the sweep could not see.
+
+## 1.15.0 — 2026-08-22
+
+**The falsifiability suite had no accounting of its own.** It printed `N passed, 0 failed /
+FALSIFIABLE` with no declared count and no skip line, so rows 19 and 24 could `continue` out and
+the summary read exactly like a run that had proved every row. That is verify.sh's own founding
+lesson, never applied to the suite that proves verify.sh. It reports `declared, passed, failed,
+skipped` now and fails when they do not add up.
+
+Its no-op detector also fingerprinted a row's files together rather than separately. Rows 1, 18
+and 29 each mutate two files now — two lanes of a check that makes two promises — and a combined
+hash goes on matching as long as either lane still lands, which is the exact rot the detector
+exists to catch, one level finer. Per file, and it names the file that stopped changing.
+
+**Check 16 asserted that an id was listed, not that a row existed.** An id could be added to
+`CHECKS=` with no `break_it` and no `label_for` and check 16 stayed green; the omission surfaced
+only when somebody ran the suite, which is the thing check 16 exists to make unnecessary. All
+three arms are required now, counting an environment branch as a mutation — check 0's row strips
+jq from `PATH` rather than editing a file, and that is a real way to break a check. It found a
+gap on its first run.
+
+**Check 21 printed `ok` over an empty list.** `RETIRED` ships empty, which is correct — nothing
+is retired — so its loop never ran and `ok (0 entries)` read like a measurement of zero rather
+than the absence of one. Skipping would have been honest and would still have measured nothing,
+so it measures the decider instead, the way checks 23, 27, 32 and 37 do: a key the repository
+ships right now must be seen as still shipped, and a key it has never shipped must not be
+reported as having shipped.
+
+**The last two `| grep -q` pipes in the unsafe direction.** Under `set -o pipefail` a `grep -q`
+that matches early kills the writer with SIGPIPE and the pipeline returns 141. Most instances
+here fail in the safe direction — 141 reads as "no match" and invents a failure somebody
+investigates. Check 32's escape-hatch probe was the exception: a 141 on a match would skip the
+`&&` and report a broken `VSTACK_NO_GRILL` as green. Its payload is one short line, so it never
+fired, which is precisely why it would have survived until the payload grew.
+
+**Check 31 matched basenames, so a file nobody names could pass by sharing a name with one
+everybody does.** Every `README.md` in the tree counted as referenced by any mention of any
+`README.md`. It matches paths now. Demonstrated: an orphan at `ui-gate/doctor` is found by
+`git grep -l -F doctor` in eighteen places and was reported as referenced; by path it is
+reported as unreferenced, which it is. Row 31's probe is now assembled as
+`ui-gate/$(basename bin/doctor)` so it proves exactly that, and so the literal never appears in
+the file — a name spelled out here is itself a referrer.
+
+The tightening found one real orphan. `bin/claude-task.sh` is copied onto every machine by
+`install.sh` (which ships `bin/*` wholesale) and was named by nothing in the repository, so
+nothing checked it either: installed everywhere, findable nowhere. `bin/doctor` reports on it
+now, beside `claude-bg.sh`. The eval corpora under `tests/evals/fixtures`, `holdout` and
+`*/fixture` are excluded instead, because those genuinely load by directory — `run-pathways.sh`
+points `FIX` at the directory and globs it, so adding a fixture is meant to be a file drop.
+
+**Checks 26 and 28 answered "skip" to a missing tracked file.** Neither `.github/workflows/verify.yml`
+nor `docs/` is an environment dependency that may reasonably be absent on a runner; they are
+files in this repository. The workflow being gone means CI is gone and the README's platform
+promise has no evidence behind it; `docs/` being gone silently retires this check and two rows
+inside check 12. Both are failures now. Legitimate skips are unchanged: check 19 when the Claude
+CLI is absent, check 24 with no tags, check 29 without shellcheck — each names the missing
+dependency, and each is a thing a runner may honestly lack.
+
+**Check 24 could only fail after it was too late to act on.** It compared `v$version..HEAD`, so
+before a commit HEAD *was* the tag, the diff was empty, and it printed `ok declared version
+matches what installs (v1.14.0)` with modified payload files sitting in the working tree. After
+the commit — identical file contents — it went red. Nothing about the artefact changed between
+those two runs, only which side of the commit boundary the person stood on. Both directions
+observed on this branch and independently by a second session on main the same afternoon.
+
+It reads the working tree now, staged and unstaged and untracked, so it bites while the bump is
+still cheap. A `git stash` still hides payload from it; that is stated in the ok line rather
+than solved, because the only honest answer to "somebody hid the evidence" is to say what was
+looked at. The ok line also now says the tag is local and that no remote was consulted — the
+check verifies the tag exists here, not that the URL the README hands a stranger resolves.
+
+**`tests/evals/run.sh` is deleted rather than repaired.** Its gstack arm used `find "$GSTACK_DIR"
+-maxdepth 2 -name SKILL.md`, which matches gstack's root SKILL.md at depth 1 and copies the whole
+repository in as one nested skill, and it installed gstack at project scope where its references
+to a global skills directory are all command-not-found. Two other harnesses had already been
+fixed; this one was missed.
+
+It was not repaired because its question is answered and the answer is recorded — 11/15, 11/15,
+10/15 across none, vstack and gstack, with zero skill invocations in sixty runs.
+`run-pathways.sh` exists specifically to record that this result is spent: a neutral prompt about
+a single file reaches neither harness's front door, because vstack ships `/review` as a command
+and gstack ships it as a slash-triggered skill. Repairing it means porting `activate_arm`,
+`deactivate_all`, `backup_machine`/`restore_machine` and the positive control, producing a third
+copy of the block that mutates the operator's real `~/.claude` — the most dangerous code here —
+to serve a benchmark that still could not answer the question. It also lacks the
+`FIXTURES=dev|holdout` selector `optimize.sh` drives, so it cannot join the optimisation loop.
+The finding stays in RESULTS.md; the harness does not need to stay runnable for it to stay true.
+
+Check 38 is what makes that deletion bite. Check 20 already asserts that `~/`-rooted install
+paths named in prose exist; the repo-relative direction never had a check, so a doc could point
+at a script that is not there and nothing would say so. Confirmed against the real deletion:
+with `tests/README.md` at its pre-deletion content, check 38 reports `names evals/run.sh, which
+is not in this repository`.
+
+**The optimiser had never run, and its scorer could not tell zero from no data.** `--try`
+hard-exits without `.opt-state`, and `.opt-state` has never existed, so the accept/revert/noise
+branch and the `MIN_GAIN` threshold beneath it had never once executed. `MIN_GAIN` is now
+labelled what it is: a stated default of 0.05, uncalibrated, described in the header as "wider
+than the run-to-run spread observed here" when no run in this repository measured that spread.
+Calibrating it means three unchanged `--measure` runs; with `SAMPLES=3` over 8 fixtures a single
+f1 step is about 0.029, so 0.05 is the right order of magnitude and that is the most that can
+honestly be said for it.
+
+The scorer collapsed three situations into `0 0 0`: a run that genuinely scored zero, a run that
+produced no rows, and a run whose fixtures planted no defects. Only the first is a result. The
+other two read as f1 0.0000, which makes the delta hugely negative, trips the revert branch, and
+tells you a good change made things measurably worse — a broken harness arguing against a
+correct edit. They are distinct verdicts now and the three call sites refuse to score them.
+
+Check 37 drives both halves offline, at no model cost, and found a real defect in the boundary
+while doing it: `0.55 - 0.50` is `0.050000000000000044`, so a bare `d > g` called exactly
+`+MIN_GAIN` a keep. Which side of the threshold a change landed on depended on the bit pattern
+of two decimals rather than on the measurement.
+
+**Check 12 scanned eight files, chosen by hand.** The list had grown by hand every time somebody
+noticed a miss — `tests/README.md` and `docs/how-skills-fire.md` were both late additions, and
+`tests/evals/RESULTS.md` was the next one waiting to be noticed. That is the shape check 29
+removed one check over: a list you have to remember to update is a list that goes stale silently,
+and the remembering is the part that fails. It is derived now, from every tracked markdown and
+manifest: 8 files to 133.
+
+Two trees are excluded, under one rule — a document whose numbers are evidence about something
+other than this tree's shape today. `docs/provenance/**` is dated internal handoffs;
+`docs/research/**` is published evidence about other systems, where a sentence counting the
+agents in somebody else's benchmark is not a claim about this tree, and holding it to this
+repository's count is a category error rather than a finding. That is still an exclusion somebody maintains, and it is two directories with a stated
+rule instead of eight filenames with none — an improvement, not a solution.
+
+A derived set can shrink to nothing and pass by scanning nothing, which is the failure this
+check exists to catch turned on itself, so the set is asserted before it is used. The prose
+extractor also gained a `$`-guard: `claude/commands/release.md` contains `TYPE=$1` above `case
+$TYPE in`, which normalises to `$1 case` and matched `[0-9]+ case` against a tree of 14.
+
+**compare-baseline printed six comparisons and made five.** Its `row()` took an expected value
+that could be spelled `-` meaning "assert nothing", and exactly one row used it: the per-session
+context cost, which is the number the README publishes and therefore the row that most deserved
+an expectation. A row proving nothing printed identically to a row proving something, and
+`exit "$FAIL"` stayed 0 however far the number drifted.
+
+The escape hatch is deleted rather than fixed, because a ceiling inside `row()` would need a
+fifth grammar parsed out of a display string — `~3.6 KB full / ~2.1 KB plugin` is not a number
+and never will be. `row()` displays and counts; `expect` and `expect_max` assert and count; the
+footer fails when the two counts disagree. The cost row now carries a real ceiling on the raw
+byte count (`CTX_MAX`, default 6144), leaving the rounded KB figures for display only.
+
+The accounting found a seventh row nobody had noticed was unasserted, on its first run.
+
+**Three eval harnesses opened their run log by destroying it.** `printf '<header>\n' >
+"$RUNLOG"` truncates unconditionally. That is harmless for the default, where `RUNLOG` lands in a
+fresh mktemp directory, and destructive the moment a caller passes `RUNLOG=` to accumulate across
+arms — which is required, because one model-calling arm does not fit in a single invocation. Each
+arm overwrote the arm before it, exit status stayed 0, and the summary reported the survivor as
+the whole experiment.
+
+It has already cost data rather than merely risked it. `.audit/run/falsedone-*.tsv` retains nine
+rows, all `arm=vstack`; the twelve-run `none` baseline quoted in
+[do-harnesses-help.md](docs/research/do-harnesses-help.md) has no surviving raw rows. Nothing
+noticed, because destroying data and succeeding look identical from outside.
+
+`tests/evals/lib/runlog.sh` now owns the opening: empty counts as new (`optimize.sh` passes a
+freshly `mktemp`'d file, so a refusal keyed on `[ -f ]` rather than `[ -s ]` would break the
+optimiser on its first call), a matching header appends, a foreign header refuses with rc 2.
+Check 36 exercises all four and then bans the truncating redirect outright under `tests/evals/`,
+because the line was copied into three harnesses and the thing worth preventing is the fourth.
+
+## 1.14.0 — 2026-08-22
+
+**ui-gate reported OK over nothing, and doctor --drift reported no drift over nothing.**
+`./ui-gate/ui-gate.sh docs` printed `9 declared, 0 ran, 0 passed, 0 failed, 9 skipped` and then
+`UI GATE OK`, exit 0 — the accounting rule above it is satisfied at RAN=0, and FAILED is 0
+because nothing ran to fail. That is the defect the file's own header says this repository
+exists to catch, reproduced in the summary written to catch it. The floor is RAN, not PASSED:
+browser rules skipping for want of playwright is honest, but every rule skipping means the
+target has no interface in it, and a UI gate over a target with no UI is a category error rather
+than a pass. It now prints `UI GATE NOT RUN` and exits 2, following the file's own precedent
+where 2 is "could not run" and 1 is "rules failed".
+
+`doctor --drift` had the same shape one tool over. Its five family globs are each `[ -e "$f" ]
+|| continue` guarded, so a `$REPO` that resolves but ships no skills — a moved checkout, a
+partial clone, a stale pointer — compared 28 installed skills against nothing and printed
+`no drift ✔`. Measured: against a stub whose families are all empty, the old code exits 0
+saying no drift; the new code names all five families and exits 1. It also reports the count
+now (`no drift ✔ (73 item(s) compared)`), because a comparison that does not say what it
+compared cannot be audited. The resolve-failure branch one layer up had already learned this;
+the loops beneath it had not.
+
+Check 35 holds both, in both directions, because a gate that always refuses is worth exactly as
+much as one that never does. `ui-gate/mutations.sh` gained the same control beside its clean-
+fixture baseline.
+
+**Check 18 published two promises and kept one.** The half that compares the README's context-cost
+figure against the live byte count was guarded by a grep for `~N KB full / ~N KB plugin` — a
+sentence that `cc76ba8` reworded into a table row in the same commit that severed it. An `if` with
+no `else` does not go red when its anchor stops matching; it goes quiet. The assertion was
+unreachable for four releases while the check kept printing `ok`. It was also check 18's only
+lower bound: every other assertion is an upper cap, so a hook emitting zero bytes satisfied all
+three and printed `ok injected context bounded (digest 0 B, baseline 0 B)`. The anchor is now the
+current table row, a missing anchor is a failure rather than silence, and both bounds are
+asserted. The published 3.6 KB figure was, as it happens, still accurate — which is the point:
+nothing had been checking, and nobody could have known.
+
+**Check 29 read its delegate's silence as success.** `shellcheck ... 2>/dev/null` inside a command
+substitution discarded stderr and never read the exit status. `shellcheck -S nonsense -f gcc
+install.sh` writes nothing to stdout and exits 4, so a shellcheck that could not run at all
+produced `ok shellcheck clean (33 scripts)`. It now reads the exit status per file — 0 and 1 are
+answers, anything else means the question was never asked — and carries the two-way positive
+control check 19 uses, linting a known-bad script and refusing to believe a clean result unless
+the linter can still find that defect.
+
+**One file selector where there were four.** Checks 1, 12, 29 and 30 each spelled "the shell
+scripts in this repository" separately, as a copied shebang scan. All four missed
+`ui-gate/rules/browser.sh` and `ui-gate/rules/tokens.sh` — real bash, sourced by `ui-gate.sh`,
+carrying a `# shellcheck shell=` directive and no shebang because they are never executed
+directly. Nothing in the gate parsed them and nothing linted them, in the one subtree that exists
+to catch a gate reporting OK over nothing. This is the second miss for that predicate;
+`bin/cloudflare-mcp` was the first, and is why the shebang scan replaced a hand-maintained list.
+The fix is not a third spelling. `sh_files()` covers suffix, shebang and directive, and the
+selector went from 33 files to 35.
+
+Rows 1, 18 and 29 of `tests/gate-falsifiability.sh` now mutate both lanes each, so no half of a
+two-part check can rot unproven the way check 18's figure comparison did.
+
+What this does not yet support: the three fixes above were each watched going red under their own
+mutation before being made green, but the falsifiability suite fingerprints a row's files
+together, so it detects both lanes of a widened row rotting and not one of them. Per-file
+fingerprinting is not in this release.
+
 ## 1.13.4 — 2026-08-22
 
 **Two skills stopped requiring skills that are not installed.** `executing-plans` and

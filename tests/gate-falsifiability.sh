@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -46,7 +46,8 @@ if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2
   TREE_BEFORE=$(git status --porcelain -- . 2>/dev/null)
 fi
 
-PASSED=0; FAILED=0
+PASSED=0
+SKIPPED=0; FAILED=0
 pass(){ printf 'ok    check %-3s falsifiable (%s)\n' "$1" "$2"; PASSED=$((PASSED+1)); }
 fail(){ printf 'FAIL  check %-3s did NOT fail when broken\n      expected label: %s\n%s\n' \
         "$1" "$2" "${3:-}"; FAILED=$((FAILED+1)); }
@@ -64,7 +65,13 @@ restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
 # referrer as far as check 31 is concerned. The first draft spelled the name out, the check found
 # it named in this very script, and the row reported "did NOT fail when broken" while the
 # mutation was working perfectly.
-ORPHAN_PROBE="bin/zz-unreferenced-$$.sh"
+# The basename is assembled from an existing, well-referenced path rather than typed, for two
+# reasons. The old one: a literal name in this file is itself a referrer, which is how the first
+# draft reported "did NOT fail when broken" while the mutation worked perfectly. The new one:
+# since 1.15.0 check 31 matches paths instead of basenames, and this probe is what proves it --
+# ui-gate/doctor collides with bin/doctor, which is named in eighteen places, so the old
+# basename match called it referenced and the path match does not.
+ORPHAN_PROBE="ui-gate/$(basename bin/doctor)"
 
 creates_for(){ case "$1" in
   31)  printf '%s' "$ORPHAN_PROBE" ;;
@@ -74,7 +81,7 @@ esac }
 # here: this has to be safe to run on a dirty tree.
 files_for(){ case "$1" in
   0)   printf '' ;;
-  1)   printf 'claude/hooks/format.sh' ;;
+  1)   printf 'claude/hooks/format.sh ui-gate/rules/tokens.sh' ;;
   2)   printf 'mcp/servers.json' ;;
   3)   printf 'claude/skills/unslop/SKILL.md' ;;
   4|5|6) printf 'README.md' ;;
@@ -91,6 +98,7 @@ files_for(){ case "$1" in
   17)  printf 'overlay.sh' ;;
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
   18b) printf 'README.md' ;;
+  18c) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
@@ -101,10 +109,14 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
-  29)  printf 'bin/cloudflare-mcp' ;;
+  29)  printf 'bin/cloudflare-mcp ui-gate/rules/browser.sh' ;;
   30)  printf 'claude/hooks/format.sh' ;;
   31)  printf '' ;;   # plants a new file rather than editing one
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
+  35)  printf 'ui-gate/ui-gate.sh' ;;
+  36)  printf 'tests/evals/lib/runlog.sh' ;;
+  37)  printf 'tests/evals/optimize.sh' ;;
+  38)  printf 'tests/README.md' ;;
   34)  printf 'overlay.sh' ;;
 esac }
 
@@ -132,6 +144,7 @@ label_for(){ case "$1" in
   17)  printf 'overlay ships project keys only' ;;
   18)  printf 'injected context bounded' ;;
   18b) printf 'injected context bounded' ;;
+  18c) printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
@@ -148,12 +161,21 @@ label_for(){ case "$1" in
   32)  printf 'grill trigger decides correctly' ;;
   33)  printf 'project overlay stands down when the user-scope hook is live' ;;
   34)  printf 'the policy document reaches a session exactly once' ;;
+  35)  printf 'gates refuse a green on nothing measured' ;;
+  36)  printf 'run logs are opened append-safe' ;;
+  37)  printf 'optimiser decides correctly' ;;
+  38)  printf 'every repository path named in prose exists' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
 # trips four checks proves far less than one that trips the intended one.
 break_it(){ case "$1" in
-  1)  printf '\nif [ -z\n' >> claude/hooks/format.sh ;;
+  1)  # Both lanes of the file selector. format.sh has a shebang; ui-gate/rules/tokens.sh has
+      # none, only a `# shellcheck shell=` directive, and for four versions nothing in this gate
+      # parsed it. Mutating one leaves the other exactly as unproven as it was.
+      for _f in claude/hooks/format.sh ui-gate/rules/tokens.sh; do
+        printf '\nif [ -z\n' >> "$_f"
+      done ;;
   2)  printf '{' >> mcp/servers.json ;;
   3)  # a description past the 200-char listing cap, which silently stops the skill triggering
       awk 'BEGIN{d="x"; for(i=0;i<209;i++) d=d "y"}
@@ -192,6 +214,13 @@ exit 0
       # printing ok while comparing nothing. The row exists because the fix is an `else`, and an
       # `else` nobody has seen fire is indistinguishable from the missing one it replaced.
       sed -i.t 's| KB full / ~| KB total / ~|' README.md && rm -f README.md.t ;;
+
+  18c) # The floor lane. Check 18's three assertions were all upper caps, so a hook emitting
+      # nothing satisfied every one and printed "ok injected context bounded (digest 0 B,
+      # baseline 0 B)". The floor that fixed that had no mutation behind it -- it was proven by
+      # a hand-run, which by this repository's own standard is not evidence. Stub the hook to
+      # say nothing at all and the floors must name it.
+      printf '#!/usr/bin/env bash\nexit 0\n' > claude/hooks/inject-session-context.sh ;;
   14b) # Honour a stale lock. A killed run leaves its lock behind, and a gate that refuses on a
       # dead pid is wedged for everyone until someone deletes a file they do not know about --
       # the failure mode that makes people delete locks reflexively and defeat the whole thing.
@@ -205,7 +234,7 @@ exit 0
       # settings.project-keys -- could not see it, because the check it armed was asserting the
       # deletion as correct. The row now mutates the behaviour, not the allowlist.
       perl -0pi -e 's/\| \(\$dest \* \$ship\)/| (\$dest * \$ship)\n    | delpaths([(keys - \$A)[] | [.]])/' overlay.sh ;;
-  18) # pad the per-prompt digest past its cap
+  18) # The cap lane: pad the per-prompt digest past its 512 byte ceiling.
       perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
   19) # A schema type violation, which is what check 19 is actually for.
       #
@@ -244,8 +273,13 @@ exit 0
       # the old `git ls-files '*.sh' bin/doctor bin/vstack` selector never linted it and this
       # exact mutation left the check green. Mutating a file the selector already covered would
       # prove the linter runs; mutating this one proves it runs over everything.
-      printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' \
-        >> bin/cloudflare-mcp ;;
+      # Both lanes, since 1.14.0 folded four copies of the selector into one sh_files().
+      # cloudflare-mcp is the shebang-without-suffix lane; ui-gate/rules/browser.sh is the
+      # directive-only lane, a sourced fragment with no shebang at all that the shebang scan
+      # could not see. One mutation per lane, or half the selector stays unproven.
+      for _f in bin/cloudflare-mcp ui-gate/rules/browser.sh; do
+        printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' >> "$_f"
+      done ;;
   30) # A bare disable, no reason on the line and none above it. This is the shape bootstrap.sh
       # carried for several versions while check 29's own header claimed the rule was kept.
       printf '\n# shellcheck disable=SC2086\nsup_probe=$HOME/x\nls $sup_probe >/dev/null 2>&1 || true\n' \
@@ -282,6 +316,28 @@ exit 0
       # watches for, and nothing downstream can undo it.
       sed -i.t '/^  rm -f "\$DEST\/\.claude\/CLAUDE\.md"$/d' \
         overlay.sh && rm -f overlay.sh.t ;;
+
+  35) # Put the floor back the way it read for four versions: an accounting rule satisfied at
+      # zero. `-lt 0` can never be true, so the OK below fires again over a target where every
+      # rule skipped. One comparison, which is all it took the first time.
+      sed -i.t 's/\[ "\$RAN" -eq 0 \]/[ "$RAN" -lt 0 ]/' ui-gate/ui-gate.sh \
+        && rm -f ui-gate/ui-gate.sh.t ;;
+
+  36) # Restore the truncation: treat every log as new, which is the line that shipped three
+      # times and threw away the previous arm each time.
+      sed -i.t 's/if \[ -s "\$f" \]; then/if false; then/' tests/evals/lib/runlog.sh \
+        && rm -f tests/evals/lib/runlog.sh.t ;;
+
+  37) # Put back the zero that reads as a finding. A run whose fixtures planted nothing scores
+      # f1 0.0000 instead of saying so, delta goes hugely negative, and the loop reverts a good
+      # change for being "measurably worse".
+      sed -i.t 's/INVALID zero planted defects[^"]*/0 0 0/' tests/evals/optimize.sh \
+        && rm -f tests/evals/optimize.sh.t ;;
+
+  38) # A doc pointing at a script that is not there -- exactly the state this file was left in
+      # the moment tests/evals/run.sh was deleted, and the shape check 20 already catches on the
+      # ~/ side but never did on the repo-relative one.
+      printf '\nRun `tests/evals/does-not-exist.sh` before committing.\n' >> tests/README.md ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;
@@ -345,19 +401,19 @@ for id in $CHECKS; do
     _probe=$(./.claude/verify.sh 2>&1)
     if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (no tags to compare against; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
   fi
 
   if [ "$id" = 19 ]; then
     if ! command -v claude >/dev/null 2>&1; then
       printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
     _probe=$(./.claude/verify.sh 2>&1)      # not a pipe: see the 141 note on check 24 above
     if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (validator is not validating; %s)\n' "$id" "$lbl"
-      continue
+      SKIPPED=$((SKIPPED+1)); continue
     fi
   fi
 
@@ -372,13 +428,28 @@ for id in $CHECKS; do
     # weak check when the truth is a mutation that landed nowhere. That has now happened three
     # times: rows 11, 26 and 28, the last two on the same README rewrite. Distinguish the two
     # cases instead of leaving the reader to guess.
-    _before=""
-    [ -n "$fs" ] && _before=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
-    break_it "$id"
-    _after=""
-    [ -n "$fs" ] && _after=$(cat $fs 2>/dev/null | shasum | cut -d' ' -f1)
-    if [ -n "$fs" ] && [ "$_before" = "$_after" ]; then
-      printf 'FAIL  check %-3s mutation changed nothing (its pattern no longer matches %s)\n' "$id" "$fs"
+    # Fingerprinted per file, not over the concatenation. Rows 1, 18 and 29 each mutate two
+    # files now -- two lanes of a check that makes two promises -- and a combined hash goes on
+    # matching as long as either lane still lands, which is precisely the rot this detector
+    # exists to catch, one level finer. Naming the file that stopped changing is also the whole
+    # value of the message.
+    _stale=""
+    if [ -n "$fs" ]; then
+      _before=""
+      for _f in $fs; do _before="$_before$(shasum < "$_f" 2>/dev/null | cut -d' ' -f1) "; done
+      break_it "$id"
+      _i=0
+      for _f in $fs; do
+        _i=$((_i+1))
+        _b=$(printf '%s' "$_before" | cut -d' ' -f"$_i")
+        _a=$(shasum < "$_f" 2>/dev/null | cut -d' ' -f1)
+        [ "$_b" = "$_a" ] && _stale="$_stale $_f"
+      done
+    else
+      break_it "$id"
+    fi
+    if [ -n "$_stale" ]; then
+      printf 'FAIL  check %-3s mutation changed nothing in:%s (its pattern no longer matches)\n' "$id" "$_stale"
       FAILED=$((FAILED+1))
       restore $fs
       continue
@@ -413,6 +484,18 @@ if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2
 fi
 
 echo
-printf '%d passed, %d failed\n' "$PASSED" "$FAILED"
+# The accounting verify.sh carries, in the twin that enforces it. This printed "N passed, 0
+# failed / FALSIFIABLE" with no declared count and no skip line, so rows 19 and 24 could
+# `continue` out and the summary read exactly like a run that proved every row. verify.sh's own
+# founding lesson, unapplied to the suite that proves verify.sh.
+DECLARED=0
+for _ in $CHECKS; do DECLARED=$((DECLARED+1)); done
+DECLARED=$((DECLARED+1))            # the tree-unchanged row at the end is a row too
+printf '%d declared, %d passed, %d failed, %d skipped\n' "$DECLARED" "$PASSED" "$FAILED" "$SKIPPED"
+if [ "$((PASSED + FAILED + SKIPPED))" -ne "$DECLARED" ]; then
+  printf 'FAIL  row accounting: %d declared row(s) reported nothing\n' \
+    "$((DECLARED - PASSED - FAILED - SKIPPED))"
+  FAILED=$((FAILED+1))
+fi
 [ "$FAILED" -eq 0 ] && echo "FALSIFIABLE" || echo "NOT FALSIFIABLE"
 [ "$FAILED" -eq 0 ]

@@ -44,6 +44,32 @@ ok(){   printf 'ok    %s\n' "$1"; RAN=$((RAN+1)); }
 bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; FAIL=1; RAN=$((RAN+1)); }
 skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
+# One selector, four callers. Checks 1, 12, 29 and 30 each need "the shell scripts in this
+# repository" and each spelled it separately: a shebang scan, copied. That spelling missed
+# ui-gate/rules/browser.sh and ui-gate/rules/tokens.sh -- real bash, sourced by ui-gate.sh,
+# carrying `# shellcheck shell=bash` and no shebang because they are never executed directly.
+# Nothing here parsed them and nothing linted them, in the subtree that exists to catch a gate
+# reporting OK over nothing. That is the second miss for this predicate: bin/cloudflare-mcp
+# (#!/bin/sh, no .sh suffix) was the first, and is why the shebang scan replaced a hand-list.
+# The fix is not a third spelling, it is one.
+#
+# Three ways to be a shell script here, because the repo genuinely has all three: the suffix,
+# the shebang, or a `# shellcheck shell=` directive for a fragment that has neither. .zsh is
+# deliberately out -- shellcheck does not lint zsh and `bash -n` would misread it.
+sh_files(){
+  git ls-files 2>/dev/null | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      *.zsh) continue ;;
+      *.sh|*.bash) printf '%s\n' "$f"; continue ;;
+    esac
+    if grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" \
+    || grep -q '^#[[:space:]]*shellcheck[[:space:]]\+shell=' <<<"$(head -5 "$f" 2>/dev/null)"; then
+      printf '%s\n' "$f"
+    fi
+  done
+}
+
 # --- 0. the toolchain this gate depends on is present -------------------------------------
 # jq is core tier (README: install via ./setup-machine.sh). Five checks below need it and
 # git. Reporting their absence as a quiet skip let a partial run masquerade as a full pass,
@@ -56,9 +82,9 @@ for t in jq git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; do
 # --- 1. every shell script parses ----------------------------------------------------------
 errs=""
 while IFS= read -r f; do
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue   # not a pipe: SIGPIPE + pipefail = 141
+  [ -n "$f" ] || continue
   out=$(bash -n "$f" 2>&1) || errs="$errs\n$f: $out"
-done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*" \) -print)
+done <<<"$(sh_files)"   # not a pipe: SIGPIPE + pipefail = 141
 [ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
 
 # --- 2. every JSON file parses --------------------------------------------------------------
@@ -328,12 +354,30 @@ if command -v jq >/dev/null; then
             jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null
           } | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh' | sort -u)
   nref=$(printf '%s\n' "$refs" | grep -c . )
-  [ "$nref" -ge 4 ] || errs="$errs\nhook command extraction found $nref scripts, expected 4+ (the settings schema or jq filter changed)"
+  # Both directions, against the tree rather than a number. This was `[ "$nref" -ge 4 ]` while
+  # the real count was 6, so two hooks could fall out of the wiring and the floor would still
+  # clear. Rewiring one event's command to a script another event already names keeps every
+  # event key present, every referenced file on disk, and drops nref from 6 to 5 -- the check
+  # printed ok with format.sh wired to nothing at all. A literal floor cannot notice a tree
+  # that grew past it; the set comparison below has nothing to go stale.
   for h in $refs; do
     [ -f "claude/$h" ] || errs="$errs\n$h: referenced in hook wiring but not in claude/hooks/"
   done
+  # refs arrives newline-separated from sort -u; flatten it so the membership test below is a
+  # word match and not an accident of where the newlines fell.
+  refs_flat=" $(printf '%s' "$refs" | tr '\n' ' ') "
+  for f in claude/hooks/*.sh; do
+    [ -e "$f" ] || continue
+    case "$refs_flat" in
+      *" hooks/${f##*/} "*) ;;
+      *) errs="$errs\n${f##*/}: shipped in claude/hooks/ but no lane wires it, so it never runs" ;;
+    esac
+  done
+  ndisk=0
+  for f in claude/hooks/*.sh; do [ -e "$f" ] && ndisk=$((ndisk + 1)); done
+  [ "$ndisk" -gt 0 ] || errs="$errs\nclaude/hooks/ has no scripts in it, so this compared nothing"
 
-  [ -z "$errs" ] && ok "hook wiring (3 lanes, $nref scripts)" || bad "hook wiring" "$(printf '%b' "$errs")"
+  [ -z "$errs" ] && ok "hook wiring (3 lanes, $nref wired, $ndisk shipped)" || bad "hook wiring" "$(printf '%b' "$errs")"
 else
   skip "hook wiring" "jq not installed"
 fi
@@ -369,9 +413,7 @@ nck=$TOTAL
 # Same shape, one noun later. The CHANGELOG said "29 shell scripts" against a tree of 27 .sh
 # files and 31 shebang scripts, and nothing could see it because "shell script" was not in the
 # map. Derived the same way check 29 selects, so the two can never disagree.
-nsh=$(git ls-files 2>/dev/null | while IFS= read -r f; do
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf 'x\n'
-done | grep -c .)
+nsh=$(sh_files | grep -c .)
 
 want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
   case "$1" in
@@ -417,8 +459,34 @@ done <<EOF
 $(printf '%s' "$NOUNS" | tr '|' '\n' | sed 's/?$//')
 EOF
 
-for f in README.md CHANGELOG.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
-         claude/skills/ATTRIBUTION.md claude/CLAUDE.md docs/how-skills-fire.md tests/README.md; do
+# Derived, not listed. This was a hand-maintained list of eight and it had grown by hand every
+# time somebody noticed a miss -- tests/README.md and docs/how-skills-fire.md were both late
+# additions, and tests/evals/RESULTS.md was the next one waiting to be noticed. That is exactly
+# the shape check 29 removed one check over: a list you have to remember to update is a list
+# that goes stale silently, and the remembering is the part that fails.
+#
+# Every tracked markdown and manifest is scanned except two trees, and the rule is one rule:
+# a document whose numbers are evidence about something other than this tree's shape today.
+# docs/provenance/** is dated internal handoffs -- they record what was true on the day, and
+# rewriting them to satisfy today's tree would be falsifying history. docs/research/** is
+# published evidence about other systems; its "15 agents" and "196 checks" are somebody else's
+# benchmark, and holding them to this repository's counts is a category error, not a finding.
+#
+# This is still an exclusion somebody has to maintain, and worth being honest about: a document
+# dropped into either tree is unscanned by design. It is two directories with a stated rule
+# rather than eight filenames with none, which is the improvement -- not a claim that the
+# problem is gone.
+doc_set=$(git ls-files '*.md' '*.json' 2>/dev/null | grep -vE '^docs/(provenance|research)/')
+ndocs=$(printf '%s' "$doc_set" | grep -c .)
+# A derived set can silently shrink to nothing, which would make this check pass by scanning no
+# documents at all -- the precise failure it exists to catch, turned on itself. So the set is
+# asserted before it is used.
+if [ "$ndocs" -lt 8 ] \
+|| ! grep -qx 'README.md' <<<"$doc_set" \
+|| ! grep -qx 'CHANGELOG.md' <<<"$doc_set"; then
+  errs="$errs\ninternal: the derived document set is $ndocs file(s) and does not contain both README.md and CHANGELOG.md, so this scanned nothing worth scanning"
+fi
+for f in $doc_set; do
   [ -f "$f" ] || continue
   if [ "$f" = CHANGELOG.md ]; then
     # Only the entries that describe what ships today: Unreleased, plus the section for the
@@ -447,7 +515,7 @@ EOF
     [ -n "$want" ] && [ "$num" != "$want" ] \
       && errs="$errs\n$f: claims '$claim', tree has $want"
   done <<EOF
-$(printf '%s' "$norm" | grep -oE "[0-9]+ ($NOUNS)" | sort -u)
+$(printf '%s' "$norm" | grep -oE "(^|[^\$[:alnum:]])[0-9]+ ($NOUNS)" | sed -E 's/^[^0-9]*//' | sort -u)
 EOF
 
   # table form: "| Commands | 14 |"
@@ -658,7 +726,22 @@ if [ -f tests/gate-falsifiability.sh ]; then
   nid=0
   for i in $(grep -oE '^# --- [0-9]+b?\.' "$SELF" | sed 's/^# --- //; s/\.$//'); do
     nid=$((nid+1))
-    case "$cov" in *" $i "*) ;; *) errs="$errs\ncheck $i has no row in tests/gate-falsifiability.sh" ;; esac
+    case "$cov" in
+      *" $i "*) ;;
+      *) errs="$errs\ncheck $i is not listed in CHECKS= in tests/gate-falsifiability.sh" ;;
+    esac
+    # Listing is not a row. This asserted membership in the CHECKS string and nothing else, so
+    # an id could be added there with no break_it and no label_for and this check stayed green;
+    # the omission surfaced only when somebody ran the suite, which is the thing this check
+    # exists to make unnecessary. All three arms, or it is not falsifiable.
+    grep -qE "^  $i\)" <<<"$(sed -n '/^label_for(){/,/^esac }/p' tests/gate-falsifiability.sh)" \
+      || errs="$errs\ncheck $i has no label_for arm, so no row can match its FAIL line"
+    # A row falsifies its check by editing a file or by changing the environment the gate runs
+    # in -- check 0 is about the toolchain, so its row strips jq from PATH instead of editing
+    # anything. Both count; neither existing does not.
+    grep -qE "^  $i\)" <<<"$(sed -n '/^break_it(){/,/^esac }/p' tests/gate-falsifiability.sh)" \
+      || grep -qE "\[ \"\\\$id\" = $i \]" tests/gate-falsifiability.sh \
+      || errs="$errs\ncheck $i has neither a break_it arm nor an environment branch, so nothing ever breaks it"
   done
   [ -z "$errs" ] && ok "falsifiability coverage ($nid checks)" \
     || bad "falsifiability coverage" "$(printf '%b' "$errs")"
@@ -749,33 +832,42 @@ if command -v jq >/dev/null; then
   # The README publishes these byte counts as the cost column of its comparison table. A number
   # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
   # keeps finding in its own docs — so the published figures are read back and compared.
+  #
+  # Anchored on the row's LABEL, not on its figures. This was
+  #   if [ -f README.md ] && grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md
+  # with no else, and cc76ba8 -- a README rewrite from 469 lines to 226 -- moved the sentence it
+  # keyed on. The comparison then did nothing for eleven commits while the check printed ok, and
+  # the same rewrite killed a second guard the same way. It happened a second time during the
+  # v1.15.0 audit, on a second rewrite, while the fix was being written: a later commit here is
+  # titled "put back the anchor my own mutation test moved". Anchoring on the figures cannot
+  # survive that, because the figures are precisely the thing people edit. The label states what
+  # the row means and outlives a rewrite of what the row says.
+  #
+  # Three outcomes, three messages. The row missing and the row present with an unparseable
+  # value are different repairs, and conflating them sends the next reader looking for a row
+  # that is sitting in front of them.
   _full=$(probe SessionStart '' '')
   _sk=$(probe SessionStart skills 1)
-  # Compared with tolerance, not for equality. The exact byte count is not a publishable
-  # constant: the block embeds environment-dependent text, so this machine measured 3655 and CI
-  # measured 3667 for the same commit. Demanding equality made the gate depend on where it ran,
-  # which is a worse failure than the staleness it was added to prevent — a check that is only
-  # true on one machine is the thing this repo keeps finding and removing.
-  #
-  # So the README publishes a rounded KB figure and this asserts the live value still rounds to
-  # it. Real drift moves this by hundreds of bytes; noise moves it by tens.
-  if [ -f README.md ] && grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md; then
-    _qf=$(grep -oE '~[0-9.]+ KB full' README.md | head -1 | grep -oE '[0-9.]+')
-    _qs=$(grep -oE '~[0-9.]+ KB plugin' README.md | head -1 | grep -oE '[0-9.]+')
-    _lf=$(awk -v b="$_full" 'BEGIN{printf "%.1f", b/1024}')
-    _ls=$(awk -v b="$_sk"   'BEGIN{printf "%.1f", b/1024}')
+  _label='Context spent per session'
+  _row=$(grep -F "| $_label " README.md 2>/dev/null | head -1)
+  _qf=$(printf '%s' "$_row" | grep -oE '~[0-9.]+ KB full' | grep -oE '[0-9.]+')
+  _qs=$(printf '%s' "$_row" | grep -oE '~[0-9.]+ KB plugin' | grep -oE '[0-9.]+')
+  _lf=$(awk -v b="$_full" 'BEGIN{printf "%.1f", b/1024}')
+  _ls=$(awk -v b="$_sk"   'BEGIN{printf "%.1f", b/1024}')
+  if [ -z "$_row" ]; then
+    errs="$errs\nREADME has no '$_label' row, so the published session cost was compared against nothing -- restore the row or repoint this at the one that replaced it"
+  elif [ -z "$_qf" ] || [ -z "$_qs" ]; then
+    errs="$errs\nREADME's '$_label' row is present but no ~N KB full / ~N KB plugin figures parse out of it -- the value format changed, not the row"
+  else
+    # Compared with tolerance, not for equality. The exact byte count is not a publishable
+    # constant: the block embeds environment-dependent text, so this machine measured 3655, a
+    # worktree on it measured 3670, and CI measured 3667 for the same commit. Demanding equality
+    # made the gate depend on where it ran, which is a worse failure than the staleness it was
+    # added to prevent. Real drift moves this by hundreds of bytes; noise moves it by tens.
     awk -v a="$_qf" -v b="$_lf" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
       || errs="$errs\nREADME quotes ~$_qf KB for the full session cost; live is ~$_lf KB"
     awk -v a="$_qs" -v b="$_ls" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
       || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
-  else
-    # Absence of the anchor is the failure, not a reason to stop measuring. This guard was
-    # `if grep -q ANCHOR; then compare; fi` with no else, and cc76ba8 -- a README rewrite from 469
-    # lines to 226 -- moved the sentence it keys on. The comparison then did nothing for eleven
-    # commits while the check went on printing ok, and the same rewrite killed a second guard the
-    # same way. A gate whose anchor lives in prose degrades to silence the moment someone edits
-    # the prose, and prose gets edited.
-    errs="$errs\nREADME no longer publishes the ~N KB full / ~N KB plugin figures, so the published cost was compared against nothing -- restore the anchor or rewrite this to read the new one"
   fi
   [ -z "$errs" ] \
     && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
@@ -934,11 +1026,39 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     now=$(jq -r 'keys[]' claude/settings.json | sort -u)
     errs=""
     for k in $(printf '%s' "$retired" | jq -r '.[]?' 2>/dev/null); do
-      printf '%s\n' "$now"  | grep -qx "$k" && errs="$errs\n$k: still shipped in claude/settings.json, so it is not retired"
-      printf '%s\n' "$ever" | grep -qx "$k" || errs="$errs\n$k: claude/settings.json has never shipped it — not this repo's key to delete"
+      grep -qx "$k" <<<"$now"  && errs="$errs\n$k: still shipped in claude/settings.json, so it is not retired"
+      grep -qx "$k" <<<"$ever" || errs="$errs\n$k: claude/settings.json has never shipped it — not this repo's key to delete"
     done
-    [ -z "$errs" ] && ok "RETIRED names only retired keys ($(printf '%s' "$retired" | jq -r 'length') entries)" \
-      || bad "RETIRED names only retired keys" "$(printf '%b' "$errs")"
+    nret=$(printf '%s' "$retired" | jq -r 'length')
+
+    # RETIRED ships empty, which is correct: this repository currently retires nothing. But an
+    # empty list means the loop above never runs, and "ok (0 entries)" then reads like a
+    # measurement of zero rather than the absence of one -- a green with no evidence under it,
+    # which is the shape this whole gate exists to remove. Skipping instead would be honest and
+    # would still measure nothing.
+    #
+    # So measure the decider, the way checks 23, 27, 32 and 37 do. Two synthetic keys, one of
+    # each kind, run through the same two comparisons the loop uses. A key still shipping must
+    # be rejected as not retired; a key this repository has never shipped must be rejected as
+    # not ours to delete. If those stop deciding correctly, the loop would not catch a real
+    # retirement either, and that is true whether or not RETIRED currently has anything in it.
+    ctl=""
+    _live=$(printf '%s\n' "$now" | head -1)
+    if [ -n "$_live" ]; then
+      grep -qx "$_live" <<<"$now" || ctl="$ctl\n  control: a key claude/settings.json ships right now was not seen as still shipped"
+    else
+      ctl="$ctl\n  control: claude/settings.json has no keys, so this compared nothing"
+    fi
+    grep -qx 'zz-never-a-real-key' <<<"$ever" \
+      && ctl="$ctl\n  control: a key this repository has never shipped was reported as having shipped"
+
+    if [ -n "$ctl" ]; then
+      bad "RETIRED names only retired keys" "$(printf '%b' "$ctl")"
+    else
+      [ -z "$errs" ] \
+        && ok "RETIRED names only retired keys ($nret entries, decider verified both directions)" \
+        || bad "RETIRED names only retired keys" "$(printf '%b' "$errs")"
+    fi
   fi
 else
   skip "RETIRED names only retired keys" "jq or git not installed"
@@ -1125,9 +1245,27 @@ PINEOF
   else
     # Everything a lane actually delivers. Docs, tests and CI are deliberately excluded: they
     # change without changing what a stranger receives.
-    drift=$(git diff --name-only "v$mv_..HEAD" -- claude/ mcp/ bin/ shell/ conductor/ \
-              install.sh bootstrap.sh overlay.sh uninstall.sh setup-machine.sh 2>/dev/null)
-    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_)" \
+    PAYLOAD="claude/ mcp/ bin/ shell/ conductor/ install.sh bootstrap.sh overlay.sh uninstall.sh setup-machine.sh"
+    # shellcheck disable=SC2086  # PAYLOAD is a deliberate word list of pathspecs, not one path
+    drift=$(git diff --name-only "v$mv_..HEAD" -- $PAYLOAD 2>/dev/null)
+    # The working tree too, not only HEAD. This compared v$mv_..HEAD and nothing else, so before
+    # a commit HEAD *was* the tag, the diff was empty, and it printed ok while three modified
+    # payload files sat in the working tree. After the commit, same file contents, it went red.
+    # Nothing about the artefact changed between those two runs -- only which side of the commit
+    # boundary the person stood on. A green whose truth value depends on when you ask is worse
+    # than one that is simply wrong, because it is reproducible in both directions on demand,
+    # and it becomes able to fail only once it is too late to act on.
+    #
+    # Staged, unstaged and untracked payload all count, since all three are things a stranger
+    # would receive and the tag does not describe. A `git stash` still hides them; that is stated
+    # in the ok line rather than solved, because the only honest fix for "somebody hid the
+    # evidence" is to say what was looked at.
+    # shellcheck disable=SC2086  # same deliberate word list
+    wt=$(git status --porcelain -- $PAYLOAD 2>/dev/null | sed 's/^...//')
+    if [ -n "$wt" ]; then
+      drift=$(printf '%s\n%s' "$drift" "$wt" | grep -v '^$' | sort -u)
+    fi
+    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_, HEAD and working tree; the tag is local -- this does not check any remote)" \
       || bad "declared version matches what installs" \
              "$(printf 'the manifests say v%s but the payload has moved since that tag:\n%s\nbump the version and changelog it, or the plugin and unpinned lanes ship something v%s never described' "$mv_" "$(printf '%s' "$drift" | sed 's/^/  /' | head -10)" "$mv_")"
   fi
@@ -1222,7 +1360,13 @@ if [ -f .github/workflows/verify.yml ]; then
     && ok "documented platforms match CI ($(printf '%s' "$ci_runners" | tr '\n' ' '))" \
     || bad "documented platforms match CI" "$(printf 'support is a claim about what is tested:%b' "$errs")"
 else
-  skip "documented platforms match CI" "no .github/workflows/verify.yml"
+  # Not a skip. The workflow is a tracked file in this repository, not a dependency that may or
+  # may not exist on a runner, so its absence does not mean "cannot measure here" -- it means CI
+  # is gone and the README's platform claim has no evidence behind it at all. Nothing else
+  # asserts the workflow exists; check 31 excludes .github/. A skip here reported the strongest
+  # possible version of the failure as an absence of information.
+  bad "documented platforms match CI" \
+      ".github/workflows/verify.yml is missing, so the platforms the README promises are tested by nothing"
 fi
 
 # --- 27. the skill mandate blocks on an unmet rule and stays quiet otherwise -------------------
@@ -1277,7 +1421,10 @@ fi
 # fine is a doc no path in the repository leads to.
 docs_all=$(find docs -name '*.md' 2>/dev/null | sort)
 if [ -z "$docs_all" ]; then
-  skip "every doc is reachable" "no docs/ directory"
+  # Not a skip, for the same reason: docs/ is tracked. Its absence silently retires three
+  # assertions at once -- this one, and two rows inside check 12 that are guarded on files under
+  # it -- and reports that as nothing to see.
+  bad "every doc is reachable" "there is no docs/ directory, so this and two rows of check 12 are asserting nothing"
 else
   # Written to a file and grepped directly. `printf ... | grep -q` returns 141 under pipefail
   # when grep exits early on a match, so every doc that WAS linked reported as an orphan -- the
@@ -1322,12 +1469,31 @@ fi
 # left shellcheck exiting 1 on it while this check still printed "ok shellcheck clean (29
 # scripts)". A list you have to remember to update is a list that goes stale silently.
 if command -v shellcheck >/dev/null 2>&1; then
-  sc_files=$(git ls-files 2>/dev/null | while IFS= read -r f; do
-    grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf '%s\n' "$f"
-  done)
-  sc_out=$(while IFS= read -r f; do
-    [ -n "$f" ] && shellcheck -S warning -f gcc "$f" 2>/dev/null
-  done <<<"$sc_files")
+  sc_files=$(sh_files)
+  # Read the delegate, do not infer from its silence. This ran `shellcheck ... 2>/dev/null`
+  # inside a command substitution: stderr discarded, exit status never read. `shellcheck -S
+  # nonsense -f gcc install.sh` writes nothing to stdout and exits 4, so a shellcheck that could
+  # not run at all printed "ok shellcheck clean (33 scripts)". That is the same shape as the
+  # count check whose extractor silently stopped matching, and it is why scan() above reads rc.
+  # Exit-status contract: 0 clean, 1 findings, 2 bad input, 3 bad syntax, 4 bad usage. Only
+  # the first two are answers; the rest mean the question was never asked.
+  sc_out=""; sc_err=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    _o=$(shellcheck -S warning -f gcc "$f" 2>/tmp/sc_err.$$); _rc=$?
+    case "$_rc" in
+      0|1) [ -n "$_o" ] && sc_out="$sc_out$_o
+" ;;
+      *)   sc_err="$sc_err\n  $f: shellcheck exited $_rc: $(head -1 /tmp/sc_err.$$)" ;;
+    esac
+  done <<<"$sc_files"
+  rm -f /tmp/sc_err.$$
+  # Positive control, the same two-way shape check 19 uses: a linter that reports nothing is
+  # only good news if it can still report something. Without this, disabling the tool and
+  # deleting every defect are indistinguishable from here.
+  _ctl=$(printf '#!/bin/bash\nx=$HOME/a b\nls $x\n' | shellcheck -S warning -f gcc - 2>/dev/null)
+  [ -n "$_ctl" ] || sc_err="$sc_err\n  positive control: shellcheck found nothing wrong with a known-bad script, so a clean result here means nothing"
+  [ -n "$sc_err" ] && sc_out="$sc_out$(printf '%b' "$sc_err")"
   [ -z "$sc_out" ] \
     && ok "shellcheck clean ($(grep -c . <<<"$sc_files") scripts, warning level)" \
     || bad "shellcheck clean" "$(printf '%s' "$sc_out" | sed 's/^/  /' | head -20)"
@@ -1343,14 +1509,13 @@ fi
 # rule that lives only in prose is a rule that gets skipped by whoever did not read the prose,
 # which is the second time that has happened here -- the documented-count rule was the first.
 #
-# A reason counts if it is on the same line after the code list, which is how the other five
+# A reason counts if it is on the same line after the code list, which is how all seven
 # suppressions in this repo are written, or on the line immediately above. Both are readable at
 # the point of the disable; a reason three lines away is not.
 bare=""
 nsup=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
     n=${hit%%:*}
@@ -1364,9 +1529,9 @@ while IFS= read -r f; do
     fi
     # A directive shellcheck honours is always its own comment line, so anchor on that. Matching
     # the bare phrase also picked up this file's own prose about the rule and the mutation
-    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 6.
+    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 7.
   done <<<"$(grep -nE '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=' "$f" 2>/dev/null)"
-done <<<"$(git ls-files 2>/dev/null)"
+done <<<"$(sh_files)"
 [ -z "$bare" ] \
   && ok "shellcheck suppressions carry a reason ($nsup suppressions)" \
   || bad "shellcheck suppressions carry a reason" \
@@ -1395,8 +1560,16 @@ while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
     claude/skills/*|claude/agents/*|claude/commands/*|.github/*|docs/*) continue ;;
+    # Eval corpora, loaded by directory the same way skills are: the harness points FIX at the
+    # directory and globs it (run-pathways.sh:42), so naming each fixture individually somewhere
+    # would be redundant rather than informative. Adding a fixture is meant to be a file drop.
+    tests/evals/fixtures/*|tests/evals/holdout/*|tests/evals/*/fixture/*) continue ;;
   esac
-  [ -n "$(git grep -l -F "${f##*/}" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
+  # Matched on the path, not the basename. A basename match means every README.md in the tree is
+  # "referenced" by any mention of any README.md, and a subtree that names only itself passes as
+  # a group: ui-gate/ -- shipped as the fix for the fifth fake green -- was named by nothing
+  # outside itself, was not linted, was not parsed, was not run by CI, and this check was green.
+  [ -n "$(git grep -l -F -- "$f" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
     || unref="$unref\n  $f"
 done <<<"$(git ls-files 2>/dev/null)"
 [ -z "$unref" ] \
@@ -1437,9 +1610,15 @@ if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh 
   g_want gv2 "$g_med"   1 "a substantive first prompt gets grilled"
   g_want gv2 "$g_med"   0 "the same prompt later in the session is under the long threshold"
   g_want gv2 "$g_long"  1 "any prompt long enough to be a plan gets grilled"
-  ( export VSTACK_NO_GRILL=1
-    got=$(g_ask gv3 "$g_long")
-    [ "$got" = 0 ] || printf 'ESCAPE_FAILED\n' ) | grep -q ESCAPE_FAILED \
+  # Captured, not piped. Every other `| grep -q` in this file fails in the safe direction -- a
+  # 141 reads as "no match" and invents a failure somebody will investigate. This one was the
+  # exception: 141 on a match would skip the `&&` and report a broken VSTACK_NO_GRILL as green.
+  # The payload is one short line so it never fired in practice, which is exactly why it would
+  # have survived until the payload grew.
+  _esc=$( export VSTACK_NO_GRILL=1
+          got=$(g_ask gv3 "$g_long")
+          [ "$got" = 0 ] || printf 'ESCAPE_FAILED\n' )
+  grep -q ESCAPE_FAILED <<<"$_esc" \
     && g_errs="$g_errs\n  VSTACK_NO_GRILL=1 did not turn it off"
   # The digest runs on every prompt and has a byte cap of its own (check 18). Measure the fired
   # form too: the unfired one is what check 18 probes, so a grill line that blew the budget
@@ -1583,6 +1762,239 @@ if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_m
 else
   skip "the policy document reaches a session exactly once" "jq or git missing, or the policy document is empty"
 fi
+
+# --- 35. a gate that measured nothing does not report success ----------------------------------
+#
+# Three tools in this repository print declared/ran/skipped accounting and then a verdict, and
+# two of them used to pass at ran=0. ui-gate.sh printed "9 declared, 0 ran, 0 passed, 0 failed,
+# 9 skipped" followed by "UI GATE OK" against any directory with no interface files in it, which
+# is the exact defect its own header says the repository exists to catch. doctor --drift printed
+# "no drift ✔" after four whole families of globs matched nothing, though the resolve-failure
+# branch one layer up had already learned that nothing-compared is a failure.
+#
+# So this is not a one-off: it is the same reading twice, in two tools, one of which had already
+# been fixed in one branch and not the others. Both directions are asserted, because a gate that
+# always refuses is worth exactly as much as one that never does -- and the refusing direction is
+# the one nobody would notice breaking.
+g_errs=""
+if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
+  g_empty=$(mktemp -d)
+
+  # ui-gate, negative: no interface files, so no rule can run.
+  _o=$(./ui-gate/ui-gate.sh "$g_empty" 2>&1)
+  grep -q 'UI GATE OK' <<<"$_o" \
+    && g_errs="$g_errs\n  ui-gate reports OK over a target where no rule ran"
+  grep -q 'UI GATE NOT RUN' <<<"$_o" \
+    || g_errs="$g_errs\n  ui-gate does not say it never ran; it must name that case, not stay quiet"
+
+  # ui-gate, positive: a fixture with real component and stylesheet files.
+  mkdir -p "$g_empty/app/src"
+  printf 'export const C = () => <div className="mt-4 p-4">x</div>;\n' > "$g_empty/app/src/C.tsx"
+  printf '.a{font-size: 16px;}\n' > "$g_empty/app/src/a.css"
+  _o=$(./ui-gate/ui-gate.sh "$g_empty/app" 2>&1)
+  grep -q 'UI GATE OK' <<<"$_o" \
+    || g_errs="$g_errs\n  ui-gate withholds OK from a fixture whose rules do run and hold"
+
+  # doctor --drift, negative: a $REPO that resolves but ships no families at all.
+  g_repo=$(mktemp -d); g_home=$(mktemp -d)
+  mkdir -p "$g_repo"/claude/hooks "$g_repo"/claude/agents "$g_repo"/claude/commands \
+           "$g_repo"/claude/skills "$g_repo"/bin "$g_home/.claude"
+  cp claude/CLAUDE.md claude/statusline.sh claude/settings.json "$g_repo/claude/" 2>/dev/null
+  cp claude/CLAUDE.md claude/statusline.sh "$g_home/.claude/" 2>/dev/null
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'no drift' <<<"$_o" \
+    && g_errs="$g_errs\n  doctor --drift reports no drift after comparing zero items per family"
+
+  # doctor --drift, positive: one member in every family, mirrored on both sides.
+  for _p in hooks/h.sh agents/a.md commands/c.md; do
+    printf 'x\n' > "$g_repo/claude/$_p"
+    mkdir -p "$g_home/.claude/${_p%/*}" && printf 'x\n' > "$g_home/.claude/$_p"
+  done
+  mkdir -p "$g_repo/claude/skills/s" "$g_home/.claude/skills/s"
+  printf 'x\n' > "$g_repo/claude/skills/s/SKILL.md"; printf 'x\n' > "$g_home/.claude/skills/s/SKILL.md"
+  mkdir -p "$g_home/.config/agents/bin"
+  printf 'x\n' > "$g_repo/bin/b"; printf 'x\n' > "$g_home/.config/agents/bin/b"
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'no drift' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift withholds its verdict from a tree that matches item for item"
+  grep -qE 'no drift .*[0-9]+ item' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not say how many items it compared, so the result cannot be audited"
+
+  rm -rf "$g_empty" "$g_repo" "$g_home"
+  [ -z "$g_errs" ] \
+    && ok "gates refuse a green on nothing measured (ui-gate, doctor --drift, both directions)" \
+    || bad "gates refuse a green on nothing measured" "$(printf '%b' "$g_errs")"
+else
+  skip "gates refuse a green on nothing measured" "ui-gate/ui-gate.sh or bin/doctor is not executable"
+fi
+
+# --- 36. an eval run log is opened without destroying the one already there --------------------
+#
+# Every harness under tests/evals/ opened its log with `printf '<header>\n' > "$RUNLOG"`. That
+# truncates unconditionally, which is harmless for the default (a fresh mktemp dir) and
+# destructive the moment a caller passes RUNLOG= to accumulate across arms -- which is required,
+# because one model-calling arm does not fit in a single invocation. Each arm overwrote the one
+# before it, exit status stayed 0, and the summary reported the survivor as the whole experiment.
+#
+# It has already cost data. .audit/run/falsedone-*.tsv retains nine rows, all arm=vstack; the
+# twelve-run `none` baseline quoted in docs/research/do-harnesses-help.md has no surviving raw
+# rows. Nothing noticed, because destroying data and succeeding look identical from outside.
+#
+# The line was copied into three harnesses, so the assertion is not "these three are fixed" but
+# "no fourth can reintroduce it": the truncating redirect is banned outright under tests/evals/,
+# and any harness that defines its own RUNLOG default must go through the shared opener. The
+# behavioural half runs the opener; the static half stops the next copy.
+r_errs=""
+if [ -f tests/evals/lib/runlog.sh ]; then
+  # shellcheck source=/dev/null
+  . tests/evals/lib/runlog.sh
+  r_dir=$(mktemp -d); r_f="$r_dir/runs.tsv"; r_h=$(printf 'arm\trun\tresult')
+
+  open_runlog "$r_f" "$r_h" 2>/dev/null || r_errs="$r_errs\n  refused to open a log that does not exist yet"
+  [ "$(grep -c . "$r_f")" = 1 ] || r_errs="$r_errs\n  a new log did not get exactly one header line"
+
+  printf 'vstack\t1\tok\n' >> "$r_f"; printf 'vstack\t2\tok\n' >> "$r_f"
+  open_runlog "$r_f" "$r_h" 2>/dev/null || r_errs="$r_errs\n  refused to reopen a log it had written itself"
+  [ "$(grep -c . "$r_f")" = 3 ] || r_errs="$r_errs\n  reopening a log destroyed rows: $(grep -c . "$r_f") line(s) survive of 3"
+  [ "$(grep -c '^arm' "$r_f")" = 1 ] || r_errs="$r_errs\n  reopening wrote a second header line into the middle of the data"
+
+  # optimize.sh hands the harness `log=$(mktemp)`, which exists and is empty. A refusal keyed on
+  # [ -f ] rather than [ -s ] would break the optimiser on its first call, so pin the distinction.
+  r_e="$r_dir/empty.tsv"; : > "$r_e"
+  open_runlog "$r_e" "$r_h" 2>/dev/null || r_errs="$r_errs\n  treated a zero-length file as occupied; optimize.sh passes exactly that"
+
+  open_runlog "$r_f" "$(printf 'other\tschema')" >/dev/null 2>&1
+  [ "$?" = 2 ] || r_errs="$r_errs\n  appended rows of one schema onto a log holding another"
+  rm -rf "$r_dir"
+
+  # The static half. A truncating redirect anywhere under tests/evals/ is the defect itself.
+  # Anchored on code, not on the word. The first spelling of this matched the sentence in
+  # runlog.sh's own header that quotes the defect, which is the same way check 30's first draft
+  # counted its own prose as a suppression. A file explaining a bug is not committing it.
+  r_trunc=$(git grep -n -E '^[^#]*[^>]>[[:space:]]*"\$RUNLOG"' -- tests/evals \
+              ':(exclude)tests/evals/lib/runlog.sh' 2>/dev/null || true)
+  [ -z "$r_trunc" ] || r_errs="$r_errs\n  a truncating redirect into \$RUNLOG is back:\n    $(printf '%s' "$r_trunc" | head -3)"
+
+  # And any harness owning a RUNLOG default must use the shared opener rather than its own.
+  while IFS= read -r r_file; do
+    [ -n "$r_file" ] || continue
+    grep -q 'runlog\.sh' "$r_file" \
+      || r_errs="$r_errs\n  $r_file sets its own RUNLOG default but never sources tests/evals/lib/runlog.sh"
+  done <<<"$(git grep -l -E '^RUNLOG=\$\{RUNLOG:-|^RUNLOG="\$\{RUNLOG:-' -- tests/evals 2>/dev/null)"
+
+  [ -z "$r_errs" ] \
+    && ok "run logs are opened append-safe (4 cases, plus no truncating redirect under tests/evals)" \
+    || bad "run logs are opened append-safe" "$(printf '%b' "$r_errs")"
+else
+  bad "run logs are opened append-safe" "tests/evals/lib/runlog.sh is missing, so three harnesses are back to truncating"
+fi
+
+# --- 37. the optimiser decides correctly, and refuses to score a run that produced no data -----
+#
+# The fourth decider in this repository and the only one nobody tested. Checks 23, 27 and 32 all
+# drive their decider through its cases in both directions; optimize.sh's accept/revert/noise
+# branch had never executed at all -- --try hard-exits without .opt-state, and .opt-state has
+# never existed, so MIN_GAIN was asserted rather than measured and the code beneath it unrun.
+#
+# The scoring half matters more than the threshold. The old awk collapsed three situations into
+# "0 0 0": a run that genuinely scored zero, a run that produced no rows, and a run whose
+# fixtures planted no defects. Only the first is a result. The other two read as f1 0.0000,
+# which makes delta hugely negative, trips the revert branch, and tells you a good change "made
+# things measurably worse" -- a broken harness arguing against a correct edit.
+#
+# Offline and free: both functions are pure, so this spends no model allowance.
+o_errs=""
+if command -v awk >/dev/null 2>&1 && [ -f tests/evals/optimize.sh ]; then
+  # shellcheck source=/dev/null
+  eval "$(sed -n '/^f1_from_log() {/,/^}/p;/^decide() {/,/^}/p' tests/evals/optimize.sh)"
+  o_dir=$(mktemp -d)
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$o_dir/empty.tsv"
+  case "$(f1_from_log "$o_dir/empty.tsv")" in
+    INVALID*) ;; *) o_errs="$o_errs\n  a log with a header and no rows scored instead of reporting no data" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t0\t0\t0\tyes\n' > "$o_dir/noplant.tsv"
+  case "$(f1_from_log "$o_dir/noplant.tsv")" in
+    INVALID*) ;; *) o_errs="$o_errs\n  a run whose fixtures planted no defects scored 0 instead of reporting no data" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t0\t4\t0\tyes\n' > "$o_dir/zero.tsv"
+  case "$(f1_from_log "$o_dir/zero.tsv")" in
+    INVALID*) o_errs="$o_errs\n  a genuine score of zero was reported as no data; those are different findings" ;;
+    *) read -r _r _p _f <<<"$(f1_from_log "$o_dir/zero.tsv")"
+       [ "$_f" = "0.0000" ] || o_errs="$o_errs\n  a run that found none of 4 planted defects scored f1 $_f, expected 0.0000" ;;
+  esac
+
+  printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\nvstack\ta\t1\t4\t4\t0\tyes\n' > "$o_dir/perfect.tsv"
+  read -r _r _p _f <<<"$(f1_from_log "$o_dir/perfect.tsv")"
+  [ "$_f" = "1.0000" ] || o_errs="$o_errs\n  a run that found all 4 of 4 with no false positives scored f1 $_f, expected 1.0000"
+
+  # The decision, including the boundary an edit moves by accident.
+  [ "$(decide 0.50 0.60 0.05)" = keep ]   || o_errs="$o_errs\n  a +0.10 gain was not kept"
+  [ "$(decide 0.50 0.40 0.05)" = revert ] || o_errs="$o_errs\n  a -0.10 loss was not reverted"
+  [ "$(decide 0.50 0.52 0.05)" = noise ]  || o_errs="$o_errs\n  a +0.02 move inside the spread was treated as a result"
+  [ "$(decide 0.50 0.55 0.05)" = noise ]  || o_errs="$o_errs\n  exactly +MIN_GAIN was kept; the boundary is strictly greater than"
+
+  rm -rf "$o_dir"
+  [ -z "$o_errs" ] \
+    && ok "optimiser decides correctly (4 scoring cases, 4 decisions, no model calls)" \
+    || bad "optimiser decides correctly" "$(printf '%b' "$o_errs")"
+else
+  skip "optimiser decides correctly" "awk missing or tests/evals/optimize.sh absent"
+fi
+
+# --- 38. every repository path named in live prose exists --------------------------------------
+#
+# Check 20 does this for ~/-rooted install paths and frames it as prose and installed tree
+# disagreeing. The repo-relative direction had never been checked, so a doc could point at a
+# script that is not there and nothing would say so -- which is exactly the state tests/README.md
+# was left in the moment tests/evals/run.sh was deleted.
+#
+# Backticked paths only, and only those ending in an extension this repository actually ships.
+# Resolved against the repo root or against the doc's own directory, because tests/README.md
+# writes `evals/run-pathways.sh` and means tests/evals/run-pathways.sh.
+#
+# Scope is stated rather than assumed. claude/skills, claude/agents and claude/commands are
+# excluded: they are instructions to a model about the reader's project, full of placeholders
+# like `exact/path/to/file.py` and target-project paths like `.impeccable/config.json`, none of
+# which are claims about this tree. docs/provenance and docs/research are excluded for the same
+# reason check 12 excludes them -- one is dated internal history, the other describes other
+# people's repositories. CHANGELOG is excluded because its older entries name files that were
+# real when written and deleting them later is not an error.
+p_errs=""
+p_docs=$(git ls-files 'README.md' 'tests/README.md' 'ui-gate/README.md' 'docs/*.md' '.github/*.md' '.github/**/*.md' 2>/dev/null \
+         | grep -vE '^docs/(provenance|research)/')
+p_n=$(printf '%s' "$p_docs" | grep -c .)
+if [ "$p_n" -lt 3 ]; then
+  p_errs="$p_errs\n  internal: only $p_n document(s) in scope, so this scanned nothing worth scanning"
+else
+  p_seen=0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    while IFS= read -r ref; do
+      [ -n "$ref" ] || continue
+      case "$ref" in
+        http*|*'<'*|*'>'*|*'$'*|*'*'*) continue ;;   # URLs, placeholders, globs
+        # The installed namespace, which check 20 owns. `.claude/CLAUDE.md` in prose is a file
+        # the overlay writes into somebody else's repository, or one a falsifiability row plants
+        # and removes; it is not a claim that this tree ships it, and demanding it exist here
+        # would be the same category error as holding another project's benchmark counts to
+        # this one. Paths this repository does ship live under claude/, without the dot.
+        .claude/*) continue ;;
+      esac
+      p_seen=$((p_seen + 1))
+      [ -e "$ref" ] && continue
+      [ -e "${d%/*}/$ref" ] && continue
+      p_errs="$p_errs\n  $d names $ref, which is not in this repository"
+    done <<<"$(grep -oE '`[./A-Za-z0-9_-]+/[./A-Za-z0-9_-]+\.(sh|md|json|py|zsh|toml|yml)`' "$d" 2>/dev/null \
+               | tr -d '`' | sed 's|^\./||' | sort -u)"
+  done <<<"$p_docs"
+  [ "$p_seen" -gt 0 ] || p_errs="$p_errs\n  internal: no backticked repository paths matched at all, so the extractor is looking for the wrong shape"
+fi
+[ -z "$p_errs" ] \
+  && ok "every repository path named in prose exists ($p_seen reference(s) across $p_n document(s))" \
+  || bad "every repository path named in prose exists" "$(printf '%b' "$p_errs")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check

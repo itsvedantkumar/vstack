@@ -14,7 +14,8 @@ N=${N:-12}; ARMS_CSV=${ARMS_CSV:-none,vstack,gstack}
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/false-done.XXXXXX")
 RUNLOG=${RUNLOG:-$ROOT/runs.tsv}
 GSTACK_DIR="${GSTACK_DIR:-}"
-printf 'arm\trun\tsaid_done\ttests_green\tfalse_completion\tseconds\n' > "$RUNLOG"
+. "$SRC/tests/evals/lib/runlog.sh"
+open_runlog "$RUNLOG" "$(printf 'arm\trun\tsaid_done\ttests_green\tfalse_completion\tseconds')" || exit 2
 echo "log: $RUNLOG"
 
 MACHINE_BK="$ROOT/machine-backup"; ARM_DIRS="skills agents commands hooks"

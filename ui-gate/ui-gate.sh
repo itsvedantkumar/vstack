@@ -55,4 +55,23 @@ if [ "$FAILED" -ne 0 ]; then
   echo "UI GATE FAILED"
   exit 1
 fi
-echo "UI GATE OK (a floor: known conditions held, which is not a claim about quality)"
+# A gate that ran nothing has not agreed with you. The accounting above is satisfied at RAN=0 --
+# nine declared, nine skipped, nothing left unreported -- and FAILED is 0 because nothing ran to
+# fail, so both guards passed and the OK below fired over a directory with no interface in it at
+# all. `./ui-gate/ui-gate.sh docs` printed "9 declared, 0 ran, 0 passed, 0 failed, 9 skipped"
+# followed by "UI GATE OK" and exited 0. That is the defect named at the top of this file,
+# reproduced in the summary written to catch it.
+#
+# The floor is RAN, not PASSED: browser rules skipping because playwright is absent is honest,
+# but every rule skipping means the target has no UI, and running a UI gate over a target with
+# no UI is a category error rather than a pass.
+#
+# exit 2 follows this file's own precedent -- the cd above spends 2 on "could not run" and 1 is
+# already spoken for by "rules failed". A caller doing `ui-gate.sh . && ship` blocks either way;
+# a caller that wants to tell the two apart now can.
+if [ "$RAN" -eq 0 ]; then
+  printf 'no rule executed: %d declared, %d skipped, nothing measured\n' "$DECLARED" "$SKIPPED"
+  echo "UI GATE NOT RUN"
+  exit 2
+fi
+echo "UI GATE OK ($PASSED of $DECLARED rules ran and held; a floor, not a claim about quality)"

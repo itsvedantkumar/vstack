@@ -339,7 +339,8 @@ RESULTS=""
 # completed reviews. Anything that takes hours has to be observable while it runs and survivable
 # when it does not.
 RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
-printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$RUNLOG"
+. "$SRC/tests/evals/lib/runlog.sh"
+open_runlog "$RUNLOG" "$(printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered')" || exit 2
 TOTAL_RUNS=$(( $(printf '%s' "$ARMS_CSV" | tr ',' ' ' | wc -w) * NFIX * SAMPLES ))
 DONE_RUNS=0
 # Does this arm's command pathway dispatch at all?
