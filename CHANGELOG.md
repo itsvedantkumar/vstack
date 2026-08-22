@@ -6,6 +6,25 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.9.1 — 2026-08-22
+
+**A fresh bootstrap ended on a red line.** setup-machine.sh installs claude-mem, bin/doctor has
+checked that the plugin's UserPromptSubmit hooks are async for several versions, and nothing ever
+set the flag. So the lane installed the plugin and then left the machine in a state its own doctor
+called drift, telling the operator to re-apply something that had never been applied once.
+
+The install-matrix doctor-stranger case could not see it. That case exercises install.sh, and the
+plugin only arrives through setup-machine.sh, which only the bootstrap lane runs. It was found by
+running the README quickstart verbatim into a scratch HOME, which is the point of running it
+verbatim rather than reading it.
+
+setup-machine.sh now sets the flag, idempotently: it reads first and rewrites only when the flag
+is not already set, because claude-mem auto-updates rewrite hooks.json and revert it. Measured on
+a scratch HOME: doctor goes from one red line and DRIFT to 23 ok, 0 red, 6 notes.
+
+v1.9.0 is tagged and describes a payload carrying this defect. It is left in place rather than
+moved, because a tag somebody may have fetched is not a thing to rewrite. Use v1.9.1.
+
 ## 1.9.0 — 2026-08-22
 
 An audit pass. Every finding below is a green that measured nothing, which is the fifth time
