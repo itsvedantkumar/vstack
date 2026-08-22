@@ -125,50 +125,106 @@ run_tests() { # <dir> <index> -> "pass total"
 #
 # The machine is backed up once before anything moves and restored on any exit path.
 MACHINE_BK="$ROOT/machine-backup"
+
+# Only the directories an arm can occupy, not the whole config dir. Backing up ~/.claude wholesale
+# copied 1.6 GB of plugin cache and session history, per run.
+ARM_DIRS="skills agents commands hooks"
+
 restore_machine() {
   [ -d "$MACHINE_BK" ] || return 0
-  rm -rf "$HOME/.claude" 2>/dev/null
-  cp -R "$MACHINE_BK/.claude" "$HOME/.claude" 2>/dev/null
-  [ -f "$MACHINE_BK/.claude.json" ] && cp "$MACHINE_BK/.claude.json" "$HOME/.claude.json" 2>/dev/null
-  printf 'machine restored from %s\n' "$MACHINE_BK" >&2
+  for _d in $ARM_DIRS; do
+    rm -rf "$HOME/.claude/$_d"
+    [ -d "$MACHINE_BK/$_d" ] && cp -R "$MACHINE_BK/$_d" "$HOME/.claude/$_d"
+  done
+  [ -f "$MACHINE_BK/settings.json" ] && cp "$MACHINE_BK/settings.json" "$HOME/.claude/settings.json"
+  # Reinstall rather than trusting the copy: the wrappers under ~/.config/agents are outside the
+  # backed-up set, and a restore that only put ~/.claude back left doctor reporting drift.
+  ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || true
+  printf 'machine restored\n' >&2
 }
+
 backup_machine() {
   mkdir -p "$MACHINE_BK"
-  cp -R "$HOME/.claude" "$MACHINE_BK/.claude" 2>/dev/null
-  cp "$HOME/.claude.json" "$MACHINE_BK/.claude.json" 2>/dev/null
+  for _d in $ARM_DIRS; do
+    [ -d "$HOME/.claude/$_d" ] && cp -R "$HOME/.claude/$_d" "$MACHINE_BK/$_d"
+  done
+  cp "$HOME/.claude/settings.json" "$MACHINE_BK/settings.json" 2>/dev/null
   trap restore_machine EXIT INT TERM
 }
 
+# Not ./uninstall.sh. That restores from the newest install backup, and because install.sh runs
+# constantly here the newest backup contains vstack's own files -- measured: 28 skills before,
+# 28 after. A deactivation that silently does nothing would have put vstack's skills on the
+# gstack arm and produced a comparison of vstack against itself.
 deactivate_all() {
-  ( cd "$SRC" && ./uninstall.sh --yes >/dev/null 2>&1 ) || true
-  rm -rf "$HOME/.claude/skills/gstack" 2>/dev/null
+  for _d in $ARM_DIRS; do rm -rf "$HOME/.claude/$_d"; mkdir -p "$HOME/.claude/$_d"; done
+  if command -v jq >/dev/null 2>&1 && [ -f "$MACHINE_BK/settings.json" ]; then
+    jq 'del(.hooks) | del(.skillOverrides) | del(.statusLine)' \
+      "$MACHINE_BK/settings.json" > "$HOME/.claude/settings.json" 2>/dev/null || true
+  fi
 }
+
+nskills() { find "$HOME/.claude/skills" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
 
 activate_arm() { # <arm>
   deactivate_all
   case "$1" in
     none) : ;;
     vstack) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1 ;;
-    # Same install as vstack, one extra line in the per-prompt digest. The only variable that
-    # moves is the register the model writes in, so the difference between these two arms is the
-    # answer to "does sounding technical cost or save anything".
     vstack-terse) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1
                   export VSTACK_TERSE=1 ;;
-    gstack) ( cd "$GSTACK_DIR" && ./setup >/dev/null 2>&1 ) || return 1 ;;
+    gstack) ( cd "$GSTACK_DIR" && ./setup --quiet >/dev/null 2>&1 ) || return 1 ;;
   esac
-  # Soundness before spend: refuse an arm that declares paths it does not have. This is the check
-  # whose absence let sixty gstack reviews be scored on a pathway with no helpers.
-  local dang
-  dang=$(grep -rhoE '(~|\$HOME)/\.claude/[A-Za-z0-9._/-]+' "$HOME/.claude/skills" 2>/dev/null \
-         | sort -u | while IFS= read -r q; do
-             r="$HOME${q#\~}"; r="${r#\$HOME}"; [ -e "$HOME/.claude${r#*/.claude}" ] || printf '%s\n' "$q"
-           done | head -5)
-  if [ -n "$dang" ]; then
-    printf 'INVALID %s: declares paths that do not exist:\n%s\n' "$1" "$dang" >&2
-    return 1
-  fi
+  [ "$1" = vstack-terse ] || unset VSTACK_TERSE 2>/dev/null || true
+
+  # Positive control. Every arm asserts that what it installed is actually there and that the
+  # other arm is not, because a benchmark whose arms silently share a config dir compares one
+  # harness against itself and prints a number anyway.
+  local n; n=$(nskills)
+  case "$1" in
+    none)
+      [ "$n" -eq 0 ] || { printf 'INVALID none: %s skill(s) still present after deactivation\n' "$n" >&2; return 1; } ;;
+    vstack|vstack-terse)
+      local want; want=$(find "$SRC/claude/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+      [ "$n" -eq "$want" ] || { printf 'INVALID %s: %s skills installed, expected %s\n' "$1" "$n" "$want" >&2; return 1; }
+      [ -d "$HOME/.claude/skills/gstack" ] && { printf 'INVALID %s: gstack is still installed\n' "$1" >&2; return 1; } ;;
+    gstack)
+      [ -d "$HOME/.claude/skills/gstack" ] || { printf 'INVALID gstack: its skills directory is absent after setup\n' >&2; return 1; }
+      # The check whose absence let sixty gstack reviews be scored on a pathway with no helpers.
+      local missing=0 q
+      for q in bin/gstack-config bin/gstack-telemetry-log review/SKILL.md; do
+        [ -e "$HOME/.claude/skills/gstack/$q" ] || missing=$((missing+1))
+      done
+      [ "$missing" -eq 0 ] || { printf 'INVALID gstack: %s declared helper path(s) missing\n' "$missing" >&2; return 1; } ;;
+  esac
+  printf 'arm %s active (%s user-scope skills)\n' "$1" "$n" >&2
   return 0
 }
+
+# --- selftest: exercise arm switching with no model calls --------------------------------------
+#
+# The expensive part of this benchmark is the model. The part most likely to be wrong is the arm
+# switching, and it is free to test. Three defects were found this way before a single prompt was
+# sent: a 1.6 GB per-run backup, a deactivation that left all 28 skills in place because
+# ./uninstall.sh restores from the newest install backup, and a restore that put ~/.claude back
+# but not the wrappers under ~/.config/agents, leaving doctor reporting drift.
+if [ "${SELFTEST:-0}" = "1" ]; then
+  fails=0
+  before=$(nskills)
+  printf 'before        %s skills\n' "$before"
+  backup_machine
+  printf 'backup        %s\n' "$(du -sh "$MACHINE_BK" 2>/dev/null | cut -f1)"
+  for a in $(echo "$ARMS_CSV" | tr ',' ' '); do
+    if activate_arm "$a"; then printf '  ok    %s\n' "$a"; else printf '  FAIL  %s\n' "$a"; fails=$((fails+1)); fi
+  done
+  restore_machine
+  after=$(nskills)
+  printf 'after restore %s skills\n' "$after"
+  [ "$before" = "$after" ] || { printf '  FAIL  restore left %s skills, started with %s\n' "$after" "$before"; fails=$((fails+1)); }
+  if "$SRC/bin/doctor" >/dev/null 2>&1; then printf '  ok    doctor green after restore\n'
+  else printf '  FAIL  doctor is red after restore\n'; fails=$((fails+1)); fi
+  [ "$fails" -eq 0 ] && { echo; echo "SELFTEST OK"; exit 0; } || { echo; echo "SELFTEST FAILED ($fails)"; exit 1; }
+fi
 
 # --- pre-flight: which instances are usable at all -------------------------------------------
 USABLE=""
