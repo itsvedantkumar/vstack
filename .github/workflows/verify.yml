@@ -13,7 +13,7 @@ jobs:
       # version the manifests declare, and the default shallow checkout carries no tags at all.
       # Without this the check cannot measure and skips, which is honest but proves nothing on
       # the one machine that gates every push.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -115,7 +115,7 @@ jobs:
   install-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
@@ -242,7 +242,7 @@ jobs:
   install-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install matrix on macOS
         run: ./tests/install-matrix.sh
@@ -260,7 +260,7 @@ jobs:
       - name: Tools a slim image does not ship
         run: apk add --no-cache bash git jq curl findutils coreutils grep sed nodejs npm
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The container runs as root against a checkout owned by another uid, so git refuses to
       # operate on it at all. That is a property of running in a container, not of this repo,
