@@ -6,6 +6,8 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.15.0 — 2026-08-22
+
 **The falsifiability suite had no accounting of its own.** It printed `N passed, 0 failed /
 FALSIFIABLE` with no declared count and no skip line, so rows 19 and 24 could `continue` out and
 the summary read exactly like a run that had proved every row. That is verify.sh's own founding

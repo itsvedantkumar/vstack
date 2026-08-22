@@ -99,8 +99,8 @@ check, requires the gate to go red naming that check, restores the tree byte for
 if anything was left behind. Check 16 fails if a check has no mutation row, so a check cannot be
 added without proof it can fail.
 
-This is not decoration. Five checks in this repository have been caught passing while measuring
-nothing:
+This is not decoration. Eighteen checks and gates in this repository have been caught passing
+while measuring nothing. The first five:
 
 - Check 24 printed `ok` for a version whose tag did not exist, having compared zero files.
 - Check 29 linted a hand-maintained file list that never included `bin/cloudflare-mcp`. Breaking
@@ -112,6 +112,25 @@ nothing:
   reporting success off the wrong branch.
 - Two mutations stopped matching after a prose rewrite and reported the checks as unfalsifiable.
   The suite now distinguishes "this check is weak" from "this mutation landed nowhere".
+
+The v1.15.0 audit found thirteen more, and they fall into four shapes worth naming:
+
+- **An anchor in prose that a prose edit moved.** Check 18's comparison of the README's
+  context-cost figure was guarded by a grep for a sentence the same commit reworded into a table
+  row. An `if` with no `else` goes quiet rather than red, and it sat unreachable for four
+  releases. It recurred during the audit, on a second rewrite, while the fix was being written.
+- **A delegate's silence read as success.** Check 29 discarded shellcheck's stderr and never
+  read its exit status, so a shellcheck that could not run reported a clean tree.
+- **A verdict returned over nothing.** `ui-gate.sh` printed `UI GATE OK` with nine rules
+  declared and none run; `doctor --drift` printed `no drift` after five families of globs
+  matched nothing; `compare-baseline` printed a row whose expected value was `-`; the eval
+  harnesses destroyed a run log and exited 0.
+- **A comparison narrower than its label.** Check 31 matched basenames, so a file nobody names
+  passed by sharing a name with one everybody does. Check 11 held a floor of four against a real
+  six. Check 16 asserted an id was listed rather than that a row existed. Check 24 compared
+  `HEAD` and not the working tree, so it could only fail after the commit it was judging. Checks
+  26 and 28 answered "skip" to a missing tracked file. Check 12 scanned eight files chosen by
+  hand, and check 21 reported `ok` over an empty list.
 
 Each is in [CHANGELOG.md](CHANGELOG.md) with the command that exposed it. A project that has never
 found one of these has not looked.
@@ -140,9 +159,9 @@ cd vstack
 **Pinned to a release, reading the script first.**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.14.0/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.15.0/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                        # about 100 lines
-VSTACK_REF=v1.14.0 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.15.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Check 24 fails if a version named in these docs is not a tag that exists. It was added after this
