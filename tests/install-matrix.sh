@@ -721,14 +721,21 @@ if want doctor-no-mutate; then
     # A real vstack checkout, because --drift refuses to run against anything else and a scratch
     # repo made it bail before ever reaching the fetch -- which is how the first version of this
     # case passed against the unfixed doctor.
-    git clone -q "$SRC" "$T/work" 2>/dev/null
-    # CI checks out a PR merge ref, so the clone lands on a detached HEAD and
-    # --set-upstream-to has no branch to attach to. Name one explicitly rather than inheriting
-    # whatever the source checkout happened to be sitting on.
-    git -C "$T/work" checkout -q -B probe-main 2>/dev/null
-    git init -q --bare "$T/remote.git"
-    git -C "$T/work" remote set-url origin "$T/remote.git"
+    # A copy of the tree with a fresh history, not a clone. --drift only requires that the
+    # directory look like a vstack checkout, and cloning inherited the source repo's shape: CI
+    # checks out shallow, a clone of a shallow repo is shallow, and pushing one to a bare remote
+    # is rejected outright with "shallow update not allowed". One commit is enough for
+    # everything --drift reads.
+    mkdir -p "$T/work"
+    cp -R "$SRC"/. "$T/work"/ 2>/dev/null
+    rm -rf "$T/work/.git"
+    git -C "$T/work" init -q
     git -C "$T/work" config user.email t@example.com; git -C "$T/work" config user.name t
+    git -C "$T/work" add -A >/dev/null 2>&1
+    git -C "$T/work" commit -qm probe >/dev/null 2>&1
+    git -C "$T/work" checkout -q -B probe-main
+    git init -q --bare "$T/remote.git"
+    git -C "$T/work" remote add origin "$T/remote.git"
     # the destructive pairing, set locally so the case does not depend on the operator's config
     git -C "$T/work" config fetch.prune true
     git -C "$T/work" config fetch.pruneTags true
