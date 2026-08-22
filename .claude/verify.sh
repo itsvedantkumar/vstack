@@ -578,9 +578,18 @@ if command -v git >/dev/null 2>&1; then
     _lkf="$_gd/vstack-falsifiability-probe.lock"
     _saved=""
     [ -f "$_gd/vstack-falsifiability.lock" ] && _saved=$(cat "$_gd/vstack-falsifiability.lock")
-    _probe(){ # lockpid, falsify -> "rc:output"
+    # env -u, not a bare ${2:+...}. The harness exports VSTACK_FALSIFY=1 for every gate run it
+    # makes, so the nested call inherited it and the "live lock" path silently became a third
+    # copy of the harness-bypass path -- green when run by hand, red the moment the harness ran
+    # it, which is how the suite found this. A check that reads its answer off the ambient
+    # environment is not testing the thing it names.
+    _probe(){ # lockpid, falsify(1 or empty) -> "rc:firstline"
       printf '%s\n' "$1" > "$_gd/vstack-falsifiability.lock"
-      _o=$(env ${2:+VSTACK_FALSIFY=1} VSTACK_GUARD_PROBE=1 bash "$SELF" 2>&1); _r=$?
+      if [ -n "$2" ]; then
+        _o=$(env VSTACK_FALSIFY=1 VSTACK_GUARD_PROBE=1 bash "$SELF" 2>&1); _r=$?
+      else
+        _o=$(env -u VSTACK_FALSIFY VSTACK_GUARD_PROBE=1 bash "$SELF" 2>&1); _r=$?
+      fi
       rm -f "$_gd/vstack-falsifiability.lock"
       printf '%s:%s' "$_r" "$(printf '%s' "$_o" | head -1)"
     }
