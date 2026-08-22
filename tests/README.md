@@ -44,6 +44,17 @@ regression.
 specific skill to auto-fire, inspects the `stream-json` transcript for
 `Skill` tool_use blocks, and reports PASS/FAIL per case.
 
+## team-gating.sh
+
+Asks whether `/team` holds the bar or only says it does. `team-gating.sh` runs the command against
+`tests/fixtures/team-fail/`, where `tests/fixtures/team-fail/slugify.py` is planted to fail three of
+the five criteria in `tests/fixtures/team-fail/test_slugify.py` — plain stdlib, no pytest, so it runs
+on every CI lane. `tests/fixtures/team-fail/README.md` explains why that fixture is the ground truth: whether a delegation was good is a judgement nobody
+can score, whether the lead stopped when told the work was broken is a fact.
+
+Costs model allowance. It opens with a control that refuses the run if the fixture passes its own
+tests, because a fixture with nothing wrong in it makes every assertion below vacuous.
+
 ## evals/
 
 `evals/run-pathways.sh` and `evals/swebench/run.sh` score this bundle against

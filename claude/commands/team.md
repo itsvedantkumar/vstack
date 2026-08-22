@@ -34,7 +34,30 @@ This phase decides whether the work is done. A green unit test is not the same c
 **6. Fix.** Route each finding back to the agent whose phase produced it. Re-run phase 4 on
 anything that changed. Do not accept a fix on the strength of its description.
 
-**7. Ship.** `release-manager`, and only once phase 4 is green.
+**7. Ship.** `release-manager`, and only once phase 4 is green. If phase 4 came back broken and
+phase 6 has not made it green, stop here and report. Shipping past a failed verify is the same
+claim as an agent saying done while the tests are red, made by the one role whose whole job is
+catching it.
+
+## The handoff log
+
+Write `.audit/team-log.tsv` as you go, one row per phase handoff, appended before you start the
+next phase. Not at the end: a log written afterwards is a summary, and a summary is what you
+would have said anyway.
+
+    ts	phase	agent	verdict	evidence	decision
+
+`verdict` is what the agent came back with — `pass`, `broken`, `unverified`. `decision` is what
+*you* did about it: `proceed`, `reject`, `halt`. `evidence` is a command and its output or a
+`file:line`, never a description of intent.
+
+The row that matters is the one where `verdict` is `broken` and `decision` is `reject` or `halt`.
+A log that only ever records `proceed` is decoration — it shows a tech lead who never held the
+bar being indistinguishable from one who had nothing to hold it against. If you never write a
+rejection row, either nothing went wrong or you are not reading what comes back.
+
+Do not soften a verdict on the way into the log. `qa` returning Broken is `broken`, whatever you
+intend to do about it next.
 
 ## Rules
 

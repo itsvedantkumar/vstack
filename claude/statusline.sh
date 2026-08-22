@@ -39,6 +39,23 @@ if [ -n "$cost" ]; then
   elif [ "${whole:-0}" -ge 2 ] 2>/dev/null; then col=$Y; fi
   out="${out} ${D}·${R} ${col}\$${cc}${R}"
 fi
+# The gate indicator. This repository spent a day removing greens that measured nothing, so an
+# indicator that only ever says "protected" would be the same defect wearing better clothes.
+# Three states, and two of them are bad news:
+#
+#   shield  the repo has a .claude/verify.sh AND it is trusted, so Stop actually blocks
+#   open    the repo has a gate but it is not armed -- a gate nobody trusts does not run
+#   (none)  no gate here at all, and the statusline says nothing rather than implying safety
+#
+# Cheap on purpose: two stat calls, no subprocess, because this renders on every turn.
+if [ -f "$cdir/.claude/verify.sh" ]; then
+  _tr="$HOME/.config/agents/verify-trust"
+  if [ -f "$_tr" ] && grep -qF "$cdir/.claude/verify.sh" "$_tr" 2>/dev/null; then
+    out="${out} ${D}·${R} ${G}shield${R}"
+  else
+    out="${out} ${D}·${R} ${Y}gate open${R}"
+  fi
+fi
 [ -d "$HOME/.claude-mem" ] && out="${out} ${D}·${R} 🧠"
 [ -n "$style" ] && out="${out} ${D}· ${C}${style}${R}"
 printf '%s' "$out"

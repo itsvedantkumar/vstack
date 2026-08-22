@@ -120,6 +120,32 @@ case "$CMD" in
   test)
     "$REPO/tests/auto-trigger.sh" "$@"
     ;;
+  receipt)
+    # Render the last /team handoff trail. The elevator-mirror argument for this is real: the
+    # work already happened, the log was already written, and the only thing missing was a way
+    # to look at it. Nothing here computes a verdict -- it reads rows that were written as the
+    # run went, which is why it cannot flatter.
+    #
+    # And it can look bad on purpose. A trail where every decision is `proceed` gets called out
+    # below, because a tech lead who never rejected anything is indistinguishable from one who
+    # never read what came back. That is the difference between a mirror in the lift and a floor
+    # counter that ticks faster than the car moves.
+    log=${2:-.audit/team-log.tsv}
+    [ -s "$log" ] || { echo "no handoff trail at $log — run /team, which writes one as it goes"; exit 1; }
+    rows=$(( $(grep -c . "$log") - 1 ))
+    printf '\n  %s handoff%s\n\n' "$rows" "$([ "$rows" = 1 ] || echo s)"
+    column -s"$(printf '\t')" -t "$log" | sed '1s/^/  /; 1s/$//; 2,$s/^/  /'
+    rej=$(awk -F'\t' 'NR>1 && ($4 ~ /broken|fail/ || $6 ~ /reject|halt/)' "$log" | grep -c .)
+    printf '\n'
+    if [ "$rej" -gt 0 ]; then
+      printf '  %s row%s where a phase was rejected or halted. The bar was held.\n\n' \
+        "$rej" "$([ "$rej" = 1 ] || echo s)"
+    else
+      printf '  Every row is a pass. Either nothing went wrong, or nothing was read.\n'
+      printf '  A trail that cannot show a rejection is not evidence that one was not needed.\n\n'
+    fi
+    ;;
+
   trust)
     d="${1:-$PWD}"
     [ -f "$d/.claude/verify.sh" ] || { echo "vstack trust: no .claude/verify.sh in $d" >&2; exit 2; }

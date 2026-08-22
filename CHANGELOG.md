@@ -6,6 +6,37 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.19.0 — 2026-08-23
+
+**`/team` writes its handoff trail, and something checks it held the bar.** The command has always
+said "you route it and hold the bar" and "decide whether the next phase can start". Nothing
+verified it ever did, and an orchestrator that proceeds past a failed verify is a tech lead
+claiming done while the tests are red.
+
+The trail is mandatory now and written as the run goes rather than at the end, because a log
+written afterwards is a summary and a summary is what you would have said anyway. The row that
+matters is the one where a phase came back broken and the lead rejected it. A log that only ever
+records `proceed` is decoration.
+
+`tests/fixtures/team-fail/` plants work that fails three of its five acceptance criteria, with no
+pytest dependency so it runs on every lane. That gives ground truth without judgement: whether a
+delegation was good is a matter of taste, whether the lead stopped when told the work was broken
+is a fact. `tests/team-gating.sh` opens with a control, so a fixture that accidentally passes
+refuses the run instead of reporting a vacuous green.
+
+**Two things you can now see.** `bin/vstack receipt` renders the last trail. The statusline gained
+a gate indicator with three states: green `shield` when this repo has a `.claude/verify.sh` and it
+is trusted, yellow `gate open` when a gate exists but nothing armed it, and silence when there is
+no gate rather than an implication of safety. Two of the three states are bad news, which is the
+point. An indicator that only ever reports "protected" is a green that measures nothing, moved to
+somewhere harder to audit.
+
+Honest about what the trail is: it makes work visible that already happened. It does not make the
+work better, and the first real one recorded seven rejections across thirteen handoffs, including
+a reviewer catching a docstring that lied and a lead's own sweep finding 434 of 16142 inputs
+non-idempotent. That is worth looking at. It is not evidence the configuration improves output,
+and this entry does not claim it is.
+
 ## 1.18.0 — 2026-08-23
 
 **Six skill descriptions claimed each other's work.** The descriptions are what Claude Code
