@@ -6,6 +6,43 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Check 18 published two promises and kept one.** The half that compares the README's context-cost
+figure against the live byte count was guarded by a grep for `~N KB full / ~N KB plugin` — a
+sentence that `cc76ba8` reworded into a table row in the same commit that severed it. An `if` with
+no `else` does not go red when its anchor stops matching; it goes quiet. The assertion was
+unreachable for four releases while the check kept printing `ok`. It was also check 18's only
+lower bound: every other assertion is an upper cap, so a hook emitting zero bytes satisfied all
+three and printed `ok injected context bounded (digest 0 B, baseline 0 B)`. The anchor is now the
+current table row, a missing anchor is a failure rather than silence, and both bounds are
+asserted. The published 3.6 KB figure was, as it happens, still accurate — which is the point:
+nothing had been checking, and nobody could have known.
+
+**Check 29 read its delegate's silence as success.** `shellcheck ... 2>/dev/null` inside a command
+substitution discarded stderr and never read the exit status. `shellcheck -S nonsense -f gcc
+install.sh` writes nothing to stdout and exits 4, so a shellcheck that could not run at all
+produced `ok shellcheck clean (33 scripts)`. It now reads the exit status per file — 0 and 1 are
+answers, anything else means the question was never asked — and carries the two-way positive
+control check 19 uses, linting a known-bad script and refusing to believe a clean result unless
+the linter can still find that defect.
+
+**One file selector where there were four.** Checks 1, 12, 29 and 30 each spelled "the shell
+scripts in this repository" separately, as a copied shebang scan. All four missed
+`ui-gate/rules/browser.sh` and `ui-gate/rules/tokens.sh` — real bash, sourced by `ui-gate.sh`,
+carrying a `# shellcheck shell=` directive and no shebang because they are never executed
+directly. Nothing in the gate parsed them and nothing linted them, in the one subtree that exists
+to catch a gate reporting OK over nothing. This is the second miss for that predicate;
+`bin/cloudflare-mcp` was the first, and is why the shebang scan replaced a hand-maintained list.
+The fix is not a third spelling. `sh_files()` covers suffix, shebang and directive, and the
+selector went from 33 files to 35.
+
+Rows 1, 18 and 29 of `tests/gate-falsifiability.sh` now mutate both lanes each, so no half of a
+two-part check can rot unproven the way check 18's figure comparison did.
+
+What this does not yet support: the three fixes above were each watched going red under their own
+mutation before being made green, but the falsifiability suite fingerprints a row's files
+together, so it detects both lanes of a widened row rotting and not one of them. Per-file
+fingerprinting is not in this release.
+
 ## 1.13.3 — 2026-08-22
 
 **The policy document no longer ships as a second CLAUDE.md.** v1.13.2 stopped the hooks from

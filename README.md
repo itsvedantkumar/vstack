@@ -28,7 +28,7 @@ writing this. Measured at commit `85fd9db`:
 | Tracked files | 1,359 | 195 |
 | Its review skill, per invocation | 112 KB | delegated to a subagent |
 | Checks proving the thing works | none found | 34 |
-| Mutations proving those checks can fail | none found | 34 |
+| Mutations proving those checks can fail | none found | 36 |
 | Install environments under test | not published | 23 |
 | Uninstall script | none | `./uninstall.sh --yes` |
 | Specialists that are real subagents | 0 | 14 |

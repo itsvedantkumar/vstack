@@ -23,6 +23,32 @@ ok(){   printf 'ok    %s\n' "$1"; RAN=$((RAN+1)); }
 bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; FAIL=1; RAN=$((RAN+1)); }
 skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
+# One selector, four callers. Checks 1, 12, 29 and 30 each need "the shell scripts in this
+# repository" and each spelled it separately: a shebang scan, copied. That spelling missed
+# ui-gate/rules/browser.sh and ui-gate/rules/tokens.sh -- real bash, sourced by ui-gate.sh,
+# carrying `# shellcheck shell=bash` and no shebang because they are never executed directly.
+# Nothing here parsed them and nothing linted them, in the subtree that exists to catch a gate
+# reporting OK over nothing. That is the second miss for this predicate: bin/cloudflare-mcp
+# (#!/bin/sh, no .sh suffix) was the first, and is why the shebang scan replaced a hand-list.
+# The fix is not a third spelling, it is one.
+#
+# Three ways to be a shell script here, because the repo genuinely has all three: the suffix,
+# the shebang, or a `# shellcheck shell=` directive for a fragment that has neither. .zsh is
+# deliberately out -- shellcheck does not lint zsh and `bash -n` would misread it.
+sh_files(){
+  git ls-files 2>/dev/null | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      *.zsh) continue ;;
+      *.sh|*.bash) printf '%s\n' "$f"; continue ;;
+    esac
+    if grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" \
+    || grep -q '^#[[:space:]]*shellcheck[[:space:]]\+shell=' <<<"$(head -5 "$f" 2>/dev/null)"; then
+      printf '%s\n' "$f"
+    fi
+  done
+}
+
 # --- 0. the toolchain this gate depends on is present -------------------------------------
 # jq is core tier (README: install via ./setup-machine.sh). Five checks below need it and
 # git. Reporting their absence as a quiet skip let a partial run masquerade as a full pass,
@@ -35,9 +61,9 @@ for t in jq git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; do
 # --- 1. every shell script parses ----------------------------------------------------------
 errs=""
 while IFS= read -r f; do
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue   # not a pipe: SIGPIPE + pipefail = 141
+  [ -n "$f" ] || continue
   out=$(bash -n "$f" 2>&1) || errs="$errs\n$f: $out"
-done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*" \) -print)
+done <<<"$(sh_files)"   # not a pipe: SIGPIPE + pipefail = 141
 [ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
 
 # --- 2. every JSON file parses --------------------------------------------------------------
@@ -307,12 +333,30 @@ if command -v jq >/dev/null; then
             jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null
           } | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh' | sort -u)
   nref=$(printf '%s\n' "$refs" | grep -c . )
-  [ "$nref" -ge 4 ] || errs="$errs\nhook command extraction found $nref scripts, expected 4+ (the settings schema or jq filter changed)"
+  # Both directions, against the tree rather than a number. This was `[ "$nref" -ge 4 ]` while
+  # the real count was 6, so two hooks could fall out of the wiring and the floor would still
+  # clear. Rewiring one event's command to a script another event already names keeps every
+  # event key present, every referenced file on disk, and drops nref from 6 to 5 -- the check
+  # printed ok with format.sh wired to nothing at all. A literal floor cannot notice a tree
+  # that grew past it; the set comparison below has nothing to go stale.
   for h in $refs; do
     [ -f "claude/$h" ] || errs="$errs\n$h: referenced in hook wiring but not in claude/hooks/"
   done
+  # refs arrives newline-separated from sort -u; flatten it so the membership test below is a
+  # word match and not an accident of where the newlines fell.
+  refs_flat=" $(printf '%s' "$refs" | tr '\n' ' ') "
+  for f in claude/hooks/*.sh; do
+    [ -e "$f" ] || continue
+    case "$refs_flat" in
+      *" hooks/${f##*/} "*) ;;
+      *) errs="$errs\n${f##*/}: shipped in claude/hooks/ but no lane wires it, so it never runs" ;;
+    esac
+  done
+  ndisk=0
+  for f in claude/hooks/*.sh; do [ -e "$f" ] && ndisk=$((ndisk + 1)); done
+  [ "$ndisk" -gt 0 ] || errs="$errs\nclaude/hooks/ has no scripts in it, so this compared nothing"
 
-  [ -z "$errs" ] && ok "hook wiring (3 lanes, $nref scripts)" || bad "hook wiring" "$(printf '%b' "$errs")"
+  [ -z "$errs" ] && ok "hook wiring (3 lanes, $nref wired, $ndisk shipped)" || bad "hook wiring" "$(printf '%b' "$errs")"
 else
   skip "hook wiring" "jq not installed"
 fi
@@ -348,9 +392,7 @@ nck=$TOTAL
 # Same shape, one noun later. The CHANGELOG said "29 shell scripts" against a tree of 27 .sh
 # files and 31 shebang scripts, and nothing could see it because "shell script" was not in the
 # map. Derived the same way check 29 selects, so the two can never disagree.
-nsh=$(git ls-files 2>/dev/null | while IFS= read -r f; do
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf 'x\n'
-done | grep -c .)
+nsh=$(sh_files | grep -c .)
 
 want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
   case "$1" in
@@ -644,32 +686,41 @@ if command -v jq >/dev/null; then
   errs=""
   probe(){ printf '{"hook_event_name":"%s"}' "$1" | env CONDUCTOR_WORKSPACE_PATH="${3:-}" ${2:+VSTACK_PROFILE=$2} \
            bash claude/hooks/inject-session-context.sh 2>/dev/null | wc -c | tr -d ' '; }
-  chk(){ [ "$2" -le "$3" ] || errs="$errs\n$1: $2 bytes exceeds the $3 byte cap"; }
+  # Both bounds. Every other assertion here is an upper cap, so a hook that emitted zero
+  # bytes used to pass all three of them and print "ok injected context bounded
+  # (digest 0 B, baseline 0 B)". The README comparison below was the only thing standing
+  # between that and a green, and it had been dead since cc76ba8.
+  chk(){ [ "$2" -gt 0 ] || errs="$errs\n$1: 0 bytes -- the hook emitted nothing, which satisfies every cap";
+         [ "$2" -le "$3" ] || errs="$errs\n$1: $2 bytes exceeds the $3 byte cap"; }
   chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)" 512
   chk "session baseline"       "$(probe SessionStart '' '')"    4096
   chk "skills profile"         "$(probe SessionStart skills 1)" 2560
-  # The README publishes these byte counts as the cost column of its comparison table. A number
+  # The README publishes this byte count as the cost column of its comparison table. A number
   # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
-  # keeps finding in its own docs — so the published figures are read back and compared.
-  _full=$(probe SessionStart '' '')
-  _sk=$(probe SessionStart skills 1)
-  # Compared with tolerance, not for equality. The exact byte count is not a publishable
-  # constant: the block embeds environment-dependent text, so this machine measured 3655 and CI
-  # measured 3667 for the same commit. Demanding equality made the gate depend on where it ran,
-  # which is a worse failure than the staleness it was added to prevent — a check that is only
-  # true on one machine is the thing this repo keeps finding and removing.
+  # keeps finding in its own docs — so the published figure is read back and compared.
   #
-  # So the README publishes a rounded KB figure and this asserts the live value still rounds to
-  # it. Real drift moves this by hundreds of bytes; noise moves it by tens.
-  if [ -f README.md ] && grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md; then
-    _qf=$(grep -oE '~[0-9.]+ KB full' README.md | head -1 | grep -oE '[0-9.]+')
-    _qs=$(grep -oE '~[0-9.]+ KB plugin' README.md | head -1 | grep -oE '[0-9.]+')
-    _lf=$(awk -v b="$_full" 'BEGIN{printf "%.1f", b/1024}')
-    _ls=$(awk -v b="$_sk"   'BEGIN{printf "%.1f", b/1024}')
+  # This comparison was dead from cc76ba8 until 1.14.0. It was guarded by
+  #   if [ -f README.md ] && grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md
+  # anchored on a README sentence that the same commit reworded into a table row. An `if` with
+  # no `else` does not go red when its anchor stops matching, it goes quiet — so the assertion
+  # sat unreachable for four releases while the check kept printing ok. There is no guard now:
+  # a missing anchor is a failure, because "I could not find the number I am meant to check"
+  # and "the number is right" must never print the same word.
+  _full=$(probe SessionStart '' '')
+  _qf=$(grep -oE '\| *Context spent per session *\|[^|]*\| *about [0-9.]+ KB *\|' README.md 2>/dev/null \
+        | head -1 | grep -oE 'about [0-9.]+ KB' | grep -oE '[0-9.]+')
+  _lf=$(awk -v b="$_full" 'BEGIN{printf "%.1f", b/1024}')
+  if [ -z "$_qf" ]; then
+    errs="$errs\nREADME has no '| Context spent per session | ... | about N KB |' row, so the published cost figure is checked against nothing"
+  else
+    # Compared with tolerance, not for equality. The exact byte count is not a publishable
+    # constant: the block embeds the branch name and other environment-dependent text, so a
+    # worktree on this machine measured 3670 where the main checkout measured 3655, and CI
+    # measured 3667 for the same commit. Demanding equality made the gate depend on where it
+    # ran, which is a worse failure than the staleness it was added to prevent. Real drift
+    # moves this by hundreds of bytes; noise moves it by tens.
     awk -v a="$_qf" -v b="$_lf" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
-      || errs="$errs\nREADME quotes ~$_qf KB for the full session cost; live is ~$_lf KB"
-    awk -v a="$_qs" -v b="$_ls" 'BEGIN{exit (a-b<0.15 && b-a<0.15)?0:1}' \
-      || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
+      || errs="$errs\nREADME quotes about $_qf KB for the session cost; live is $_lf KB"
   fi
   [ -z "$errs" ] \
     && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
@@ -1216,12 +1267,31 @@ fi
 # left shellcheck exiting 1 on it while this check still printed "ok shellcheck clean (29
 # scripts)". A list you have to remember to update is a list that goes stale silently.
 if command -v shellcheck >/dev/null 2>&1; then
-  sc_files=$(git ls-files 2>/dev/null | while IFS= read -r f; do
-    grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf '%s\n' "$f"
-  done)
-  sc_out=$(while IFS= read -r f; do
-    [ -n "$f" ] && shellcheck -S warning -f gcc "$f" 2>/dev/null
-  done <<<"$sc_files")
+  sc_files=$(sh_files)
+  # Read the delegate, do not infer from its silence. This ran `shellcheck ... 2>/dev/null`
+  # inside a command substitution: stderr discarded, exit status never read. `shellcheck -S
+  # nonsense -f gcc install.sh` writes nothing to stdout and exits 4, so a shellcheck that could
+  # not run at all printed "ok shellcheck clean (33 scripts)". That is the same shape as the
+  # count check whose extractor silently stopped matching, and it is why scan() above reads rc.
+  # Exit-status contract: 0 clean, 1 findings, 2 bad input, 3 bad syntax, 4 bad usage. Only
+  # the first two are answers; the rest mean the question was never asked.
+  sc_out=""; sc_err=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    _o=$(shellcheck -S warning -f gcc "$f" 2>/tmp/sc_err.$$); _rc=$?
+    case "$_rc" in
+      0|1) [ -n "$_o" ] && sc_out="$sc_out$_o
+" ;;
+      *)   sc_err="$sc_err\n  $f: shellcheck exited $_rc: $(head -1 /tmp/sc_err.$$)" ;;
+    esac
+  done <<<"$sc_files"
+  rm -f /tmp/sc_err.$$
+  # Positive control, the same two-way shape check 19 uses: a linter that reports nothing is
+  # only good news if it can still report something. Without this, disabling the tool and
+  # deleting every defect are indistinguishable from here.
+  _ctl=$(printf '#!/bin/bash\nx=$HOME/a b\nls $x\n' | shellcheck -S warning -f gcc - 2>/dev/null)
+  [ -n "$_ctl" ] || sc_err="$sc_err\n  positive control: shellcheck found nothing wrong with a known-bad script, so a clean result here means nothing"
+  [ -n "$sc_err" ] && sc_out="$sc_out$(printf '%b' "$sc_err")"
   [ -z "$sc_out" ] \
     && ok "shellcheck clean ($(grep -c . <<<"$sc_files") scripts, warning level)" \
     || bad "shellcheck clean" "$(printf '%s' "$sc_out" | sed 's/^/  /' | head -20)"
@@ -1237,14 +1307,13 @@ fi
 # rule that lives only in prose is a rule that gets skipped by whoever did not read the prose,
 # which is the second time that has happened here -- the documented-count rule was the first.
 #
-# A reason counts if it is on the same line after the code list, which is how the other five
+# A reason counts if it is on the same line after the code list, which is how all seven
 # suppressions in this repo are written, or on the line immediately above. Both are readable at
 # the point of the disable; a reason three lines away is not.
 bare=""
 nsup=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
     n=${hit%%:*}
@@ -1258,9 +1327,9 @@ while IFS= read -r f; do
     fi
     # A directive shellcheck honours is always its own comment line, so anchor on that. Matching
     # the bare phrase also picked up this file's own prose about the rule and the mutation
-    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 6.
+    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 7.
   done <<<"$(grep -nE '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=' "$f" 2>/dev/null)"
-done <<<"$(git ls-files 2>/dev/null)"
+done <<<"$(sh_files)"
 [ -z "$bare" ] \
   && ok "shellcheck suppressions carry a reason ($nsup suppressions)" \
   || bad "shellcheck suppressions carry a reason" \

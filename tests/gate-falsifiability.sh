@@ -63,7 +63,7 @@ esac }
 # here: this has to be safe to run on a dirty tree.
 files_for(){ case "$1" in
   0)   printf '' ;;
-  1)   printf 'claude/hooks/format.sh' ;;
+  1)   printf 'claude/hooks/format.sh ui-gate/rules/tokens.sh' ;;
   2)   printf 'mcp/servers.json' ;;
   3)   printf 'claude/skills/unslop/SKILL.md' ;;
   4|5|6) printf 'README.md' ;;
@@ -77,7 +77,7 @@ files_for(){ case "$1" in
   15)  printf 'claude/settings.json' ;;
   16)  printf 'tests/gate-falsifiability.sh' ;;
   17)  printf 'overlay.sh' ;;
-  18)  printf 'claude/hooks/inject-session-context.sh' ;;
+  18)  printf 'claude/hooks/inject-session-context.sh README.md' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
@@ -88,7 +88,7 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
-  29)  printf 'bin/cloudflare-mcp' ;;
+  29)  printf 'bin/cloudflare-mcp ui-gate/rules/browser.sh' ;;
   30)  printf 'claude/hooks/format.sh' ;;
   31)  printf '' ;;   # plants a new file rather than editing one
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
@@ -138,7 +138,12 @@ esac }
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
 # trips four checks proves far less than one that trips the intended one.
 break_it(){ case "$1" in
-  1)  printf '\nif [ -z\n' >> claude/hooks/format.sh ;;
+  1)  # Both lanes of the file selector. format.sh has a shebang; ui-gate/rules/tokens.sh has
+      # none, only a `# shellcheck shell=` directive, and for four versions nothing in this gate
+      # parsed it. Mutating one leaves the other exactly as unproven as it was.
+      for _f in claude/hooks/format.sh ui-gate/rules/tokens.sh; do
+        printf '\nif [ -z\n' >> "$_f"
+      done ;;
   2)  printf '{' >> mcp/servers.json ;;
   3)  # a description past the 200-char listing cap, which silently stops the skill triggering
       awk 'BEGIN{d="x"; for(i=0;i<209;i++) d=d "y"}
@@ -180,8 +185,14 @@ exit 0
       # settings.project-keys -- could not see it, because the check it armed was asserting the
       # deletion as correct. The row now mutates the behaviour, not the allowlist.
       perl -0pi -e 's/\| \(\$dest \* \$ship\)/| (\$dest * \$ship)\n    | delpaths([(keys - \$A)[] | [.]])/' overlay.sh ;;
-  18) # pad the per-prompt digest past its cap
-      perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
+  18) # Both lanes, because check 18 makes two different promises and only one of them was
+      # ever alive. The cap lane pads the per-prompt digest past 512. The figure lane falsifies
+      # the cost number README publishes -- that half of the check was dead from cc76ba8 to
+      # 1.14.0, anchored on a sentence the same commit reworded, and no mutation touched it.
+      # Caveat worth knowing: the no-op detector fingerprints the files together, so it catches
+      # both lanes rotting but not one. Per-file fingerprinting is below, in the summary block.
+      perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh
+      sed -i.t 's/| about 3\.6 KB |/| about 9.9 KB |/' README.md && rm -f README.md.t ;;
   19) # A schema type violation, which is what check 19 is actually for.
       #
       # This used to rename "version" to "verzion", and that never tested check 19 directly:
@@ -219,8 +230,13 @@ exit 0
       # the old `git ls-files '*.sh' bin/doctor bin/vstack` selector never linted it and this
       # exact mutation left the check green. Mutating a file the selector already covered would
       # prove the linter runs; mutating this one proves it runs over everything.
-      printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' \
-        >> bin/cloudflare-mcp ;;
+      # Both lanes, since 1.14.0 folded four copies of the selector into one sh_files().
+      # cloudflare-mcp is the shebang-without-suffix lane; ui-gate/rules/browser.sh is the
+      # directive-only lane, a sourced fragment with no shebang at all that the shebang scan
+      # could not see. One mutation per lane, or half the selector stays unproven.
+      for _f in bin/cloudflare-mcp ui-gate/rules/browser.sh; do
+        printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' >> "$_f"
+      done ;;
   30) # A bare disable, no reason on the line and none above it. This is the shape bootstrap.sh
       # carried for several versions while check 29's own header claimed the rule was kept.
       printf '\n# shellcheck disable=SC2086\nsup_probe=$HOME/x\nls $sup_probe >/dev/null 2>&1 || true\n' \
