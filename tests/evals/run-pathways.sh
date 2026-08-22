@@ -221,7 +221,13 @@ run_arm() { # <arm> <dir> -> findings TAB pathway_entered
   # tree and its arm was averaging minutes per run, which turned a 120-review benchmark into
   # hours. A shorter ceiling loses the occasional slow run — recorded as a miss, which is the
   # honest treatment of a review that did not finish — rather than losing the whole suite.
-  raw=$( cd "$d" && timeout "${REVIEW_TIMEOUT:-150}" claude -p "$prompt" --setting-sources=project \
+  # user,project, not project alone. Arms install globally now, and --setting-sources=project
+  # hides user scope: measured on this machine, project-only sees 48 commands and 16 skills with
+  # no /review at all, while user,project sees 113 and 68 with /review present. The harness was
+  # invoking a slash command that did not exist in the session, so both harness arms were unable
+  # to run their pathway and the unconfigured baseline won by default. The INVALID flag caught it;
+  # the numbers under it were meaningless.
+  raw=$( cd "$d" && timeout "${REVIEW_TIMEOUT:-150}" claude -p "$prompt" --setting-sources=user,project \
            --output-format=stream-json --verbose < /dev/null 2>/dev/null )
   text=$(printf '%s' "$raw" | jq -rs '[.[]|select(.type=="assistant")|.message.content[]?|select(.type=="text")|.text]|join("")' 2>/dev/null)
   # Did the harness's own pathway actually engage? For `none` there is nothing to enter.
@@ -246,13 +252,16 @@ run_arm() { # <arm> <dir> -> findings TAB pathway_entered
     # architecture: a Skill or Task call naming something the arm installed, a file read under
     # the arm's own .claude tree, or a Bash command that runs something out of it. The first
     # covers vstack's subagent style, the second and third cover gstack's inline style.
-    entered=$(printf '%s' "$raw" | jq -rs --arg d "$d" '
+    # Both install roots. Arms are installed at user scope, so a detector that only looked under
+    # the project directory could never fire on signals 2 and 3 and reported every arm INVALID.
+    entered=$(printf '%s' "$raw" | jq -rs --arg d "$d" --arg h "$HOME/.claude" '
+      def hits($t): ($t | contains($d + "/.claude")) or ($t | contains($h));
       [ .[] | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") ]
       | map(
           if   (.name=="Skill" or .name=="Task") then 1
           elif ((.name=="Read" or .name=="Grep" or .name=="Glob")
-                and ((.input.path // .input.file_path // .input.pattern // "") | contains($d + "/.claude"))) then 1
-          elif (.name=="Bash" and ((.input.command // "") | contains($d + "/.claude"))) then 1
+                and hits(.input.path // .input.file_path // .input.pattern // "")) then 1
+          elif (.name=="Bash" and hits(.input.command // "")) then 1
           else 0 end)
       | add // 0' 2>/dev/null)
     [ "${entered:-0}" -gt 0 ] && entered=yes || entered=no
