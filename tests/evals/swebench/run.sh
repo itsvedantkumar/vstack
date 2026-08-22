@@ -325,7 +325,6 @@ fi
 # Pre-patch PASS_TO_PASS baseline, per instance, on the same sample scoring uses. Anything
 # already failing here is the instance's problem and not the agent's, and counting it as a
 # regression made every arm look equally destructive.
-declare_base() { :; }
 for i in $USABLE; do
   id=$(jq -r ".[$i].instance_id" "$DATA")
   d="$ROOT/basep2p-$id"

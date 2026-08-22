@@ -6,6 +6,12 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Dead code removed.** `declare_base() { :; }` in `tests/evals/swebench/run.sh` was defined,
+empty, and called from nowhere — a stub left behind when the PASS_TO_PASS baseline moved inline.
+A sweep of every tracked shell file for functions defined and never called found this one and
+nothing else; the other candidates were dispatched by name from a quoted list, which the first
+version of the sweep could not see.
+
 ## 1.15.0 — 2026-08-22
 
 **The falsifiability suite had no accounting of its own.** It printed `N passed, 0 failed /
