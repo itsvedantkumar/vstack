@@ -267,6 +267,7 @@ cannot enforce it. That lane could be made to pass. It could not be made to be t
 
 - [docs/how-skills-fire.md](docs/how-skills-fire.md) — dispatch, the listing budget, the measurements
 - [tests/evals/RESULTS.md](tests/evals/RESULTS.md) — every benchmark run, including the retracted one
+- [docs/research/do-harnesses-help.md](docs/research/do-harnesses-help.md) — the open question of whether any of this beats unconfigured Claude Code
 - [tests/README.md](tests/README.md) — what each suite proves
 - [mcp/README.md](mcp/README.md) — the two MCP servers
 - [docs/provenance/](docs/provenance/README.md) — where the ported skills came from and what changed
