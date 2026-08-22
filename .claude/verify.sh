@@ -35,7 +35,7 @@ for t in jq git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; do
 # --- 1. every shell script parses ----------------------------------------------------------
 errs=""
 while IFS= read -r f; do
-  head -1 "$f" | grep -q '^#!.*sh' || continue
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue   # not a pipe: SIGPIPE + pipefail = 141
   out=$(bash -n "$f" 2>&1) || errs="$errs\n$f: $out"
 done < <(find . -path ./.git -prune -o -type f \( -name "*.sh" -o -path "./bin/*" \) -print)
 [ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
@@ -345,6 +345,13 @@ command -v jq >/dev/null && nmc=$(jq 'keys|length' mcp/servers.json 2>/dev/null 
 # at 25 against a gate of 26 and nothing could see it, because the noun was not in the map.
 nck=$TOTAL
 
+# Same shape, one noun later. The CHANGELOG said "29 shell scripts" against a tree of 27 .sh
+# files and 31 shebang scripts, and nothing could see it because "shell script" was not in the
+# map. Derived the same way check 29 selects, so the two can never disagree.
+nsh=$(git ls-files 2>/dev/null | while IFS= read -r f; do
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf 'x\n'
+done | grep -c .)
+
 want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
   case "$1" in
     skill|skills)                                   printf '%s' "$nsk" ;;
@@ -355,6 +362,7 @@ want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty 
     "cli wrapper"|"cli wrappers")                   printf '%s' "$nwr" ;;
     case|cases)                                     printf '%s' "$ncs" ;;
     "mcp server"|"mcp servers")                     printf '%s' "$nmc" ;;
+    "shell script"|"shell scripts")                 printf '%s' "$nsh" ;;
   esac
 }
 
@@ -369,11 +377,40 @@ exempt_phrases(){
   esac
 }
 
+# Every noun this check can resolve, spelled once. The extraction regex is built from this
+# list, so a noun can no longer be resolvable-but-never-extracted -- which is how "29 shell
+# scripts" sat in the CHANGELOG unchallenged. want_for had no case for it, and even after one
+# was added the claim stayed invisible, because the extractor carried its own separate
+# alternation and nothing compared the two.
+NOUNS='skills?|checks?|agents?|subagents?|sub-agents?|commands?|hooks?|CLI wrappers?|cases?|MCP servers?|shell scripts?'
+
 errs=""
-for f in README.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
+
+# Positive control. Every alternative the extractor looks for must resolve to a number, or the
+# check pulls claims out of the docs and then drops them on the floor without saying so.
+while IFS= read -r _n; do
+  [ -n "$_n" ] || continue
+  [ -n "$(want_for "$(printf '%s' "$_n" | tr '[:upper:]' '[:lower:]')")" ] \
+    || errs="$errs\ninternal: the extractor looks for '$_n' but want_for cannot resolve it"
+done <<EOF
+$(printf '%s' "$NOUNS" | tr '|' '\n' | sed 's/?$//')
+EOF
+
+for f in README.md CHANGELOG.md .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json \
          claude/skills/ATTRIBUTION.md claude/CLAUDE.md docs/how-skills-fire.md tests/README.md; do
   [ -f "$f" ] || continue
-  norm=$(tr '\n' ' ' < "$f" | tr -s '[:space:]' ' ')
+  if [ "$f" = CHANGELOG.md ]; then
+    # Only the entries that describe what ships today: Unreleased, plus the section for the
+    # version the manifests declare. Older entries record what was true at that release and
+    # rewriting them to satisfy today's tree would be falsifying history. Taking simply "the top
+    # section" is not enough -- an Unreleased heading sits above the release, and slicing there
+    # stopped one section short of the claim that had gone stale.
+    _cv=$(jq -r '.version' claude/.claude-plugin/plugin.json 2>/dev/null)
+    norm=$(awk -v v="$_cv" '/^## /{ sec = ($2 == "Unreleased" || index($2, v) == 1) } sec' "$f" \
+             | tr '\n' ' ' | tr -s '[:space:]' ' ')
+  else
+    norm=$(tr '\n' ' ' < "$f" | tr -s '[:space:]' ' ')
+  fi
   while IFS= read -r ph; do
     [ -n "$ph" ] && norm=${norm//"$ph"/}
   done <<EOF
@@ -389,7 +426,7 @@ EOF
     [ -n "$want" ] && [ "$num" != "$want" ] \
       && errs="$errs\n$f: claims '$claim', tree has $want"
   done <<EOF
-$(printf '%s' "$norm" | grep -oE '[0-9]+ ((sub-?)?agents?|skills?|commands?|hooks?|cases?|checks?|MCP servers?|CLI wrappers?)' | sort -u)
+$(printf '%s' "$norm" | grep -oE "[0-9]+ ($NOUNS)" | sort -u)
 EOF
 
   # table form: "| Commands | 14 |"
@@ -940,11 +977,23 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   # quickstart pinned v1.4.0 while the manifests said v1.8.0, so anyone copy-pasting the "pin a
   # release" lane got a four-version-old payload and no error -- the tag resolves, the install
   # succeeds, and the only symptom is a setup that quietly disagrees with its own README.
+  #
+  # Agreeing with the manifest is not enough. The quickstart's "pin a release" lane pinned
+  # v1.8.0 while the manifests said v1.8.0 and no such tag existed, so the check was satisfied
+  # and the URL a stranger copy-pastes returned 404. A pin has to name a tag that is actually
+  # there. Only asserted where the checkout has tags at all -- a shallow clone has none, and the
+  # branch below already declines to measure in that case.
   pins=""
   for f in README.md docs/*.md; do
     [ -f "$f" ] || continue
     while IFS= read -r pv; do
-      [ -n "$pv" ] && [ "$pv" != "$mv_" ] && pins="$pins\n  $f pins v$pv"
+      [ -n "$pv" ] || continue
+      if [ "$pv" != "$mv_" ]; then
+        pins="$pins\n  $f pins v$pv"
+      elif [ -n "$(git tag -l 2>/dev/null | head -1)" ] \
+           && ! git rev-parse -q --verify "refs/tags/v$pv" >/dev/null 2>&1; then
+        pins="$pins\n  $f pins v$pv, which is not a tag in this repository (the URL 404s)"
+      fi
     done <<PINEOF
 $(grep -oE '(vstack/v|VSTACK_REF=v)[0-9]+\.[0-9]+\.[0-9]+' "$f" 2>/dev/null | sed -E 's/.*v//' | sort -u)
 PINEOF
@@ -961,7 +1010,12 @@ PINEOF
     # failure mode it was written to prevent, reproduced inside itself.
     skip "declared version matches what installs" "no tags in this checkout (shallow clone?), so there is nothing to compare against"
   elif ! git rev-parse -q --verify "refs/tags/v$mv_" >/dev/null 2>&1; then
-    ok "declared version matches what installs (v$mv_ not yet tagged)"
+    # A declared-but-untagged version has no payload to diff against, so this branch compares
+    # nothing. It used to print "ok", which is the same defect the tagless branch above guards
+    # against, one elif lower down: a green that measured nothing, hidden from the skip census
+    # because only skips are counted there. Say skip, and the release unit has to tag before the
+    # check starts measuring again.
+    skip "declared version matches what installs" "v$mv_ is declared by the manifests but not tagged, so there is no payload to compare it against — tag the release and this starts measuring"
   else
     # Everything a lane actually delivers. Docs, tests and CI are deliberately excluded: they
     # change without changing what a stranger receives.
@@ -1148,23 +1202,99 @@ fi
 
 # --- 29. every shell script passes shellcheck ------------------------------------------------
 #
-# This bundle is 27 shell scripts and almost nothing else, and the whole product is the claim
+# This bundle is shell scripts and almost nothing else, and the whole product is the claim
 # that they behave correctly on someone else's machine. The class of bug that keeps landing here
 # is not exotic -- an unquoted expansion, a pattern that can never match, a variable set for a
 # check nobody wrote -- and a linter finds all three for free.
 #
 # Warning level, not style: informational notes are opinions and this should fail on defects.
-# Where a warning is wrong the suppression carries a reason on the line above it, so the next
-# reader can see the argument rather than a bare disable.
+# Where a warning is wrong the suppression carries a reason, which check 30 enforces.
+#
+# Selected by shebang, the same way check 1 selects. It used to be the hand-maintained list
+# `git ls-files '*.sh' bin/doctor bin/vstack`, and bin/cloudflare-mcp -- a #!/bin/sh script with
+# no .sh suffix -- had never been on it. Appending an unquoted `$HOME/some path` to that file
+# left shellcheck exiting 1 on it while this check still printed "ok shellcheck clean (29
+# scripts)". A list you have to remember to update is a list that goes stale silently.
 if command -v shellcheck >/dev/null 2>&1; then
-  sc_out=$(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null \
-    | while IFS= read -r f; do shellcheck -S warning -f gcc "$f" 2>/dev/null; done)
+  sc_files=$(git ls-files 2>/dev/null | while IFS= read -r f; do
+    grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" && printf '%s\n' "$f"
+  done)
+  sc_out=$(while IFS= read -r f; do
+    [ -n "$f" ] && shellcheck -S warning -f gcc "$f" 2>/dev/null
+  done <<<"$sc_files")
   [ -z "$sc_out" ] \
-    && ok "shellcheck clean ($(git ls-files '*.sh' bin/doctor bin/vstack 2>/dev/null | wc -l | tr -d ' ') scripts, warning level)" \
+    && ok "shellcheck clean ($(grep -c . <<<"$sc_files") scripts, warning level)" \
     || bad "shellcheck clean" "$(printf '%s' "$sc_out" | sed 's/^/  /' | head -20)"
 else
   skip "shellcheck clean" "shellcheck not installed (brew install shellcheck / apk add shellcheck)"
 fi
+
+# --- 30. every shellcheck suppression carries a reason ----------------------------------------
+#
+# Check 29's own header has said for several versions that a suppression carries its reason with
+# it, so the next reader sees the argument rather than a bare disable. Nothing enforced it, and
+# bootstrap.sh had carried a naked `# shellcheck disable=SC2086` since the lane was written. A
+# rule that lives only in prose is a rule that gets skipped by whoever did not read the prose,
+# which is the second time that has happened here -- the documented-count rule was the first.
+#
+# A reason counts if it is on the same line after the code list, which is how the other five
+# suppressions in this repo are written, or on the line immediately above. Both are readable at
+# the point of the disable; a reason three lines away is not.
+bare=""
+nsup=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" || continue
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    n=${hit%%:*}
+    nsup=$((nsup + 1))
+    line=$(sed -n "${n}p" "$f")
+    # whatever follows the comma-separated code list on the same line
+    tail_=$(sed -E 's/.*shellcheck[[:space:]]+disable=[A-Za-z0-9,]+//' <<<"$line")
+    above=$(sed -n "$((n - 1))p" "$f")
+    if ! grep -qE '[A-Za-z]{3}' <<<"$tail_" && ! grep -qE '^[[:space:]]*#.*[A-Za-z]{3}' <<<"$above"; then
+      bare="$bare\n  $f:$n"
+    fi
+    # A directive shellcheck honours is always its own comment line, so anchor on that. Matching
+    # the bare phrase also picked up this file's own prose about the rule and the mutation
+    # payload in tests/gate-falsifiability.sh, and reported 9 suppressions where there are 6.
+  done <<<"$(grep -nE '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=' "$f" 2>/dev/null)"
+done <<<"$(git ls-files 2>/dev/null)"
+[ -z "$bare" ] \
+  && ok "shellcheck suppressions carry a reason ($nsup suppressions)" \
+  || bad "shellcheck suppressions carry a reason" \
+         "$(printf 'a bare disable hides the argument from the next reader:%b' "$bare")"
+
+# --- 31. every shipped file has a referrer -----------------------------------------------------
+#
+# Check 28 does this for docs/, where a link to the containing directory counts. Everything else
+# in the tree had no such rule, and two files had been riding along for versions: a launchd
+# wrapper around the doctor that install.sh never installs and uninstall.sh never removes, and an
+# eval-loop driver nothing but its own header mentioned. Neither was reachable and neither was
+# visible to any check. They are not named here on purpose -- a basename in this comment is a
+# referrer as far as the grep below is concerned, which is exactly how the first draft of this
+# check passed over both of them.
+#
+# The limit, stated rather than hidden: a mention in prose counts. This finds files nothing points
+# at, not files pointed at only rhetorically.
+#
+# Skills, agents, commands and issue templates are excluded because the loader finds them by
+# directory: a referrer would be redundant there, not missing. docs/ is excluded because check 28
+# owns it with directory-link semantics this basename match cannot express.
+unref=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    claude/skills/*|claude/agents/*|claude/commands/*|.github/ISSUE_TEMPLATE/*|docs/*) continue ;;
+  esac
+  [ -n "$(git grep -l -F "${f##*/}" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
+    || unref="$unref\n  $f"
+done <<<"$(git ls-files 2>/dev/null)"
+[ -z "$unref" ] \
+  && ok "every shipped file has a referrer ($(git ls-files | grep -cvE '^(claude/(skills|agents|commands)/|\.github/ISSUE_TEMPLATE/|docs/)') outside the load-by-directory trees)" \
+  || bad "every shipped file has a referrer" \
+         "$(printf 'nothing in this repository names:%b\n  delete it, or give it a referrer -- a file nobody can find is a file nobody maintains' "$unref")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check

@@ -220,8 +220,17 @@ if [ "${1:-}" = "--drift" ]; then
   fi
 
   # Behind-remote is informational only — never fail solely for being behind.
+  #
+  # Every flag here is spelled out because a bare `git fetch` is not read-only: it does whatever
+  # the operator's ~/.gitconfig says. With fetch.prune and fetch.pruneTags set true -- a common
+  # pairing -- it deletes every local tag and remote-tracking branch that is not on the remote.
+  # That is exactly what happened during the 1.9.1 audit: `doctor --drift`, a command whose whole
+  # job is to compare and report, silently destroyed an unpushed release tag, and the release
+  # check then reported ok for a version whose tag had been deleted out from under it seconds
+  # earlier. An inspection command must not be able to change what it inspects, whatever the
+  # ambient config says.
   if git -C "$REPO" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-    git -C "$REPO" fetch -q 2>/dev/null || true
+    git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head 2>/dev/null || true
     behind=$(git -C "$REPO" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
     case "$behind" in ''|*[!0-9]*) behind=0 ;; esac
     if [ "$behind" -gt 0 ]; then

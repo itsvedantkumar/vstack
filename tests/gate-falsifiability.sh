@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -42,6 +42,22 @@ fail(){ printf 'FAIL  check %-3s did NOT fail when broken\n      expected label:
 
 save(){ for f in "$@"; do mkdir -p "$BK/$(dirname "$f")"; cp "$f" "$BK/$f"; done; }
 restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
+
+# Rows whose mutation creates a file instead of editing one. save()/restore() work by copying, so
+# a planted file has no backup to be put back from and has to be removed by name. Leaving it
+# behind fails the tree-unchanged check at the end, which is correct, and then fails every run
+# after this one too, which is not.
+#
+# The name is assembled from the PID rather than written out, for the same reason checks 4-6
+# assemble their secret probes: this file is a tracked file, so a literal basename here is a
+# referrer as far as check 31 is concerned. The first draft spelled the name out, the check found
+# it named in this very script, and the row reported "did NOT fail when broken" while the
+# mutation was working perfectly.
+ORPHAN_PROBE="bin/zz-unreferenced-$$.sh"
+
+creates_for(){ case "$1" in
+  31)  printf '%s' "$ORPHAN_PROBE" ;;
+esac }
 
 # Files each row edits, so it can be put back byte for byte. Backing up beats `git checkout`
 # here: this has to be safe to run on a dirty tree.
@@ -72,7 +88,9 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
-  29)  printf 'claude/hooks/format.sh' ;;
+  29)  printf 'bin/cloudflare-mcp' ;;
+  30)  printf 'claude/hooks/format.sh' ;;
+  31)  printf '' ;;   # plants a new file rather than editing one
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -108,6 +126,8 @@ label_for(){ case "$1" in
   27)  printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
+  30)  printf 'shellcheck suppressions carry a reason' ;;
+  31)  printf 'every shipped file has a referrer' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -189,8 +209,23 @@ exit 0
         && rm -f claude/.claude-plugin/plugin.json.t ;;
   29) # An unquoted expansion, which is the single most common way a shell script breaks on
       # somebody else's machine: a path with a space in it silently becomes two arguments.
+      #
+      # Broken in bin/cloudflare-mcp on purpose. It is a #!/bin/sh script with no .sh suffix, so
+      # the old `git ls-files '*.sh' bin/doctor bin/vstack` selector never linted it and this
+      # exact mutation left the check green. Mutating a file the selector already covered would
+      # prove the linter runs; mutating this one proves it runs over everything.
       printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' \
+        >> bin/cloudflare-mcp ;;
+  30) # A bare disable, no reason on the line and none above it. This is the shape bootstrap.sh
+      # carried for several versions while check 29's own header claimed the rule was kept.
+      printf '\n# shellcheck disable=SC2086\nsup_probe=$HOME/x\nls $sup_probe >/dev/null 2>&1 || true\n' \
         >> claude/hooks/format.sh ;;
+  31) # A file nothing points at. It has to be tracked to be visible to the check, so it is added
+      # to the index and removed again after the row -- the same shape as every other row, except
+      # the mutation creates rather than edits, so creates_for() cleans up instead of restore().
+      printf '#!/usr/bin/env bash\necho probe\n' > "$ORPHAN_PROBE"
+      chmod +x "$ORPHAN_PROBE"
+      git add -f "$ORPHAN_PROBE" >/dev/null 2>&1 ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -0pi -e 's{- \[Provenance\]\(docs/provenance/README\.md\)[^\n]*\n}{}' README.md ;;
@@ -219,7 +254,10 @@ echo
 # break back, and the suite printed FALSIFIABLE over a repo that still carried the defect. The
 # tree-unchanged check at the end cannot see that -- it compares the run against a start that was
 # already wrong. Only a baseline can.
-if ! base=$(./.claude/verify.sh 2>&1) || printf '%s' "$base" | grep -q '^FAIL  '; then
+# Captured to a variable and grepped from a here-string, never `printf ... | grep -q`. Under
+# `set -o pipefail` grep -q exits the moment it matches, the writer upstream takes SIGPIPE, and
+# the pipeline reports 141 -- which reads as "no FAIL found" and declares a red baseline green.
+if ! base=$(./.claude/verify.sh 2>&1) || grep -q '^FAIL  ' <<<"$base"; then
   printf 'FAIL  gate is not green before any mutation; nothing here would be evidence:\n%s\n' \
     "$(printf '%s' "$base" | grep -E '^(FAIL|VERIFICATION)' | sed 's/^/      /')"
   printf '\n0 passed, 1 failed\nNOT FALSIFIABLE\n'
@@ -245,7 +283,11 @@ for id in $CHECKS; do
   # assuming. Without tags there is nothing for it to compare, and demanding a FAIL it cannot
   # produce turns a correct skip into a red build.
   if [ "$id" = 24 ]; then
-    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+    # Not `verify.sh | grep -q`: verify writes for ~20s, grep -q exits on the first match, verify
+    # dies of SIGPIPE, and pipefail turns the whole pipeline into 141. That read as "the check did
+    # not skip", so this branch never fired and the row claimed a falsifiability it had not shown.
+    _probe=$(./.claude/verify.sh 2>&1)
+    if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (no tags to compare against; %s)\n' "$id" "$lbl"
       continue
     fi
@@ -256,7 +298,8 @@ for id in $CHECKS; do
       printf 'skip  check %-3s not falsifiable here (claude CLI not installed; %s)\n' "$id" "$lbl"
       continue
     fi
-    if ./.claude/verify.sh 2>&1 | grep -q "^skip  $lbl"; then
+    _probe=$(./.claude/verify.sh 2>&1)      # not a pipe: see the 141 note on check 24 above
+    if grep -q "^skip  $lbl" <<<"$_probe"; then
       printf 'skip  check %-3s not falsifiable here (validator is not validating; %s)\n' "$id" "$lbl"
       continue
     fi
@@ -272,13 +315,18 @@ for id in $CHECKS; do
     out=$(./.claude/verify.sh 2>&1)
   fi
 
-  if printf '%s' "$out" | grep -q '^FAIL  '"$lbl"; then
+  if grep -q '^FAIL  '"$lbl" <<<"$out"; then
     pass "$id" "$lbl"
   else
     fail "$id" "$lbl" "$(printf '%s' "$out" | grep -E '^(FAIL|VERIF)' | sed 's/^/      got: /')"
   fi
 
   [ -n "$fs" ] && restore $fs
+  cr=$(creates_for "$id")
+  if [ -n "$cr" ]; then
+    git rm -q -f --cached "$cr" >/dev/null 2>&1
+    rm -f "$cr"
+  fi
 done
 
 echo

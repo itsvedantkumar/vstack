@@ -311,6 +311,33 @@ else
       note "!! ${pl%@*} failed (add it later with: claude plugin install $pl)"; mark fail "${pl%@*}"
     fi
   done
+
+  # claude-mem ships its UserPromptSubmit hooks synchronous, which puts its work on the critical
+  # path of every prompt. vstack wants them async, and bin/doctor has checked for that flag for
+  # several versions -- but nothing ever set it. This lane installs the plugin and then left the
+  # machine in a state its own doctor calls drift, so every fresh bootstrap ended on a red line
+  # telling the operator to "re-apply" something that had never been applied once.
+  #
+  # Idempotent by construction: it reads the flag first and rewrites only when it is not already
+  # set. That matters because claude-mem auto-updates rewrite hooks.json and revert it, which is
+  # the whole reason doctor watches the flag rather than trusting a one-time edit.
+  if command -v jq >/dev/null 2>&1; then
+    cm_cdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    for cm_f in "$cm_cdir"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json; do
+      [ -f "$cm_f" ] || continue
+      jq -e '[.hooks.UserPromptSubmit[]?.hooks[]?.async] | all' "$cm_f" >/dev/null 2>&1 && continue
+      cm_t=$(mktemp)
+      if jq '.hooks.UserPromptSubmit = [ .hooks.UserPromptSubmit[]?
+               | .hooks = [ .hooks[]? | .async = true ] ]' "$cm_f" > "$cm_t" \
+         && jq -e . "$cm_t" >/dev/null 2>&1; then
+        cat "$cm_t" > "$cm_f"
+        note ">> claude-mem UserPromptSubmit hooks set async"
+      else
+        note "!! could not set claude-mem hooks async in $cm_f"
+      fi
+      rm -f "$cm_t"
+    done
+  fi
 fi
 
 note ""

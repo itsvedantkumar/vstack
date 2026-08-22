@@ -6,11 +6,124 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.10.0 — 2026-08-22
+
+**Two skills added, both wired to fire on their situation.**
+
+`grill-me`, from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). A round-based
+interview that maps a plan as a decision tree and works the frontier one round at a time, asking
+every currently-answerable question with a recommended answer attached.
+
+Upstream splits it in two: a seven-line `grill-me` stub that sets the frontmatter flag opting a
+skill out of model invocation, forwarding to a `grilling` skill that holds the method. A skill
+opted out of model invocation cannot auto-fire — it is reachable only by typing the slash command
+— so porting the stub would have shipped the one thing it is carried here to do. The method ships
+directly under the name the marketplace page uses, and check 3 fails if that flag ever comes back.
+
+`find-skills`, from [vercel-labs/skills](https://github.com/vercel-labs/skills) (MIT). Searches
+the open agent-skills ecosystem when the user asks whether something can be done, so a capability
+that already exists is not written from scratch. It drives `npx skills`, which this repo does not
+vendor; the port says so at the top of the skill, which is what check 22 requires.
+
+Both descriptions were written to the 200-character listing cap rather than trimmed to it
+afterwards. The first drafts came in at 238 and 261 and check 3 caught both: a description past
+the cap is truncated in the listing, which is exactly how a skill silently stops firing.
+`claude/CLAUDE.md` names the two situations directly, since that file is the always-on routing
+line. Upstream's `agents/openai.yaml` files are dropped from both — this bundle targets Claude
+Code and nothing else.
+
+Both are measured, not assumed. `tests/auto-trigger.sh` grows to 14 cases, and the find-skills
+case is the interesting one. The obvious prompt to write was "Find a skill for reviewing pull
+requests"; it fires 3 of 3 on opus and 0 of 3 on sonnet, which is the model the suite pins,
+because sonnet routes it to `review-pr` — the domain in the sentence names an installed skill and
+the request reads as asking for the work rather than for the search. A domain with no competing
+skill lands 3 of 3 on both. That limit of description-based dispatch is written into the case
+rather than hidden by a blander prompt.
+
+Skill count 26 → 28. Test cases 12 → 14.
+
+## 1.9.1 — 2026-08-22
+
+**A fresh bootstrap ended on a red line.** setup-machine.sh installs claude-mem, bin/doctor has
+checked that the plugin's UserPromptSubmit hooks are async for several versions, and nothing ever
+set the flag. So the lane installed the plugin and then left the machine in a state its own doctor
+called drift, telling the operator to re-apply something that had never been applied once.
+
+The install-matrix doctor-stranger case could not see it. That case exercises install.sh, and the
+plugin only arrives through setup-machine.sh, which only the bootstrap lane runs. It was found by
+running the README quickstart verbatim into a scratch HOME, which is the point of running it
+verbatim rather than reading it.
+
+setup-machine.sh now sets the flag, idempotently: it reads first and rewrites only when the flag
+is not already set, because claude-mem auto-updates rewrite hooks.json and revert it. Measured on
+a scratch HOME: doctor goes from one red line and DRIFT to 23 ok, 0 red, 6 notes.
+
+**doctor --drift deleted an unpushed release tag.** It ran a bare `git fetch` in the vstack
+checkout to work out how far behind the remote it was. A bare fetch is not read-only: it does
+whatever ~/.gitconfig says, and with fetch.prune and fetch.pruneTags set true it deletes every
+local tag and remote-tracking branch the remote does not have. During this audit it destroyed the
+v1.9.1 tag seconds after it was created, and the release check then reported ok for a version
+whose tag was already gone.
+
+Every flag is spelled out now, so ambient config cannot turn an inspection into an edit. The new
+doctor-no-mutate case in the install matrix clones a real checkout, sets that config pairing
+locally, plants an unpushed tag and asserts it survives. It carries three controls, because the
+first version of the case bailed before reaching the fetch and passed against the unfixed doctor.
+
+v1.9.0 is tagged and describes a payload carrying the claude-mem defect. It is left in place
+rather than moved, because a tag somebody may have fetched is not a thing to rewrite. Use v1.9.1.
+
+## 1.9.0 — 2026-08-22
+
+An audit pass. Every finding below is a green that measured nothing, which is the fifth time
+that class has shipped here, so each one leaves behind a check and a mutation row rather than
+just a fix.
+
+**Check 24 said ok over a comparison it never ran.** A version declared by the manifests but not
+yet tagged has no payload to diff against, and that branch printed ok. The tagless branch one
+elif below already knew better. It now skips with a reason, so the skip census can see it.
+
+**A pinned quickstart that 404s.** The README's "pin a release" lane pinned v1.8.0, the manifests
+said v1.8.0, and no such tag existed. The check compared the two strings, found them equal, and
+was satisfied. Measured: HTTP 404. A pin now has to name a tag that is actually there.
+
+**shellcheck was linting a hand-maintained list.** `git ls-files '*.sh' bin/doctor bin/vstack`
+never included bin/cloudflare-mcp, a #!/bin/sh script with no .sh suffix. An unquoted expansion
+appended to it made shellcheck exit 1 while the gate printed "ok shellcheck clean (29 scripts)".
+Selection is by shebang now, the way check 1 already did it, and the count is 30. Row 29 mutates
+that file specifically, so it proves the linter runs over everything rather than that it runs.
+
+**The count check dropped nouns on the floor.** `want_for()` resolved eight nouns and the
+extractor carried a separate grep alternation, so a claim could be extractable-but-unresolvable
+or the reverse, silently either way. Both come from one list now, with a positive control that
+fails if the extractor looks for a noun `want_for` cannot resolve. Adding "shell scripts"
+surfaced a stale CHANGELOG claim, and CHANGELOG's current-version section is now in the scan.
+
+**A suppression-reason rule that only lived in a comment.** Check 29's header had claimed it for
+several versions while bootstrap.sh carried a naked disable=SC2086. Check 30 enforces it.
+
+**Two files nothing pointed at.** A launchd wrapper around the doctor, which install.sh never
+installed and uninstall.sh never removed, and the eval-loop driver. The wrapper is deleted; the
+driver now has a real referrer in tests/README.md. Check 31 makes an unreferenced file a failure.
+
+**An uninstall that left Conductor pinning policy.** install.sh writes ~/.conductor/settings.toml
+and settings.managed.toml; uninstall.sh had no reference to conductor at all, so both survived
+removal, and the managed file is the one that pins models and plan mode.
+
+**The 141 that hid all of it.** tests/gate-falsifiability.sh probed for a check's skip with
+`verify.sh | grep -q`. Under `set -o pipefail` grep -q exits on the first match, verify dies of
+SIGPIPE, and the pipeline returns 141, which reads as "did not skip". Measured: rc=141 with
+pipefail, rc=0 without. Four sites now capture first and grep a here-string.
+
+The gate is 33 checks. Two of the new ones defeated themselves before they worked: naming a file
+in the check that hunts unnamed files gives it a referrer, and so does naming the probe in the
+mutation row.
+
 ## 1.8.0 — 2026-08-22
 
 **Two skill routings are mandatory now, not merely instructed.** Everything vstack did to route
 skills was instruction: the SessionStart digest spells out "any prose you write -> unslop", and
-descriptions carry their own triggers. `auto-trigger.sh` measures that landing on 12 cases, which
+descriptions carry their own triggers. `auto-trigger.sh` measures that landing on 14 cases, which
 is a weaker claim than "always". `claude/hooks/skill-mandate.sh` runs on Stop, reads the
 transcript for what actually happened, and blocks the turn when a rule went unmet. Writing
 `.md` requires `unslop`; writing `.ts` requires `typescript-best-practices`. Two rules, not
@@ -26,7 +139,7 @@ names in CI and the platform names in the README to be the same set, in both dir
 Codex, not a local model behind a compatibility shim. Every mechanism here is Claude Code's own
 and there is no adapter layer.
 
-**shellcheck is a gate.** This bundle is 29 shell scripts and almost nothing else. Warning level,
+**shellcheck is a gate.** This bundle is shell scripts and almost nothing else. Warning level,
 and where a warning is wrong the suppression carries its reason on the line above. It found a
 pattern in the destructive guard that could never match, a variable in `doctor` computed for a
 check nobody ever wrote, and two dead assignments.
@@ -267,7 +380,7 @@ that turned up.
 
 **Installs where Claude Code actually looks.** `install.sh` hardcoded `~/.claude`, but Claude
 Code reads `$CLAUDE_CONFIG_DIR` when it is set. Anyone with it pointed elsewhere — containers,
-VMs, separate profiles — got all 26 skills and every hook written into a directory Claude Code
+VMs, separate profiles — got all 28 skills and every hook written into a directory Claude Code
 never opens, with hook paths baked to match, and a success message. `install.sh`, `uninstall.sh`
 and `doctor` now resolve it, and `.claude.json` follows it.
 

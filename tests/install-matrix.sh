@@ -658,10 +658,23 @@ if want uninstall-clean; then
   # things that are theirs, which must all still be here afterwards
   printf '{"theirKey":"keep","theme":"dracula","skillOverrides":{"their-skill":"off"}}\n' > "$H/.claude/settings.json"
   printf 'THEIR_MANAGED=true\n' > "$H/.conductor/settings.managed.toml"
+  printf '{"mcpServers":{"their-server":{"command":"theirs"}}}\n' > "$H/.claude.json"
   HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  # Positive control, taken between install and uninstall. Asserting only that vstack's servers
+  # are gone afterwards passes for free on any machine where they were never registered, which
+  # is the shape of every fake green this repo has shipped.
+  installed_srv=0
+  command -v jq >/dev/null 2>&1 \
+    && installed_srv=$(jq -r '[(.mcpServers // {}) | keys[]] | length' "$H/.claude.json" 2>/dev/null || echo 0)
+  installed_cond=0
+  [ -f "$H/.conductor/settings.toml" ] && installed_cond=1
   HOME="$H" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
   e=""
+  [ "${installed_cond:-0}" -eq 1 ] || e="$e; install never wrote ~/.conductor/settings.toml, so its removal proves nothing"
   if command -v jq >/dev/null 2>&1; then
+    want_srv=$(jq -r 'keys | length' "$SRC/mcp/servers.json" 2>/dev/null || echo 0)
+    [ "${installed_srv:-0}" -gt "$want_srv" ] \
+      || e="$e; install registered ${installed_srv:-0} MCP servers where theirs plus $want_srv were expected, so the removal assertions below prove nothing"
     n=$(jq -r '[.hooks[]?[]?.hooks[]?.command]|length' "$H/.claude/settings.json" 2>/dev/null || echo 0)
     [ "${n:-0}" -eq 0 ] || e="$e; $n hook commands left pointing at deleted scripts"
     [ "$(jq -r '.model // "gone"' "$H/.claude/settings.json")" = gone ] || e="$e; vstack model policy still in force"
@@ -672,12 +685,80 @@ if want uninstall-clean; then
   fi
   grep -q THEIR_MANAGED "$H/.conductor/settings.managed.toml" 2>/dev/null \
     || e="$e; their Conductor managed policy was not restored"
+  # install.sh writes ~/.conductor/settings.toml where none exists. uninstall.sh had no
+  # reference to conductor at all, so an install into a clean home left both files behind for
+  # good -- and the managed one is the pinning file, so a removed vstack went on pinning models.
+  [ -f "$H/.conductor/settings.toml" ] && e="$e; ~/.conductor/settings.toml was left behind"
+  # Same shape one file over: install.sh merges its servers into the global mcpServers map, and
+  # nothing subtracted them again. Theirs must survive, ours must not.
+  if command -v jq >/dev/null 2>&1; then
+    for srv in $(jq -r 'keys[]' "$SRC/mcp/servers.json" 2>/dev/null); do
+      [ "$(jq -r --arg s "$srv" 'if (.mcpServers // {}) | has($s) then "left" else "gone" end' "$H/.claude.json" 2>/dev/null)" = gone ] \
+        || e="$e; vstack's $srv MCP server was left registered"
+    done
+    [ "$(jq -r '(.mcpServers // {})["their-server"].command // "GONE"' "$H/.claude.json" 2>/dev/null)" = theirs ] \
+      || e="$e; their own MCP server was removed"
+  fi
   [ -f "$H/.config/agents/verify-trust" ] && e="$e; the trust store was left behind"
   for rc in .zshrc .zshenv .bashrc; do
     [ -f "$H/$rc" ] && grep -q 'claude-parity' "$H/$rc" 2>/dev/null && e="$e; $rc still sources vstack"
   done
   [ -z "$e" ] && ok "uninstall removes vstack and keeps your own settings" \
     || bad "uninstall removes vstack and keeps your own settings" "${e#; }"
+fi
+
+# --- doctor --drift does not mutate the repo it inspects ---------------------------------------
+# A bare `git fetch` is not read-only: it does whatever ~/.gitconfig says. With fetch.prune and
+# fetch.pruneTags true -- a common pairing -- it deletes every local tag and remote-tracking
+# branch the remote does not have. doctor --drift ran one, and during the 1.9.1 audit it silently
+# destroyed an unpushed release tag, after which the release check reported ok for a version
+# whose tag was already gone. Ambient config must not be able to turn an inspection into an edit.
+if want doctor-no-mutate; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "doctor --drift leaves the repo alone" "git not installed"
+  else
+    T="$ROOT/nomutate"; mkdir -p "$T"
+    # A real vstack checkout, because --drift refuses to run against anything else and a scratch
+    # repo made it bail before ever reaching the fetch -- which is how the first version of this
+    # case passed against the unfixed doctor.
+    # A copy of the tree with a fresh history, not a clone. --drift only requires that the
+    # directory look like a vstack checkout, and cloning inherited the source repo's shape: CI
+    # checks out shallow, a clone of a shallow repo is shallow, and pushing one to a bare remote
+    # is rejected outright with "shallow update not allowed". One commit is enough for
+    # everything --drift reads.
+    mkdir -p "$T/work"
+    cp -R "$SRC"/. "$T/work"/ 2>/dev/null
+    rm -rf "$T/work/.git"
+    git -C "$T/work" init -q
+    git -C "$T/work" config user.email t@example.com; git -C "$T/work" config user.name t
+    git -C "$T/work" add -A >/dev/null 2>&1
+    git -C "$T/work" commit -qm probe >/dev/null 2>&1
+    git -C "$T/work" checkout -q -B probe-main
+    git init -q --bare "$T/remote.git"
+    git -C "$T/work" remote add origin "$T/remote.git"
+    # the destructive pairing, set locally so the case does not depend on the operator's config
+    git -C "$T/work" config fetch.prune true
+    git -C "$T/work" config fetch.pruneTags true
+    # push -u in one step. Setting the upstream separately depended on the push having created
+    # refs/remotes/origin/probe-main, which it did not do on the CI runners, and the case then
+    # failed on its own control with no way to see why from the log.
+    git -C "$T/work" push -u origin probe-main > "$T/push.log" 2>&1 || true
+    git -C "$T/work" tag -a v9.9.9-local -m "never pushed" 2>/dev/null
+    e=""
+    # Two positive controls. Without them the case passes on any machine where the tag was never
+    # created or where --drift declined to run, which is the shape of every fake green here.
+    git -C "$T/work" rev-parse -q --verify refs/tags/v9.9.9-local >/dev/null 2>&1 \
+      || e="$e; the probe tag was never created, so this case proves nothing"
+    git -C "$T/work" rev-parse --symbolic-full-name '@{u}' >/dev/null 2>&1 \
+      || e="$e; no upstream, so the code path under test never runs [$(tr '\n' ' ' < "$T/push.log" 2>/dev/null | cut -c1-160)]"
+    HOME="$T" VSTACK_DIR="$T/work" "$SRC/bin/doctor" --drift > "$T/out" 2>&1
+    grep -q 'no vstack repo found' "$T/out" 2>/dev/null \
+      && e="$e; --drift refused to run, so it never reached the fetch this case is about"
+    git -C "$T/work" rev-parse -q --verify refs/tags/v9.9.9-local >/dev/null 2>&1 \
+      || e="$e; doctor --drift deleted an unpushed local tag"
+    [ -z "$e" ] && ok "doctor --drift leaves the repo alone" \
+      || bad "doctor --drift leaves the repo alone" "${e#; }"
+  fi
 fi
 
 # --- overlay does not delete settings the target repo owns -------------------------------------
