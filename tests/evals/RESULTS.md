@@ -354,3 +354,59 @@ fourth number produced by a broken gstack arm.
 The second reason is simpler: the run was not authorised. A six-arm, five-sample pass is roughly
 480 model calls, and this account is a Max subscription rather than metered API billing, so the
 cost is plan allowance rather than dollars. It is still not mine to spend without being asked.
+
+
+## Review-pathway benchmark, 2026-08-22 — the first run on arms that all worked
+
+8 fixtures, 2 samples, 3 arms, 48 reviews. Each harness installed globally, one arm at a time, the
+way its own project says to install it. Both harness arms passed a dispatch canary before
+scoring: a command dropped into the arm's own directory, invoked, and required to echo its token.
+
+| arm | recall | precision | false positives | n |
+|---|---|---|---|---|
+| none | 11/14 (79%) | 92% | 1 | 16 |
+| gstack | 11/14 (79%) | 85% | 2 | 16 |
+| vstack | 11/14 (79%) | 73% | 4 | 16 |
+
+**No harness improved recall, and vstack made precision worse.** Unconfigured Claude Code found
+the same eleven defects with a quarter of the false positives. This is the least flattering result
+this project has produced and it is the one that survived the most scrutiny.
+
+### Adversarial pass
+
+Run because a result should be attacked whichever way it points, not only when it flatters.
+
+**The identical 11/14 is not a collapsed harness.** Per-fixture hit vectors differ between arms:
+
+```
+none     1111010011111100
+vstack   1110110011111100
+gstack   1110110011011101
+```
+
+The aggregate tie is arithmetic coincidence. The arms genuinely disagreed about `leak.py`,
+`race.py`, `off-by-one.py` and `integer.py`, which is what independent arms are supposed to do.
+
+**Denominators intact.** 14 planted for every arm; no arm's scoring failure shrank its own
+denominator, which is the defect that once let a crashed arm finish at 0/0.
+
+**The clean-code control held.** `clean.py` carries no planted defect. All three arms reported
+zero findings and zero false positives on it, so none of them is hallucinating bugs into correct
+code as a general habit.
+
+**Both harness pathways dispatched.** Three canaries fired, one per arm.
+
+### What this does and does not support
+
+It supports: on this fixture set, at this sample size, neither harness beat unconfigured Claude
+Code at finding planted defects, and vstack's review pathway produced more false positives than
+either alternative.
+
+It does not support a claim about harnesses in general. 8 fixtures and 2 samples is 16
+observations per arm with no confidence interval, and a 3-point recall gap here is well inside
+what resampling would swallow. The fixtures are single-file Python with one planted defect each,
+which is closer to the SWE-bench shape than to a real diff.
+
+The honest next step is n=5 with a bootstrap interval, and fixtures that are multi-file diffs
+rather than single files. Until then this is one measurement, published because it is unflattering
+rather than in spite of it.
