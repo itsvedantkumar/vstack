@@ -102,59 +102,109 @@ make_repo() { # <fixture> <dir>
   cp "$FIX/$f" "$d/$f"
 }
 
+# --- arm activation: global, one at a time, in the real home ---------------------------------
+#
+# Lifted from tests/evals/swebench/run.sh so the two harnesses cannot drift apart on the thing
+# that matters most. The reasoning is there in full; the short version is that gstack refers to
+# its own helpers by absolute path about eighty-five times, its own setup calls --local
+# deprecated, and directory isolation loses authentication, so arms are isolated by time.
+MACHINE_BK="$ROOT/machine-backup"
+
+# Only the directories an arm can occupy, not the whole config dir. Backing up ~/.claude wholesale
+# copied 1.6 GB of plugin cache and session history, per run.
+ARM_DIRS="skills agents commands hooks"
+
+restore_machine() {
+  [ -d "$MACHINE_BK" ] || return 0
+  for _d in $ARM_DIRS; do
+    rm -rf "$HOME/.claude/$_d"
+    [ -d "$MACHINE_BK/$_d" ] && cp -R "$MACHINE_BK/$_d" "$HOME/.claude/$_d"
+  done
+  [ -f "$MACHINE_BK/settings.json" ] && cp "$MACHINE_BK/settings.json" "$HOME/.claude/settings.json"
+  # Reinstall rather than trusting the copy: the wrappers under ~/.config/agents are outside the
+  # backed-up set, and a restore that only put ~/.claude back left doctor reporting drift.
+  ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || true
+  printf 'machine restored\n' >&2
+}
+
+backup_machine() {
+  mkdir -p "$MACHINE_BK"
+  for _d in $ARM_DIRS; do
+    [ -d "$HOME/.claude/$_d" ] && cp -R "$HOME/.claude/$_d" "$MACHINE_BK/$_d"
+  done
+  cp "$HOME/.claude/settings.json" "$MACHINE_BK/settings.json" 2>/dev/null
+  trap restore_machine EXIT INT TERM
+}
+
+# Not ./uninstall.sh. That restores from the newest install backup, and because install.sh runs
+# constantly here the newest backup contains vstack's own files -- measured: 28 skills before,
+# 28 after. A deactivation that silently does nothing would have put vstack's skills on the
+# gstack arm and produced a comparison of vstack against itself.
+deactivate_all() {
+  for _d in $ARM_DIRS; do rm -rf "$HOME/.claude/$_d"; mkdir -p "$HOME/.claude/$_d"; done
+  if command -v jq >/dev/null 2>&1 && [ -f "$MACHINE_BK/settings.json" ]; then
+    jq 'del(.hooks) | del(.skillOverrides) | del(.statusLine)' \
+      "$MACHINE_BK/settings.json" > "$HOME/.claude/settings.json" 2>/dev/null || true
+  fi
+}
+
+nskills() { find "$HOME/.claude/skills" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
+
+activate_arm() { # <arm>
+  deactivate_all
+  case "$1" in
+    none) : ;;
+    vstack) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1 ;;
+    # Same install as vstack, with outputStyle forced back to Default. vstack ships Concise, so
+    # the only variable between these two arms is the register the model writes in.
+    vstack-default) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1
+                    jq '.outputStyle = "Default"' "$HOME/.claude/settings.json" > "$ROOT/s.json" \
+                      && mv "$ROOT/s.json" "$HOME/.claude/settings.json" ;;
+    gstack) ( cd "$GSTACK_DIR" && ./setup --quiet >/dev/null 2>&1 ) || return 1 ;;
+  esac
+  
+  # Positive control. Every arm asserts that what it installed is actually there and that the
+  # other arm is not, because a benchmark whose arms silently share a config dir compares one
+  # harness against itself and prints a number anyway.
+  local n; n=$(nskills)
+  case "$1" in
+    none)
+      [ "$n" -eq 0 ] || { printf 'INVALID none: %s skill(s) still present after deactivation\n' "$n" >&2; return 1; } ;;
+    vstack|vstack-default)
+      local want; want=$(find "$SRC/claude/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+      [ "$n" -eq "$want" ] || { printf 'INVALID %s: %s skills installed, expected %s\n' "$1" "$n" "$want" >&2; return 1; }
+      [ -d "$HOME/.claude/skills/gstack" ] && { printf 'INVALID %s: gstack is still installed\n' "$1" >&2; return 1; } ;;
+    gstack)
+      [ -d "$HOME/.claude/skills/gstack" ] || { printf 'INVALID gstack: its skills directory is absent after setup\n' >&2; return 1; }
+      # The check whose absence let sixty gstack reviews be scored on a pathway with no helpers.
+      local missing=0 q
+      for q in bin/gstack-config bin/gstack-telemetry-log review/SKILL.md; do
+        [ -e "$HOME/.claude/skills/gstack/$q" ] || missing=$((missing+1))
+      done
+      [ "$missing" -eq 0 ] || { printf 'INVALID gstack: %s declared helper path(s) missing\n' "$missing" >&2; return 1; } ;;
+  esac
+  printf 'arm %s active (%s user-scope skills)\n' "$1" "$n" >&2
+  return 0
+}
+
+# Project scope still carries vstack's skills for the fixture repo, because /review is invoked
+# from inside it. The user-scope activation above is what makes the gstack arm real.
 install_arm() { # <arm> <dir>
   local a="$1" d="$2" sk="$2/.claude/skills" cm="$2/.claude/commands"
   mkdir -p "$sk" "$cm"
   case "$a" in
-    none) : ;;
+    none|gstack) : ;;
     vstack)
       for x in "$SRC"/claude/skills/*/; do [ -d "$x" ] && cp -R "${x%/}" "$sk/"; done
       cp "$SRC"/claude/commands/*.md "$cm/" 2>/dev/null
       mkdir -p "$d/.claude/agents" && cp "$SRC"/claude/agents/*.md "$d/.claude/agents/" 2>/dev/null
-      # Hooks and project settings, which no vstack arm had ever been given. skill-mandate.sh and
-      # inject-session-context.sh ARE vstack's routing: without them the arm is the skill files
-      # sitting on disk with nothing steering the model toward them, which is the configuration
-      # the very first benchmark already measured and found indistinguishable from baseline.
-      # Every published vstack number to date is of vstack-without-its-routing.
       mkdir -p "$d/.claude/hooks" && cp "$SRC"/claude/hooks/*.sh "$d/.claude/hooks/" 2>/dev/null
       chmod 755 "$d"/.claude/hooks/*.sh 2>/dev/null
       [ -x "$SRC/overlay.sh" ] && "$SRC/overlay.sh" "$d" >/dev/null 2>&1
       ;;
-    gstack)
-      # The WHOLE skill directory, not just SKILL.md. gstack's /review reads sibling files —
-      # specialists/, checklist.md, design-checklist.md — and copying only the manifest left its
-      # pathway unable to run. It scored zero and was marked INVALID, which is the right outcome
-      # for a broken arm and would have been a disgraceful thing to publish as a result.
-      #
-      # -mindepth 2, not -maxdepth 2 alone. gstack keeps a 34 KB SKILL.md at its repo root, which
-      # matched at depth 1, so `cp -R $(dirname)` copied the entire checkout -- .git, every other
-      # skill, the lot -- into $sk/<reponame> as a single nested skill. Measured on 85fd9db:
-      # 54 matches at depth <= 2, one of them the repo itself.
-      find "$GSTACK_DIR" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | while IFS= read -r m; do
-        d0=$(dirname "$m"); n=$(basename "$d0")
-        cp -R "$d0" "$sk/$n" 2>/dev/null
-      done ;;
   esac
 }
 
-# Every path an arm declares as something it will execute or read, checked for existence before
-# a single prompt is sent.
-#
-# This is the check that was missing. gstack's review pathway names ~/.claude/skills/gstack/bin/
-# helpers 85 times; that directory does not exist unless gstack was installed at user scope, and
-# the harness installs at project scope. So every gstack run ever recorded here executed a
-# pathway whose helpers were all `command not found`, scored the wreckage, and published it as a
-# comparison. An arm that cannot run is INVALID. It is not a low score.
-dangling_refs() { # <dir> -> one path per line, empty if the arm is sound
-  local d="$1"
-  [ -d "$d/.claude" ] || return 0
-  grep -rhoE '(~|\$HOME)/\.claude/[A-Za-z0-9._/-]+' "$d/.claude" 2>/dev/null \
-    | sort -u \
-    | while IFS= read -r p; do
-        case "$p" in "~"*) real="$HOME${p#\~}" ;; '$HOME'*) real="$HOME${p#\$HOME}" ;; *) real="$p" ;; esac
-        [ -e "$real" ] || printf '%s\n' "$p"
-      done
-}
 
 run_arm() { # <arm> <dir> -> findings TAB pathway_entered
   local a="$1" d="$2" prompt raw text entered
@@ -283,23 +333,12 @@ RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
 printf 'arm\tfixture\tsample\thits\tplanted\tfp\tentered\n' > "$RUNLOG"
 TOTAL_RUNS=$(( $(printf '%s' "$ARMS_CSV" | tr ',' ' ' | wc -w) * NFIX * SAMPLES ))
 DONE_RUNS=0
-DANGLING_REPORT=""
+backup_machine
 for a in $(printf '%s' "$ARMS_CSV" | tr ',' ' '); do
   H=0; P=0; FP=0; ENT=0; RUNS=0
 
-  # Soundness before spend. Build the arm once, list every path it declares that does not exist,
-  # and refuse to run it at all if any do. Sixty gstack reviews were once bought and scored on an
-  # arm whose every helper was `command not found`; this costs one directory build and would have
-  # stopped that before the first prompt.
-  probe_dir="$ROOT/probe-$a"
-  make_repo "$(jq -r '.fixtures[0].file' "$GT")" "$probe_dir"; install_arm "$a" "$probe_dir"
-  dang=$(dangling_refs "$probe_dir")
-  if [ -n "$dang" ]; then
-    DANGLING_REPORT="$DANGLING_REPORT$a	$(printf '%s' "$dang" | tr '\n' ' ')
-"
-    printf 'INVALID  %s: declares %s path(s) that do not exist on this machine; not run, not scored\n' \
-      "$a" "$(printf '%s\n' "$dang" | grep -c .)" >&2
-    printf '%s\n' "$dang" | sed 's/^/           /' >&2
+  if ! activate_arm "$a"; then
+    printf 'INVALID  %s: not installable on this machine; not run, not scored\n' "$a" >&2
     continue
   fi
 
