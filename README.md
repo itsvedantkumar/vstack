@@ -229,15 +229,32 @@ rather than asking a model what it would do.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent per session | 0 B | about 3.6 KB |
+| Context spent, session floor | 0 B | 4,415 B (~1,100 tokens) |
+| Context spent, per prompt after that | 0 B | 305 B (~76 tokens) |
 
-The last row is the price, stated because you pay it every session.
+The last two rows are the price, stated because you pay it every session and every turn. Measured,
+not estimated: `claude/CLAUDE.md` is 1,472 B and the SessionStart baseline is 2,943 B, so a 20-turn
+session costs about 10.5 KB and a 50-turn session about 19.7 KB. Reproduce with
+`echo '{"hook_event_name":"UserPromptSubmit"}' | claude/hooks/inject-session-context.sh | wc -c`.
 
 ## What this does not claim
 
 It does not claim to make the model better at your codebase. There is no measured quality
 improvement in this README because there is not yet one I trust, and
 [RESULTS.md](tests/evals/RESULTS.md) is where I keep being wrong about that in public.
+
+Nobody else has one either, which I did not know until I went looking.
+[docs/research/harness-value-literature-2026-08.md](docs/research/harness-value-literature-2026-08.md)
+surveys about 70 published sources. On frontier models, no published evidence says a
+configuration layer improves correctness, and two independent nulls at honest baselines say it does
+not. The nearest thing to this project's shape, a full skills bundle against a bare agent over 500
+tasks, returned +2.2 points at a 45.6% baseline, not significant, for 40% more tokens.
+
+What the config layer does measurably move is behaviour. Prompt strictness takes
+test-exploitation from over 85% to 1%. Consent declarations hold a coding agent's destructive
+out-of-scope rate at 0.0% against 17.1% without them. A retrieval skill cuts test regressions by
+70%, while the same paper's prose-only control made regressions worse. That is the row this README
+already leads with, and it is the honest one: guards, refusals, a gate that blocks. Not better code.
 
 It does not manage secrets beyond a 600-mode file and wrappers that load it. It does not work
 offline for the lanes that fetch. It is opinionated about model, effort and delegation, and those

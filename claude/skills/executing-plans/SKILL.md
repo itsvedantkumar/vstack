@@ -18,7 +18,7 @@ Load plan, review critically, execute all tasks, report when complete.
 
 **Announce at start:** "I'm using the executing-plans skill to implement this plan."
 
-**Note:** Tell your human partner that Superpowers works much better with access to subagents. The quality of its work will be significantly higher if run on a platform with subagent support (such as Claude Code). If subagents are available, use superpowers:subagent-driven-development instead of this skill.
+**Note:** Tell your human partner that plan execution works much better with access to subagents. The quality of its work will be significantly higher if run on a platform with subagent support (such as Claude Code). If subagents are available, dispatch each task to a fresh subagent via the Agent tool instead of executing tasks inline in this session.
 
 ## The Process
 
@@ -39,9 +39,9 @@ For each task:
 ### Step 3: Complete Development
 
 After all tasks complete and verified:
-- Announce: "I'm using the finishing-a-development-branch skill to complete this work."
-- **REQUIRED SUB-SKILL:** Use superpowers:finishing-a-development-branch
-- Follow that skill to verify tests, present options, execute choice
+- Verify the implementation: run typecheck, lint, and all tests
+- Commit changes to the branch with descriptive messages
+- Open a pull request or merge per your repository's convention
 
 ## When to Stop and Ask for Help
 
@@ -71,7 +71,10 @@ After all tasks complete and verified:
 
 ## Integration
 
-**Required workflow skills:**
-- **superpowers:using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
-- **superpowers:writing-plans** - Creates the plan this skill executes
-- **superpowers:finishing-a-development-branch** - Complete development after all tasks
+**Around this skill:**
+- **writing-plans** (a real skill here) creates the plan this one executes.
+- Isolated workspace: under Conductor each workspace is already a worktree. Outside it, `git worktree add`.
+- Finishing: verify with typecheck, lint and tests, commit, then merge or open a PR per the repo's convention.
+
+Only the first is a skill you can invoke. The other two are things you do, named here so the
+sequence is legible.
