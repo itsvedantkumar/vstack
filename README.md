@@ -229,13 +229,25 @@ rather than asking a model what it would do.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent, session floor | 0 B | 4,415 B (~1,100 tokens) |
-| Context spent, per prompt after that | 0 B | 305 B (~76 tokens) |
+| Context spent per session | 0 B | ~3.6 KB full / ~2.1 KB plugin |
+| Context spent per prompt, after that | 0 B | 305 B |
 
-The last two rows are the price, stated because you pay it every session and every turn. Measured,
-not estimated: `claude/CLAUDE.md` is 1,472 B and the SessionStart baseline is 2,943 B, so a 20-turn
-session costs about 10.5 KB and a 50-turn session about 19.7 KB. Reproduce with
-`echo '{"hook_event_name":"UserPromptSubmit"}' | claude/hooks/inject-session-context.sh | wc -c`.
+<!-- Check 18 in .claude/verify.sh parses the two "~N KB full / ~N KB plugin" figures above and
+     compares them against a live probe of the hook. Reword that cell and the check stops
+     comparing. It has happened once already, at cc76ba8, and went unnoticed for eleven commits. -->
+
+The last two rows are the price, stated because you pay the first once a session and the second
+every turn. The per-turn one is the one that compounds: 305 B is nothing, and a hundred turns of it
+costs more than the session baseline does once.
+
+Both figures are measured outside Conductor. Inside a Conductor workspace the baseline is 712 B
+smaller, because the hook skips its workspace-conventions block when `CONDUCTOR_WORKSPACE_PATH` is
+set. Reproduce either:
+
+```bash
+echo '{"hook_event_name":"SessionStart"}' | claude/hooks/inject-session-context.sh | wc -c
+echo '{"hook_event_name":"UserPromptSubmit"}' | claude/hooks/inject-session-context.sh | wc -c
+```
 
 ## What this does not claim
 

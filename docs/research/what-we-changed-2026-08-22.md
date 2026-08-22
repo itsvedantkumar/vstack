@@ -34,27 +34,48 @@ devalues every mandatory instruction in the rest of the set. `REQUIRED` should o
 something that exists. Evidence link: this is failure mode (a), exhortation with nothing behind it,
 and TDAD's control arm is the measured case where prose alone was net-negative.
 
-### README now states the context cost accurately
+### README context cost: I got this wrong twice before getting it right
 
-It said "about 3.6 KB" per session. Measured: **4,415 B floor** (CLAUDE.md 1,472 + SessionStart
-baseline 2,943) **plus 305 B every prompt after that**. So 10.5 KB at 20 turns, 19.7 KB at 50. The
-per-turn growth was not stated at all, which is the part that compounds.
+Worth recording in full, because the errors are more instructive than the fix.
+
+**Attempt one.** The README said "about 3.6 KB per session". I measured 2,943 B for the SessionStart
+baseline, added CLAUDE.md's 1,472 B, published "4,415 B floor", and thought I was correcting an
+understatement.
+
+**Error one, caught by a peer session.** Check 18 in `.claude/verify.sh` does not measure what I
+measured. It probes the hook in two profiles and compares against two published figures, `~N KB
+full` and `~N KB plugin`. It never counts CLAUDE.md. So my "floor" was a different quantity wearing
+the same label, and the original 3.6 KB was correct and machine-verified.
+
+**Error two, also mine.** My 2,943 B was measured inside a Conductor workspace. The hook skips its
+workspace-conventions block when `CONDUCTOR_WORKSPACE_PATH` is set, so outside Conductor the same
+block is **3,655 B**. A 712 B difference, confirmed to the byte. Both numbers are true and I
+published the one that did not match the check.
+
+**Error three, nearly.** My very first measurement returned 2,943 B for the *per-prompt* digest, a
+9x overstatement, because the test JSON omitted `hook_event_name` and the hook defaults to
+`SessionStart`. That exact defaulting bug is documented at line 13 of the hook as already found and
+fixed. The comment caught me.
+
+**What was actually broken, and it was not my edit.** Check 18's comparison is guarded by
+`grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin' README.md` with no `else`. The README stopped
+matching that pattern at **cc76ba8** ("Rewrite the README around the gstack comparison, 469 lines
+to 226"), eleven commits before I touched it. The check printed `ok` the whole time while comparing
+nothing. Same commit, same cause, as a second dead guard another session is fixing independently.
+
+**The fix.** The README publishes `~3.6 KB full / ~2.1 KB plugin` again, so the comparison is live.
+Verified falsifiable: changing the figure to 9.9 makes it fail. The per-prompt 305 B and the
+Conductor condition are stated too, since neither was there before and the per-turn one is what
+compounds.
+
+The prose anchor now carries an HTML comment naming what depends on it. That is a mitigation, not a
+fix. **The root cause is the missing `else`**: a guard whose absence skips silently will always die
+this way eventually. Handed to the session that owns `verify.sh`.
 
 Evidence link: cost is the best-measured harness effect in the literature and the one thing harness
-authors reliably publish about themselves, always version-to-version and never against a bare
-agent. A README that understates its own always-on cost is doing the same thing in miniature.
-
-Reproduce:
-
-```
-echo '{"hook_event_name":"UserPromptSubmit"}' | claude/hooks/inject-session-context.sh | wc -c
-```
-
-A note on how that number was nearly wrong. The first measurement returned 2,943 B for the
-per-prompt digest, a 9x overstatement, because the test JSON omitted `hook_event_name` and the hook
-defaults to `SessionStart`. That exact defaulting bug is documented at line 13 of the hook as
-something already found and fixed in production. It is a good reminder that measuring your own
-instrumentation wrong is as easy as measuring anything else wrong.
+authors reliably publish about themselves, always version-to-version and never against a bare agent.
+A README that understates its own always-on cost is doing the same in miniature. Needing three
+attempts to state it is the more honest lesson.
 
 ### README claims section now cites the field rather than only confessing
 
