@@ -6,6 +6,24 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Three eval harnesses opened their run log by destroying it.** `printf '<header>\n' >
+"$RUNLOG"` truncates unconditionally. That is harmless for the default, where `RUNLOG` lands in a
+fresh mktemp directory, and destructive the moment a caller passes `RUNLOG=` to accumulate across
+arms — which is required, because one model-calling arm does not fit in a single invocation. Each
+arm overwrote the arm before it, exit status stayed 0, and the summary reported the survivor as
+the whole experiment.
+
+It has already cost data rather than merely risked it. `.audit/run/falsedone-*.tsv` retains nine
+rows, all `arm=vstack`; the twelve-run `none` baseline quoted in
+[do-harnesses-help.md](docs/research/do-harnesses-help.md) has no surviving raw rows. Nothing
+noticed, because destroying data and succeeding look identical from outside.
+
+`tests/evals/lib/runlog.sh` now owns the opening: empty counts as new (`optimize.sh` passes a
+freshly `mktemp`'d file, so a refusal keyed on `[ -f ]` rather than `[ -s ]` would break the
+optimiser on its first call), a matching header appends, a foreign header refuses with rc 2.
+Check 36 exercises all four and then bans the truncating redirect outright under `tests/evals/`,
+because the line was copied into three harnesses and the thing worth preventing is the fourth.
+
 ## 1.14.0 — 2026-08-22
 
 **ui-gate reported OK over nothing, and doctor --drift reported no drift over nothing.**

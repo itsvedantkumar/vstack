@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -93,6 +93,7 @@ files_for(){ case "$1" in
   31)  printf '' ;;   # plants a new file rather than editing one
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
   35)  printf 'ui-gate/ui-gate.sh' ;;
+  36)  printf 'tests/evals/lib/runlog.sh' ;;
   34)  printf 'overlay.sh' ;;
 esac }
 
@@ -135,6 +136,7 @@ label_for(){ case "$1" in
   33)  printf 'project overlay stands down when the user-scope hook is live' ;;
   34)  printf 'the policy document reaches a session exactly once' ;;
   35)  printf 'gates refuse a green on nothing measured' ;;
+  36)  printf 'run logs are opened append-safe' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -276,6 +278,11 @@ exit 0
       # rule skipped. One comparison, which is all it took the first time.
       sed -i.t 's/\[ "\$RAN" -eq 0 \]/[ "$RAN" -lt 0 ]/' ui-gate/ui-gate.sh \
         && rm -f ui-gate/ui-gate.sh.t ;;
+
+  36) # Restore the truncation: treat every log as new, which is the line that shipped three
+      # times and threw away the previous arm each time.
+      sed -i.t 's/if \[ -s "\$f" \]; then/if false; then/' tests/evals/lib/runlog.sh \
+        && rm -f tests/evals/lib/runlog.sh.t ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;

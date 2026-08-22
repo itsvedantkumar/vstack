@@ -57,7 +57,8 @@ case "$ARMS_CSV" in *gstack*) [ -d "$GSTACK_DIR" ] || { echo "note: dropping gst
 
 ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/swebench.XXXXXX")" && pwd)
 RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
-printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\tp2p_broken\tp2p_total\n' > "$RUNLOG"
+. "$SRC/tests/evals/lib/runlog.sh"
+open_runlog "$RUNLOG" "$(printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\tp2p_broken\tp2p_total')" || exit 2
 echo "log: $RUNLOG" >&2
 
 setup_repo() { # <index> <dir> -> 0 usable, 1 unusable

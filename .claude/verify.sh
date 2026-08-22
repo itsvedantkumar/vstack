@@ -1612,6 +1612,67 @@ else
   skip "gates refuse a green on nothing measured" "ui-gate/ui-gate.sh or bin/doctor is not executable"
 fi
 
+# --- 36. an eval run log is opened without destroying the one already there --------------------
+#
+# Every harness under tests/evals/ opened its log with `printf '<header>\n' > "$RUNLOG"`. That
+# truncates unconditionally, which is harmless for the default (a fresh mktemp dir) and
+# destructive the moment a caller passes RUNLOG= to accumulate across arms -- which is required,
+# because one model-calling arm does not fit in a single invocation. Each arm overwrote the one
+# before it, exit status stayed 0, and the summary reported the survivor as the whole experiment.
+#
+# It has already cost data. .audit/run/falsedone-*.tsv retains nine rows, all arm=vstack; the
+# twelve-run `none` baseline quoted in docs/research/do-harnesses-help.md has no surviving raw
+# rows. Nothing noticed, because destroying data and succeeding look identical from outside.
+#
+# The line was copied into three harnesses, so the assertion is not "these three are fixed" but
+# "no fourth can reintroduce it": the truncating redirect is banned outright under tests/evals/,
+# and any harness that defines its own RUNLOG default must go through the shared opener. The
+# behavioural half runs the opener; the static half stops the next copy.
+r_errs=""
+if [ -f tests/evals/lib/runlog.sh ]; then
+  # shellcheck source=/dev/null
+  . tests/evals/lib/runlog.sh
+  r_dir=$(mktemp -d); r_f="$r_dir/runs.tsv"; r_h=$(printf 'arm\trun\tresult')
+
+  open_runlog "$r_f" "$r_h" 2>/dev/null || r_errs="$r_errs\n  refused to open a log that does not exist yet"
+  [ "$(grep -c . "$r_f")" = 1 ] || r_errs="$r_errs\n  a new log did not get exactly one header line"
+
+  printf 'vstack\t1\tok\n' >> "$r_f"; printf 'vstack\t2\tok\n' >> "$r_f"
+  open_runlog "$r_f" "$r_h" 2>/dev/null || r_errs="$r_errs\n  refused to reopen a log it had written itself"
+  [ "$(grep -c . "$r_f")" = 3 ] || r_errs="$r_errs\n  reopening a log destroyed rows: $(grep -c . "$r_f") line(s) survive of 3"
+  [ "$(grep -c '^arm' "$r_f")" = 1 ] || r_errs="$r_errs\n  reopening wrote a second header line into the middle of the data"
+
+  # optimize.sh hands the harness `log=$(mktemp)`, which exists and is empty. A refusal keyed on
+  # [ -f ] rather than [ -s ] would break the optimiser on its first call, so pin the distinction.
+  r_e="$r_dir/empty.tsv"; : > "$r_e"
+  open_runlog "$r_e" "$r_h" 2>/dev/null || r_errs="$r_errs\n  treated a zero-length file as occupied; optimize.sh passes exactly that"
+
+  open_runlog "$r_f" "$(printf 'other\tschema')" >/dev/null 2>&1
+  [ "$?" = 2 ] || r_errs="$r_errs\n  appended rows of one schema onto a log holding another"
+  rm -rf "$r_dir"
+
+  # The static half. A truncating redirect anywhere under tests/evals/ is the defect itself.
+  # Anchored on code, not on the word. The first spelling of this matched the sentence in
+  # runlog.sh's own header that quotes the defect, which is the same way check 30's first draft
+  # counted its own prose as a suppression. A file explaining a bug is not committing it.
+  r_trunc=$(git grep -n -E '^[^#]*[^>]>[[:space:]]*"\$RUNLOG"' -- tests/evals \
+              ':(exclude)tests/evals/lib/runlog.sh' 2>/dev/null || true)
+  [ -z "$r_trunc" ] || r_errs="$r_errs\n  a truncating redirect into \$RUNLOG is back:\n    $(printf '%s' "$r_trunc" | head -3)"
+
+  # And any harness owning a RUNLOG default must use the shared opener rather than its own.
+  while IFS= read -r r_file; do
+    [ -n "$r_file" ] || continue
+    grep -q 'runlog\.sh' "$r_file" \
+      || r_errs="$r_errs\n  $r_file sets its own RUNLOG default but never sources tests/evals/lib/runlog.sh"
+  done <<<"$(git grep -l -E '^RUNLOG=\$\{RUNLOG:-|^RUNLOG="\$\{RUNLOG:-' -- tests/evals 2>/dev/null)"
+
+  [ -z "$r_errs" ] \
+    && ok "run logs are opened append-safe (4 cases, plus no truncating redirect under tests/evals)" \
+    || bad "run logs are opened append-safe" "$(printf '%b' "$r_errs")"
+else
+  bad "run logs are opened append-safe" "tests/evals/lib/runlog.sh is missing, so three harnesses are back to truncating"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

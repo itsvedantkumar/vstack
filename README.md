@@ -28,7 +28,7 @@ writing this. Measured at commit `85fd9db`:
 | Tracked files | 1,359 | 195 |
 | Its review skill, per invocation | 112 KB | delegated to a subagent |
 | Checks proving the thing works | none found | 34 |
-| Mutations proving those checks can fail | none found | 37 |
+| Mutations proving those checks can fail | none found | 38 |
 | Install environments under test | not published | 23 |
 | Uninstall script | none | `./uninstall.sh --yes` |
 | Specialists that are real subagents | 0 | 14 |
@@ -94,7 +94,7 @@ verify is carried into the final report rather than disappearing between phases.
 
 ## What "proven" means here
 
-`.claude/verify.sh` runs 37 checks. `tests/gate-falsifiability.sh` breaks the repository once per
+`.claude/verify.sh` runs 38 checks. `tests/gate-falsifiability.sh` breaks the repository once per
 check, requires the gate to go red naming that check, restores the tree byte for byte, and fails
 if anything was left behind. Check 16 fails if a check has no mutation row, so a check cannot be
 added without proof it can fail.
@@ -205,7 +205,7 @@ repository does not run that repository's code.
 Locally:
 
 ```bash
-./.claude/verify.sh               # 37 checks
+./.claude/verify.sh               # 38 checks
 ./tests/gate-falsifiability.sh    # one mutation per check
 ./tests/install-matrix.sh         # 23 environment lanes
 ./tests/auto-trigger.sh           # 14 prompts through the real CLI
