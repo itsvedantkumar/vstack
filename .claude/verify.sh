@@ -1096,9 +1096,27 @@ PINEOF
   else
     # Everything a lane actually delivers. Docs, tests and CI are deliberately excluded: they
     # change without changing what a stranger receives.
-    drift=$(git diff --name-only "v$mv_..HEAD" -- claude/ mcp/ bin/ shell/ conductor/ \
-              install.sh bootstrap.sh overlay.sh uninstall.sh setup-machine.sh 2>/dev/null)
-    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_)" \
+    PAYLOAD="claude/ mcp/ bin/ shell/ conductor/ install.sh bootstrap.sh overlay.sh uninstall.sh setup-machine.sh"
+    # shellcheck disable=SC2086  # PAYLOAD is a deliberate word list of pathspecs, not one path
+    drift=$(git diff --name-only "v$mv_..HEAD" -- $PAYLOAD 2>/dev/null)
+    # The working tree too, not only HEAD. This compared v$mv_..HEAD and nothing else, so before
+    # a commit HEAD *was* the tag, the diff was empty, and it printed ok while three modified
+    # payload files sat in the working tree. After the commit, same file contents, it went red.
+    # Nothing about the artefact changed between those two runs -- only which side of the commit
+    # boundary the person stood on. A green whose truth value depends on when you ask is worse
+    # than one that is simply wrong, because it is reproducible in both directions on demand,
+    # and it becomes able to fail only once it is too late to act on.
+    #
+    # Staged, unstaged and untracked payload all count, since all three are things a stranger
+    # would receive and the tag does not describe. A `git stash` still hides them; that is stated
+    # in the ok line rather than solved, because the only honest fix for "somebody hid the
+    # evidence" is to say what was looked at.
+    # shellcheck disable=SC2086  # same deliberate word list
+    wt=$(git status --porcelain -- $PAYLOAD 2>/dev/null | sed 's/^...//')
+    if [ -n "$wt" ]; then
+      drift=$(printf '%s\n%s' "$drift" "$wt" | grep -v '^$' | sort -u)
+    fi
+    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_, HEAD and working tree; the tag is local -- this does not check any remote)" \
       || bad "declared version matches what installs" \
              "$(printf 'the manifests say v%s but the payload has moved since that tag:\n%s\nbump the version and changelog it, or the plugin and unpinned lanes ship something v%s never described' "$mv_" "$(printf '%s' "$drift" | sed 's/^/  /' | head -10)" "$mv_")"
   fi
@@ -1193,7 +1211,13 @@ if [ -f .github/workflows/verify.yml ]; then
     && ok "documented platforms match CI ($(printf '%s' "$ci_runners" | tr '\n' ' '))" \
     || bad "documented platforms match CI" "$(printf 'support is a claim about what is tested:%b' "$errs")"
 else
-  skip "documented platforms match CI" "no .github/workflows/verify.yml"
+  # Not a skip. The workflow is a tracked file in this repository, not a dependency that may or
+  # may not exist on a runner, so its absence does not mean "cannot measure here" -- it means CI
+  # is gone and the README's platform claim has no evidence behind it at all. Nothing else
+  # asserts the workflow exists; check 31 excludes .github/. A skip here reported the strongest
+  # possible version of the failure as an absence of information.
+  bad "documented platforms match CI" \
+      ".github/workflows/verify.yml is missing, so the platforms the README promises are tested by nothing"
 fi
 
 # --- 27. the skill mandate blocks on an unmet rule and stays quiet otherwise -------------------
@@ -1248,7 +1272,10 @@ fi
 # fine is a doc no path in the repository leads to.
 docs_all=$(find docs -name '*.md' 2>/dev/null | sort)
 if [ -z "$docs_all" ]; then
-  skip "every doc is reachable" "no docs/ directory"
+  # Not a skip, for the same reason: docs/ is tracked. Its absence silently retires three
+  # assertions at once -- this one, and two rows inside check 12 that are guarded on files under
+  # it -- and reports that as nothing to see.
+  bad "every doc is reachable" "there is no docs/ directory, so this and two rows of check 12 are asserting nothing"
 else
   # Written to a file and grepped directly. `printf ... | grep -q` returns 141 under pipefail
   # when grep exits early on a match, so every doc that WAS linked reported as an orphan -- the
@@ -1384,8 +1411,16 @@ while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
     claude/skills/*|claude/agents/*|claude/commands/*|.github/*|docs/*) continue ;;
+    # Eval corpora, loaded by directory the same way skills are: the harness points FIX at the
+    # directory and globs it (run-pathways.sh:42), so naming each fixture individually somewhere
+    # would be redundant rather than informative. Adding a fixture is meant to be a file drop.
+    tests/evals/fixtures/*|tests/evals/holdout/*|tests/evals/*/fixture/*) continue ;;
   esac
-  [ -n "$(git grep -l -F "${f##*/}" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
+  # Matched on the path, not the basename. A basename match means every README.md in the tree is
+  # "referenced" by any mention of any README.md, and a subtree that names only itself passes as
+  # a group: ui-gate/ -- shipped as the fix for the fifth fake green -- was named by nothing
+  # outside itself, was not linted, was not parsed, was not run by CI, and this check was green.
+  [ -n "$(git grep -l -F -- "$f" -- . ":(exclude)$f" 2>/dev/null | head -1)" ] \
     || unref="$unref\n  $f"
 done <<<"$(git ls-files 2>/dev/null)"
 [ -z "$unref" ] \

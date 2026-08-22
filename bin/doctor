@@ -316,6 +316,10 @@ echo "── hooks ──"
 for f in $HOOKS; do
   [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
 [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
+# bin/claude-task.sh ships in the same sweep (install.sh copies bin/* wholesale) and nothing in
+# the repository named it, so nothing checked it either -- it was installed on every machine and
+# findable from none. It is the scheduled-task runner cron drives.
+[ -x "$HOME/.config/agents/bin/claude-task.sh" ] && ok "claude-task.sh (scheduled runs)" || bad "claude-task.sh" "missing"
 n=$(ls "$CDIR/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" -ge "$WANT_AGENTS" ] && ok "subagents ($n)" || bad "subagents" "$n<$WANT_AGENTS"
 echo "── secrets ──"

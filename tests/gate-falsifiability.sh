@@ -53,7 +53,13 @@ restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
 # referrer as far as check 31 is concerned. The first draft spelled the name out, the check found
 # it named in this very script, and the row reported "did NOT fail when broken" while the
 # mutation was working perfectly.
-ORPHAN_PROBE="bin/zz-unreferenced-$$.sh"
+# The basename is assembled from an existing, well-referenced path rather than typed, for two
+# reasons. The old one: a literal name in this file is itself a referrer, which is how the first
+# draft reported "did NOT fail when broken" while the mutation worked perfectly. The new one:
+# since 1.15.0 check 31 matches paths instead of basenames, and this probe is what proves it --
+# ui-gate/doctor collides with bin/doctor, which is named in eighteen places, so the old
+# basename match called it referenced and the path match does not.
+ORPHAN_PROBE="ui-gate/$(basename bin/doctor)"
 
 creates_for(){ case "$1" in
   31)  printf '%s' "$ORPHAN_PROBE" ;;

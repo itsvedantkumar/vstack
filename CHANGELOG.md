@@ -6,6 +6,42 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Check 31 matched basenames, so a file nobody names could pass by sharing a name with one
+everybody does.** Every `README.md` in the tree counted as referenced by any mention of any
+`README.md`. It matches paths now. Demonstrated: an orphan at `ui-gate/doctor` is found by
+`git grep -l -F doctor` in eighteen places and was reported as referenced; by path it is
+reported as unreferenced, which it is. Row 31's probe is now assembled as
+`ui-gate/$(basename bin/doctor)` so it proves exactly that, and so the literal never appears in
+the file — a name spelled out here is itself a referrer.
+
+The tightening found one real orphan. `bin/claude-task.sh` is copied onto every machine by
+`install.sh` (which ships `bin/*` wholesale) and was named by nothing in the repository, so
+nothing checked it either: installed everywhere, findable nowhere. `bin/doctor` reports on it
+now, beside `claude-bg.sh`. The eval corpora under `tests/evals/fixtures`, `holdout` and
+`*/fixture` are excluded instead, because those genuinely load by directory — `run-pathways.sh`
+points `FIX` at the directory and globs it, so adding a fixture is meant to be a file drop.
+
+**Checks 26 and 28 answered "skip" to a missing tracked file.** Neither `.github/workflows/verify.yml`
+nor `docs/` is an environment dependency that may reasonably be absent on a runner; they are
+files in this repository. The workflow being gone means CI is gone and the README's platform
+promise has no evidence behind it; `docs/` being gone silently retires this check and two rows
+inside check 12. Both are failures now. Legitimate skips are unchanged: check 19 when the Claude
+CLI is absent, check 24 with no tags, check 29 without shellcheck — each names the missing
+dependency, and each is a thing a runner may honestly lack.
+
+**Check 24 could only fail after it was too late to act on.** It compared `v$version..HEAD`, so
+before a commit HEAD *was* the tag, the diff was empty, and it printed `ok declared version
+matches what installs (v1.14.0)` with modified payload files sitting in the working tree. After
+the commit — identical file contents — it went red. Nothing about the artefact changed between
+those two runs, only which side of the commit boundary the person stood on. Both directions
+observed on this branch and independently by a second session on main the same afternoon.
+
+It reads the working tree now, staged and unstaged and untracked, so it bites while the bump is
+still cheap. A `git stash` still hides payload from it; that is stated in the ok line rather
+than solved, because the only honest answer to "somebody hid the evidence" is to say what was
+looked at. The ok line also now says the tag is local and that no remote was consulted — the
+check verifies the tag exists here, not that the URL the README hands a stranger resolves.
+
 **`tests/evals/run.sh` is deleted rather than repaired.** Its gstack arm used `find "$GSTACK_DIR"
 -maxdepth 2 -name SKILL.md`, which matches gstack's root SKILL.md at depth 1 and copies the whole
 repository in as one nested skill, and it installed gstack at project scope where its references
