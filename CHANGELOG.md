@@ -6,6 +6,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**compare-baseline printed six comparisons and made five.** Its `row()` took an expected value
+that could be spelled `-` meaning "assert nothing", and exactly one row used it: the per-session
+context cost, which is the number the README publishes and therefore the row that most deserved
+an expectation. A row proving nothing printed identically to a row proving something, and
+`exit "$FAIL"` stayed 0 however far the number drifted.
+
+The escape hatch is deleted rather than fixed, because a ceiling inside `row()` would need a
+fifth grammar parsed out of a display string — `~3.6 KB full / ~2.1 KB plugin` is not a number
+and never will be. `row()` displays and counts; `expect` and `expect_max` assert and count; the
+footer fails when the two counts disagree. The cost row now carries a real ceiling on the raw
+byte count (`CTX_MAX`, default 6144), leaving the rounded KB figures for display only.
+
+The accounting found a seventh row nobody had noticed was unasserted, on its first run.
+
 **Three eval harnesses opened their run log by destroying it.** `printf '<header>\n' >
 "$RUNLOG"` truncates unconditionally. That is harmless for the default, where `RUNLOG` lands in a
 fresh mktemp directory, and destructive the moment a caller passes `RUNLOG=` to accumulate across

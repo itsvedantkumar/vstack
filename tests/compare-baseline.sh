@@ -46,13 +46,29 @@ FAIL=0
 # Every row carries the value it is supposed to produce, so this is a regression test that
 # happens to print a table rather than a table that happens to be true today. A comparison
 # nobody can make fail is a brochure.
-row() { # <scenario> <bare> <vstack> <expected|-> <matters>
-  if [ "$4" != "-" ] && [ "$3" != "$4" ]; then
-    printf 'REGRESSION  %s: expected "%s", got "%s"\n' "$1" "$4" "$3" >&2
-    FAIL=1
-  fi
-  ROWS="$ROWS$1|$2|$3|$5
+# There used to be a fifth argument spelled "-" meaning "assert nothing", and exactly one row
+# used it: the per-session context cost, which is the number the README publishes and therefore
+# the row that most deserved an expectation. A row with no expectation printed identically to a
+# row that proved something, so the table looked like six comparisons and was five. There is no
+# spelling for that now -- row() displays, and asserting is a separate call that gets counted.
+NROWS=0
+NASSERT=0
+row() { # <scenario> <bare> <vstack> <matters>
+  NROWS=$((NROWS + 1))
+  ROWS="$ROWS$1|$2|$3|$4
 "
+}
+expect() { # <scenario> <got> <want>
+  NASSERT=$((NASSERT + 1))
+  [ "$2" = "$3" ] && return 0
+  printf 'REGRESSION  %s: expected "%s", got "%s"\n' "$1" "$3" "$2" >&2
+  FAIL=1
+}
+expect_max() { # <scenario> <got> <ceiling>
+  NASSERT=$((NASSERT + 1))
+  [ "$2" -le "$3" ] 2>/dev/null && return 0
+  printf 'REGRESSION  %s: %s exceeds the %s budget\n' "$1" "$2" "$3" >&2
+  FAIL=1
 }
 
 need_jq() { command -v jq >/dev/null 2>&1; }
@@ -73,8 +89,9 @@ vs_gate=$(printf '{"session_id":"cmp-gate"}' \
     bash claude/hooks/verify-gate.sh 2>/dev/null | jq -r '.decision // "no decision"')
 row "agent claims done, tests fail" \
     "nothing intervenes" \
-    "$vs_gate" block \
+    "$vs_gate" \
     "incomplete work is reported as finished"
+expect "agent claims done, tests fail" "$vs_gate" block
 
 # --- 2 to 4. destructive commands, with permissions bypassed ------------------------------------
 # This configuration recommends --bypass-permissions, which removes the prompt that would
@@ -83,12 +100,20 @@ row "agent claims done, tests fail" \
 guard() { printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c "$1" '$c')" \
           | bash claude/hooks/guard-destructive.sh 2>/dev/null \
           | jq -r '.hookSpecificOutput.permissionDecision // "no decision"'; }
-row "rm -rf / from an agent" "runs" "$(guard 'rm -rf /')" deny "unrecoverable"
-row "git push --force origin main" "runs" "$(guard 'git push --force origin main')" deny "history loss on a shared branch"
-row "git reset --hard, uncommitted work" "runs" "$(guard 'git reset --hard HEAD~3')" ask "silent loss of work in progress"
+v=$(guard 'rm -rf /')
+row "rm -rf / from an agent" "runs" "$v" "unrecoverable"
+expect "rm -rf / from an agent" "$v" deny
+v=$(guard 'git push --force origin main')
+row "git push --force origin main" "runs" "$v" "history loss on a shared branch"
+expect "git push --force origin main" "$v" deny
+v=$(guard 'git reset --hard HEAD~3')
+row "git reset --hard, uncommitted work" "runs" "$v" "silent loss of work in progress"
+expect "git reset --hard, uncommitted work" "$v" ask
 # The row that proves the guard is not simply blocking everything. A guard that interrupts
 # routine work gets disabled, and a disabled guard measures zero.
-row "rm -rf node_modules (routine)" "runs" "$(guard 'rm -rf node_modules')" allow "a guard that nags gets switched off"
+v=$(guard 'rm -rf node_modules')
+row "rm -rf node_modules (routine)" "runs" "$v" "a guard that nags gets switched off"
+expect "rm -rf node_modules (routine)" "$v" allow
 
 # --- 5. a cloned repo's gate, unarmed ----------------------------------------------------------
 # The other direction: what this configuration refuses to do. An untrusted repo's verify.sh is
@@ -98,7 +123,8 @@ printf '#!/usr/bin/env bash\nexit 1\n' > "$ud/repo/.claude/verify.sh"; chmod +x 
 un=$(printf '{"session_id":"cmp-untrusted"}' \
   | env HOME="$ud/home" TMPDIR="$ud/tmp" CLAUDE_PROJECT_DIR="$ud/repo" \
     bash claude/hooks/verify-gate.sh 2>/dev/null | jq -r '.decision // "did not run it"')
-row "untrusted repo's gate on Stop" "no gate at all" "$un" "did not run it" "executing a stranger's code unasked"
+row "untrusted repo's gate on Stop" "no gate at all" "$un" "executing a stranger's code unasked"
+expect "untrusted repo's gate on Stop" "$un" "did not run it"
 
 # --- 6. the cost ---------------------------------------------------------------------------------
 # Printed as a first-class result, not a footnote. Every session pays this whether or not a skill
@@ -122,7 +148,13 @@ skills=$(probe_ctx skills)
 # is the kind of false precision this repo keeps deleting from its own docs.
 fullkb=$(awk -v b="$full" 'BEGIN{printf "%.1f", b/1024}')
 skkb=$(awk -v b="$skills" 'BEGIN{printf "%.1f", b/1024}')
-row "context spent per session (cost)" "0 B" "~${fullkb} KB full / ~${skkb} KB plugin" - "you pay this every session"
+row "context spent per session (cost)" "0 B" "~${fullkb} KB full / ~${skkb} KB plugin" "you pay this every session"
+# Asserted on the raw byte count, not the rounded string. The KB figures above are rounded on
+# purpose because the exact count embeds environment-dependent text; a ceiling does not need
+# them to be equal, only to stay inside a budget somebody chose. 6144 is roughly two thirds
+# above the 3.6 KB measured here -- room for a paragraph, not for a block that ran away.
+CTX_MAX=${CTX_MAX:-6144}
+expect_max "context spent per session (cost)" "$full" "$CTX_MAX"
 
 if [ "$JSON" = 1 ]; then
   printf '%s' "$ROWS" | jq -Rs 'split("\n")|map(select(length>0))|map(split("|"))|map({scenario:.[0],bare:.[1],vstack:.[2],matters:.[3]})'
@@ -141,6 +173,14 @@ echo "Measured by firing the real hooks with identical input, not by asking a mo
 echo "It says nothing about whether the skills produce better work — tests/auto-trigger.sh"
 echo "measures whether they fire, which is a smaller claim, and no test here measures quality."
 echo
+# The accounting verify.sh and ui-gate.sh both carry, in the one gate that lacked it. Printing a
+# row is not evidence; a row nobody can make fail is a brochure.
+if [ "$NASSERT" -ne "$NROWS" ]; then
+  printf 'FAIL  %d row(s) printed with no expectation behind them\n' "$((NROWS - NASSERT))" >&2
+  FAIL=1
+else
+  printf 'every row carries an expectation (%d)\n' "$NROWS"
+fi
 [ "$FAIL" -eq 0 ] && echo "every mechanism produced the decision it is supposed to" \
   || echo "A MECHANISM REGRESSED — see the REGRESSION lines above"
 exit "$FAIL"
