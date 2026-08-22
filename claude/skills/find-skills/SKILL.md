@@ -1,6 +1,6 @@
 ---
 name: find-skills
-description: The user wants to DISCOVER or INSTALL a skill, not have the task done now: find a skill for X, is there a skill for X, what skills exist for X, install a skill. Searches the ecosystem.
+description: "The user wants to DISCOVER or INSTALL a skill, not have the task done now: find a skill for X, is there a skill for X, what skills exist for X, install a skill. Searches the ecosystem."
 ---
 
 > Ported from vercel-labs/skills (MIT). This skill drives `npx skills`, which vstack does not

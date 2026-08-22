@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Use when the user floats a plan, design or decision and wants it stress-tested, or says grill me, poke holes, what am I missing, or tear this apart. A round-based interview before code.
+description: "Use when the user floats a plan, design or decision and wants it stress-tested, or says grill me, poke holes, what am I missing, or tear this apart. A round-based interview before code."
 ---
 
 > Ported from mattpocock/skills. Upstream splits this in two: a `grill-me` stub that forwards to
