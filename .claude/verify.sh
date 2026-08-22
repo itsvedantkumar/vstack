@@ -1547,6 +1547,71 @@ else
   skip "the policy document reaches a session exactly once" "jq or git missing, or the policy document is empty"
 fi
 
+# --- 35. a gate that measured nothing does not report success ----------------------------------
+#
+# Three tools in this repository print declared/ran/skipped accounting and then a verdict, and
+# two of them used to pass at ran=0. ui-gate.sh printed "9 declared, 0 ran, 0 passed, 0 failed,
+# 9 skipped" followed by "UI GATE OK" against any directory with no interface files in it, which
+# is the exact defect its own header says the repository exists to catch. doctor --drift printed
+# "no drift ✔" after four whole families of globs matched nothing, though the resolve-failure
+# branch one layer up had already learned that nothing-compared is a failure.
+#
+# So this is not a one-off: it is the same reading twice, in two tools, one of which had already
+# been fixed in one branch and not the others. Both directions are asserted, because a gate that
+# always refuses is worth exactly as much as one that never does -- and the refusing direction is
+# the one nobody would notice breaking.
+g_errs=""
+if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
+  g_empty=$(mktemp -d)
+
+  # ui-gate, negative: no interface files, so no rule can run.
+  _o=$(./ui-gate/ui-gate.sh "$g_empty" 2>&1)
+  grep -q 'UI GATE OK' <<<"$_o" \
+    && g_errs="$g_errs\n  ui-gate reports OK over a target where no rule ran"
+  grep -q 'UI GATE NOT RUN' <<<"$_o" \
+    || g_errs="$g_errs\n  ui-gate does not say it never ran; it must name that case, not stay quiet"
+
+  # ui-gate, positive: a fixture with real component and stylesheet files.
+  mkdir -p "$g_empty/app/src"
+  printf 'export const C = () => <div className="mt-4 p-4">x</div>;\n' > "$g_empty/app/src/C.tsx"
+  printf '.a{font-size: 16px;}\n' > "$g_empty/app/src/a.css"
+  _o=$(./ui-gate/ui-gate.sh "$g_empty/app" 2>&1)
+  grep -q 'UI GATE OK' <<<"$_o" \
+    || g_errs="$g_errs\n  ui-gate withholds OK from a fixture whose rules do run and hold"
+
+  # doctor --drift, negative: a $REPO that resolves but ships no families at all.
+  g_repo=$(mktemp -d); g_home=$(mktemp -d)
+  mkdir -p "$g_repo"/claude/hooks "$g_repo"/claude/agents "$g_repo"/claude/commands \
+           "$g_repo"/claude/skills "$g_repo"/bin "$g_home/.claude"
+  cp claude/CLAUDE.md claude/statusline.sh claude/settings.json "$g_repo/claude/" 2>/dev/null
+  cp claude/CLAUDE.md claude/statusline.sh "$g_home/.claude/" 2>/dev/null
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'no drift' <<<"$_o" \
+    && g_errs="$g_errs\n  doctor --drift reports no drift after comparing zero items per family"
+
+  # doctor --drift, positive: one member in every family, mirrored on both sides.
+  for _p in hooks/h.sh agents/a.md commands/c.md; do
+    printf 'x\n' > "$g_repo/claude/$_p"
+    mkdir -p "$g_home/.claude/${_p%/*}" && printf 'x\n' > "$g_home/.claude/$_p"
+  done
+  mkdir -p "$g_repo/claude/skills/s" "$g_home/.claude/skills/s"
+  printf 'x\n' > "$g_repo/claude/skills/s/SKILL.md"; printf 'x\n' > "$g_home/.claude/skills/s/SKILL.md"
+  mkdir -p "$g_home/.config/agents/bin"
+  printf 'x\n' > "$g_repo/bin/b"; printf 'x\n' > "$g_home/.config/agents/bin/b"
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'no drift' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift withholds its verdict from a tree that matches item for item"
+  grep -qE 'no drift .*[0-9]+ item' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not say how many items it compared, so the result cannot be audited"
+
+  rm -rf "$g_empty" "$g_repo" "$g_home"
+  [ -z "$g_errs" ] \
+    && ok "gates refuse a green on nothing measured (ui-gate, doctor --drift, both directions)" \
+    || bad "gates refuse a green on nothing measured" "$(printf '%b' "$g_errs")"
+else
+  skip "gates refuse a green on nothing measured" "ui-gate/ui-gate.sh or bin/doctor is not executable"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

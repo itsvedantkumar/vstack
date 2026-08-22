@@ -47,9 +47,13 @@ if [ "${1:-}" = "--drift" ]; then
 
   echo "comparing installed state against: $REPO"
   DRIFT=0
+  COMPARED=0
 
   check_item() {
     rel="$1"; src="$2"; dst="$3"
+    # Counted on entry, so "missing" and "differs" both count as compared. What this number is
+    # for is the case below where it stays zero.
+    COMPARED=$((COMPARED + 1))
     if [ ! -e "$dst" ]; then
       echo "missing   $rel  (not installed at $dst)"
       DRIFT=1
@@ -75,31 +79,54 @@ if [ "${1:-}" = "--drift" ]; then
     fi
   }
 
+  # Every loop below is `[ -e "$f" ] || continue` guarded, which is correct for a glob that may
+  # legitimately match nothing and wrong for one that must not. A $REPO that resolves but whose
+  # claude/skills/ is empty -- a moved checkout, a partial clone, a stale vstack-repo pointer --
+  # compared 28 installed skills against nothing and fell through to "no drift ✔". The resolve
+  # failure above already learned this ("nothing to compare" is a failure, not a pass); the
+  # loops under it had not.
+  family_floor() { # <label> <count>
+    [ "$2" -gt 0 ] && return 0
+    echo "error     $1  (nothing to compare: $REPO ships none)"
+    DRIFT=1
+  }
+  nfam=0
+
   for f in "$REPO"/claude/hooks/*.sh; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
     check_item "claude/hooks/$b" "$f" "$CDIR/hooks/$b"
+    nfam=$((nfam + 1))
   done
+  family_floor "claude/hooks" "$nfam"; nfam=0
   for f in "$REPO"/claude/agents/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
     check_item "claude/agents/$b" "$f" "$CDIR/agents/$b"
+    nfam=$((nfam + 1))
   done
+  family_floor "claude/agents" "$nfam"; nfam=0
   for f in "$REPO"/claude/commands/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
     check_item "claude/commands/$b" "$f" "$CDIR/commands/$b"
+    nfam=$((nfam + 1))
   done
+  family_floor "claude/commands" "$nfam"; nfam=0
   for d in "$REPO"/claude/skills/*/; do
     [ -d "$d" ] || continue
     s=$(basename "$d")
     check_item "claude/skills/$s" "${d%/}" "$CDIR/skills/$s"
+    nfam=$((nfam + 1))
   done
+  family_floor "claude/skills" "$nfam"; nfam=0
   for f in "$REPO"/bin/*; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
     check_item "bin/$b" "$f" "$HOME/.config/agents/bin/$b"
+    nfam=$((nfam + 1))
   done
+  family_floor "bin" "$nfam"; nfam=0
   # install.sh calls CLAUDE.md "the file most likely to have been hand-edited on a machine that
   # has been running a while", and it was the one file --drift never looked at. Hand-edit it,
   # get "no drift", then lose the edit on the next update. Same for the statusline and the
@@ -243,7 +270,14 @@ if [ "${1:-}" = "--drift" ]; then
     echo "DRIFT ✖"
     exit 1
   fi
-  echo "no drift ✔"
+  # A comparison that does not say what it compared cannot be audited, and one that compared
+  # nothing must not print the same word as one that compared everything.
+  if [ "$COMPARED" -eq 0 ]; then
+    echo "nothing was compared, so this is a failure rather than a pass"
+    echo "DRIFT ✖"
+    exit 1
+  fi
+  echo "no drift ✔ ($COMPARED item(s) compared)"
   exit 0
 fi
 

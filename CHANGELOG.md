@@ -6,6 +6,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**ui-gate reported OK over nothing, and doctor --drift reported no drift over nothing.**
+`./ui-gate/ui-gate.sh docs` printed `9 declared, 0 ran, 0 passed, 0 failed, 9 skipped` and then
+`UI GATE OK`, exit 0 — the accounting rule above it is satisfied at RAN=0, and FAILED is 0
+because nothing ran to fail. That is the defect the file's own header says this repository
+exists to catch, reproduced in the summary written to catch it. The floor is RAN, not PASSED:
+browser rules skipping for want of playwright is honest, but every rule skipping means the
+target has no interface in it, and a UI gate over a target with no UI is a category error rather
+than a pass. It now prints `UI GATE NOT RUN` and exits 2, following the file's own precedent
+where 2 is "could not run" and 1 is "rules failed".
+
+`doctor --drift` had the same shape one tool over. Its five family globs are each `[ -e "$f" ]
+|| continue` guarded, so a `$REPO` that resolves but ships no skills — a moved checkout, a
+partial clone, a stale pointer — compared 28 installed skills against nothing and printed
+`no drift ✔`. Measured: against a stub whose families are all empty, the old code exits 0
+saying no drift; the new code names all five families and exits 1. It also reports the count
+now (`no drift ✔ (73 item(s) compared)`), because a comparison that does not say what it
+compared cannot be audited. The resolve-failure branch one layer up had already learned this;
+the loops beneath it had not.
+
+Check 35 holds both, in both directions, because a gate that always refuses is worth exactly as
+much as one that never does. `ui-gate/mutations.sh` gained the same control beside its clean-
+fixture baseline.
+
 **Check 18 published two promises and kept one.** The half that compares the README's context-cost
 figure against the live byte count was guarded by a grep for `~N KB full / ~N KB plugin` — a
 sentence that `cc76ba8` reworded into a table row in the same commit that severed it. An `if` with
