@@ -6,6 +6,27 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.12.0 — 2026-08-22
+
+**README rewritten, 469 lines to 226.** It now opens on the comparison against
+[gstack](https://github.com/garrytan/gstack), which is the closest comparable project and the
+obvious thing a reader is deciding between.
+
+The comparison names four differences that are checkable rather than asserted: vstack configures
+the machine rather than only the prompt, its gate is mutation-tested so a check cannot be added
+without proof it can fail, uninstalling restores what was there, and it publishes its own broken
+measurements. It also says plainly what gstack does better, which is breadth, multi-agent support
+and a conventional unit-test suite.
+
+What it does not do is claim a benchmark win. The only vstack-versus-gstack number this repo ever
+produced came from a gstack arm whose helper scripts did not exist on the machine that ran it, and
+a README is not the place to launder a retracted result.
+
+The gate rejected four things in the first draft, which is the argument for having it: two
+sentences whose phrasing collided with the documented-count scanner, an omission of the
+`alpine:latest` runner that check 26 requires the platform claim to name, and a docs link that
+check 28 needed and the rewrite had dropped.
+
 ## 1.11.0 — 2026-08-22
 
 **grill-me fires on its own.** Two triggers, both decidable in the UserPromptSubmit hook without
