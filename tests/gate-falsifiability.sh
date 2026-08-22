@@ -32,7 +32,39 @@ NOJQ=$(mktemp -d)
 # run cannot wedge the gate for everyone -- which matters, because this suite does get killed.
 LOCK="$(git rev-parse --git-dir 2>/dev/null)/vstack-falsifiability.lock"
 printf '%s\n' "$$" > "$LOCK" 2>/dev/null || LOCK=""
-trap 'rm -rf "$BK" "$NOJQ"; [ -n "$LOCK" ] && rm -f "$LOCK"' EXIT
+# EXIT alone does not fire when the shell is killed, and this suite gets killed: someone restarts
+# it at a later commit, or a wrapper times it out. Both times that happened today it left a
+# mutated file on disk -- install.sh once, README.md once in another worktree -- and the tree
+# looked like it carried a real defect.
+#
+# The baseline check does catch it on the next run, loudly, which is the safety net working. But
+# "your repository is now wrong and the next run will tell you why" is a poor answer when putting
+# it back is this cheap. INT, TERM and HUP restore too.
+#
+# Restoring everything in $BK rather than tracking the row in flight: save() overwrites its
+# backup before each mutation, so the newest copy of each file is always its pre-mutation state,
+# and re-copying a file that was already restored writes identical bytes. Idempotent, and it does
+# not depend on knowing where the run stopped -- which is the one thing a killed run cannot tell
+# you.
+restore_all(){
+  [ -d "$BK" ] || return 0
+  ( cd "$BK" 2>/dev/null && find . -type f -print ) | sed 's|^\./||' | while IFS= read -r f; do
+    [ -n "$f" ] && cp "$BK/$f" "$f" 2>/dev/null
+  done
+}
+cleanup(){
+  _rc=$?
+  trap - EXIT INT TERM HUP
+  restore_all
+  if [ -n "${ORPHAN_PROBE:-}" ] && [ -e "$ORPHAN_PROBE" ]; then
+    git rm -q -f --cached "$ORPHAN_PROBE" >/dev/null 2>&1
+    rm -f "$ORPHAN_PROBE"
+  fi
+  rm -rf "$BK" "$NOJQ"
+  [ -n "${LOCK:-}" ] && rm -f "$LOCK"
+  exit "$_rc"
+}
+trap cleanup EXIT INT TERM HUP
 export VSTACK_FALSIFY=1
 # A PATH holding every system binary except jq, for the toolchain row.
 for d in /usr/bin /bin; do
