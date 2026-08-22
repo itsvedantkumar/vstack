@@ -6,6 +6,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**`tests/evals/run.sh` is deleted rather than repaired.** Its gstack arm used `find "$GSTACK_DIR"
+-maxdepth 2 -name SKILL.md`, which matches gstack's root SKILL.md at depth 1 and copies the whole
+repository in as one nested skill, and it installed gstack at project scope where its references
+to a global skills directory are all command-not-found. Two other harnesses had already been
+fixed; this one was missed.
+
+It was not repaired because its question is answered and the answer is recorded — 11/15, 11/15,
+10/15 across none, vstack and gstack, with zero skill invocations in sixty runs.
+`run-pathways.sh` exists specifically to record that this result is spent: a neutral prompt about
+a single file reaches neither harness's front door, because vstack ships `/review` as a command
+and gstack ships it as a slash-triggered skill. Repairing it means porting `activate_arm`,
+`deactivate_all`, `backup_machine`/`restore_machine` and the positive control, producing a third
+copy of the block that mutates the operator's real `~/.claude` — the most dangerous code here —
+to serve a benchmark that still could not answer the question. It also lacks the
+`FIXTURES=dev|holdout` selector `optimize.sh` drives, so it cannot join the optimisation loop.
+The finding stays in RESULTS.md; the harness does not need to stay runnable for it to stay true.
+
+Check 38 is what makes that deletion bite. Check 20 already asserts that `~/`-rooted install
+paths named in prose exist; the repo-relative direction never had a check, so a doc could point
+at a script that is not there and nothing would say so. Confirmed against the real deletion:
+with `tests/README.md` at its pre-deletion content, check 38 reports `names evals/run.sh, which
+is not in this repository`.
+
 **The optimiser had never run, and its scorer could not tell zero from no data.** `--try`
 hard-exits without `.opt-state`, and `.opt-state` has never existed, so the accept/revert/noise
 branch and the `MIN_GAIN` threshold beneath it had never once executed. `MIN_GAIN` is now

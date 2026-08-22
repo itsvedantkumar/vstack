@@ -1,10 +1,11 @@
 # Review benchmark — results
 
-Reproduce with:
-
-```bash
-GSTACK_DIR=/path/to/gstack tests/evals/run.sh --arms none,vstack,gstack --samples 5
-```
+The harness that produced the 2026-08-21 run below, `tests/evals/run.sh`, was deleted in v1.15.0.
+Its question is answered and the answer is recorded here; the harness does not need to stay
+runnable for the numbers to stay true. `tests/evals/run-pathways.sh` supersedes it — it reaches
+each harness through its own front door rather than with a neutral prompt that reaches neither,
+and it carries the `FIXTURES=dev|holdout` selector `optimize.sh` drives. See the CHANGELOG entry
+for v1.15.0 for why repairing it was the worse option.
 
 ## Run of 2026-08-21
 

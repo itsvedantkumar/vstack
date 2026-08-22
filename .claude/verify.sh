@@ -1754,6 +1754,52 @@ else
   skip "optimiser decides correctly" "awk missing or tests/evals/optimize.sh absent"
 fi
 
+# --- 38. every repository path named in live prose exists --------------------------------------
+#
+# Check 20 does this for ~/-rooted install paths and frames it as prose and installed tree
+# disagreeing. The repo-relative direction had never been checked, so a doc could point at a
+# script that is not there and nothing would say so -- which is exactly the state tests/README.md
+# was left in the moment tests/evals/run.sh was deleted.
+#
+# Backticked paths only, and only those ending in an extension this repository actually ships.
+# Resolved against the repo root or against the doc's own directory, because tests/README.md
+# writes `evals/run-pathways.sh` and means tests/evals/run-pathways.sh.
+#
+# Scope is stated rather than assumed. claude/skills, claude/agents and claude/commands are
+# excluded: they are instructions to a model about the reader's project, full of placeholders
+# like `exact/path/to/file.py` and target-project paths like `.impeccable/config.json`, none of
+# which are claims about this tree. docs/provenance and docs/research are excluded for the same
+# reason check 12 excludes them -- one is dated internal history, the other describes other
+# people's repositories. CHANGELOG is excluded because its older entries name files that were
+# real when written and deleting them later is not an error.
+p_errs=""
+p_docs=$(git ls-files 'README.md' 'tests/README.md' 'ui-gate/README.md' 'docs/*.md' '.github/*.md' '.github/**/*.md' 2>/dev/null \
+         | grep -vE '^docs/(provenance|research)/')
+p_n=$(printf '%s' "$p_docs" | grep -c .)
+if [ "$p_n" -lt 3 ]; then
+  p_errs="$p_errs\n  internal: only $p_n document(s) in scope, so this scanned nothing worth scanning"
+else
+  p_seen=0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    while IFS= read -r ref; do
+      [ -n "$ref" ] || continue
+      case "$ref" in
+        http*|*'<'*|*'>'*|*'$'*|*'*'*) continue ;;   # URLs, placeholders, globs
+      esac
+      p_seen=$((p_seen + 1))
+      [ -e "$ref" ] && continue
+      [ -e "${d%/*}/$ref" ] && continue
+      p_errs="$p_errs\n  $d names $ref, which is not in this repository"
+    done <<<"$(grep -oE '`[./A-Za-z0-9_-]+/[./A-Za-z0-9_-]+\.(sh|md|json|py|zsh|toml|yml)`' "$d" 2>/dev/null \
+               | tr -d '`' | sed 's|^\./||' | sort -u)"
+  done <<<"$p_docs"
+  [ "$p_seen" -gt 0 ] || p_errs="$p_errs\n  internal: no backticked repository paths matched at all, so the extractor is looking for the wrong shape"
+fi
+[ -z "$p_errs" ] \
+  && ok "every repository path named in prose exists ($p_seen reference(s) across $p_n document(s))" \
+  || bad "every repository path named in prose exists" "$(printf '%b' "$p_errs")"
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

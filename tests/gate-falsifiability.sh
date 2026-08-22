@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -95,6 +95,7 @@ files_for(){ case "$1" in
   35)  printf 'ui-gate/ui-gate.sh' ;;
   36)  printf 'tests/evals/lib/runlog.sh' ;;
   37)  printf 'tests/evals/optimize.sh' ;;
+  38)  printf 'tests/README.md' ;;
   34)  printf 'overlay.sh' ;;
 esac }
 
@@ -139,6 +140,7 @@ label_for(){ case "$1" in
   35)  printf 'gates refuse a green on nothing measured' ;;
   36)  printf 'run logs are opened append-safe' ;;
   37)  printf 'optimiser decides correctly' ;;
+  38)  printf 'every repository path named in prose exists' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -291,6 +293,11 @@ exit 0
       # change for being "measurably worse".
       sed -i.t 's/INVALID zero planted defects[^"]*/0 0 0/' tests/evals/optimize.sh \
         && rm -f tests/evals/optimize.sh.t ;;
+
+  38) # A doc pointing at a script that is not there -- exactly the state this file was left in
+      # the moment tests/evals/run.sh was deleted, and the shape check 20 already catches on the
+      # ~/ side but never did on the repo-relative one.
+      printf '\nRun `tests/evals/does-not-exist.sh` before committing.\n' >> tests/README.md ;;
   28) # Strand a document by removing the only link to it, which is how a 783-line research
       # handoff came to sit in docs/ reachable from nothing.
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;
