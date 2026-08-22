@@ -1336,13 +1336,18 @@ if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh 
   # The digest runs on every prompt and has a byte cap of its own (check 18). Measure the fired
   # form too: the unfired one is what check 18 probes, so a grill line that blew the budget
   # would never have been seen by it.
-  g_sz=$(TMPDIR="$g_dir" printf '{"hook_event_name":"UserPromptSubmit","session_id":"gv4","prompt":"%s"}' "$g_long" \
-         | TMPDIR="$g_dir" ./claude/hooks/inject-session-context.sh 2>/dev/null \
+  # The worst case, not a convenient one: every optional line on at once. Check 18 probes the
+  # unfired digest and would never see this, and the two add-ons were measured separately at 312
+  # and 386 against a 512 cap -- separately fine, together 476, which is a budget nobody was
+  # watching.
+  g_sz=$(TMPDIR="$g_dir" VSTACK_TERSE=1 \
+         sh -c 'printf "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"gv4\",\"prompt\":\"$1\"}"' _ "$g_long" \
+         | TMPDIR="$g_dir" VSTACK_TERSE=1 ./claude/hooks/inject-session-context.sh 2>/dev/null \
          | jq -r '.hookSpecificOutput.additionalContext // ""' | wc -c | tr -d ' ')
-  [ "${g_sz:-0}" -le 512 ] || g_errs="$g_errs\n  the fired digest is $g_sz bytes, over the 512 cap"
+  [ "${g_sz:-0}" -le 512 ] || g_errs="$g_errs\n  the fired digest with every option on is $g_sz bytes, over the 512 cap"
   rm -rf "$g_dir"
   [ -z "$g_errs" ] \
-    && ok "grill trigger decides correctly (5 cases, both directions, fired digest $g_sz B)" \
+    && ok "grill trigger decides correctly (5 cases, both directions, worst-case digest $g_sz B of 512)" \
     || bad "grill trigger decides correctly" "$(printf '%b' "$g_errs")"
 else
   skip "grill trigger decides correctly" "jq missing or the session-context hook is not executable"

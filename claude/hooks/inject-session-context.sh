@@ -84,8 +84,16 @@ if [ "$event" = "UserPromptSubmit" ]; then
 GRILL: run the grill-me skill on this request now, before any code or plan. Not optional.'
     fi
   fi
+  # VSTACK_TERSE=1 adds a register instruction. Off by default, and it stays off until a
+  # benchmark says it earns its place: reasoning tokens are the thing you pay for, so trimming
+  # the prose around them is plausibly free money, but forcing terseness can also cost accuracy
+  # on the hard cases, and "plausible" is how every unmeasured belief in this repo started.
+  # tests/evals/swebench/run.sh carries a vstack-terse arm for settling it.
+  terse=""
+  [ "${VSTACK_TERSE:-0}" = "1" ] && terse='
+REGISTER: reasoning and prose stay technical. State the fact, not your relationship to it. No hedging, no narration of your own process, no restating the question.'
   emit "$event" 'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
-DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'"$grill"
+DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'"$grill$terse"
   exit 0
 fi
 

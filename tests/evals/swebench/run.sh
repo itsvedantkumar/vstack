@@ -56,7 +56,7 @@ case "$ARMS_CSV" in *gstack*) [ -d "$GSTACK_DIR" ] || { echo "note: dropping gst
 
 ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/swebench.XXXXXX")" && pwd)
 RUNLOG="${RUNLOG:-$ROOT/runs.tsv}"
-printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\n' > "$RUNLOG"
+printf 'arm\tinstance\tresolved\tf2p_pass\tf2p_total\tstatus\tseconds\n' > "$RUNLOG"
 echo "log: $RUNLOG" >&2
 
 setup_repo() { # <index> <dir> -> 0 usable, 1 unusable
@@ -109,20 +109,65 @@ run_tests() { # <dir> <index> -> "pass total"
   printf '%s %s' "$pass" "$tot"
 }
 
-install_arm() { # <arm> <dir>
-  local a="$1" d="$2" sk="$2/.claude/skills" cm="$2/.claude/commands" ag="$2/.claude/agents"
-  mkdir -p "$sk" "$cm" "$ag"
-  case "$a" in
+# --- arm activation: global, one arm at a time, in the real home ----------------------------
+#
+# Isolation by time rather than by directory, and not by choice. Every attempt at directory
+# isolation loses authentication: HOME=scratch, CLAUDE_CONFIG_DIR=scratch, and CLAUDE_CONFIG_DIR
+# seeded with a copy of ~/.claude.json all return "Not logged in", because the CLI resolves its
+# credentials against the real config dir. An unauthenticated arm scores zero and looks like a
+# weak harness, which is benchmark bug 1 on this project's own list.
+#
+# gstack settles the question anyway. Its skills refer to ~/.claude/skills/gstack/bin/* about
+# eighty-five times, its own `setup --local` prints "deprecated, use global install", and that
+# flag rewrites those paths for Kiro only -- so a project-scope gstack is an arm whose every
+# helper is `command not found`. Both harnesses are therefore installed the way their authors
+# say to install them: globally, one at a time, with the machine restored in between.
+#
+# The machine is backed up once before anything moves and restored on any exit path.
+MACHINE_BK="$ROOT/machine-backup"
+restore_machine() {
+  [ -d "$MACHINE_BK" ] || return 0
+  rm -rf "$HOME/.claude" 2>/dev/null
+  cp -R "$MACHINE_BK/.claude" "$HOME/.claude" 2>/dev/null
+  [ -f "$MACHINE_BK/.claude.json" ] && cp "$MACHINE_BK/.claude.json" "$HOME/.claude.json" 2>/dev/null
+  printf 'machine restored from %s\n' "$MACHINE_BK" >&2
+}
+backup_machine() {
+  mkdir -p "$MACHINE_BK"
+  cp -R "$HOME/.claude" "$MACHINE_BK/.claude" 2>/dev/null
+  cp "$HOME/.claude.json" "$MACHINE_BK/.claude.json" 2>/dev/null
+  trap restore_machine EXIT INT TERM
+}
+
+deactivate_all() {
+  ( cd "$SRC" && ./uninstall.sh --yes >/dev/null 2>&1 ) || true
+  rm -rf "$HOME/.claude/skills/gstack" 2>/dev/null
+}
+
+activate_arm() { # <arm>
+  deactivate_all
+  case "$1" in
     none) : ;;
-    vstack)
-      for x in "$SRC"/claude/skills/*/; do [ -d "$x" ] && cp -R "${x%/}" "$sk/"; done
-      cp "$SRC"/claude/commands/*.md "$cm/" 2>/dev/null
-      cp "$SRC"/claude/agents/*.md   "$ag/" 2>/dev/null ;;
-    gstack)
-      find "$GSTACK_DIR" -maxdepth 2 -name SKILL.md 2>/dev/null | while IFS= read -r m; do
-        d0=$(dirname "$m"); cp -R "$d0" "$sk/$(basename "$d0")" 2>/dev/null
-      done ;;
+    vstack) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1 ;;
+    # Same install as vstack, one extra line in the per-prompt digest. The only variable that
+    # moves is the register the model writes in, so the difference between these two arms is the
+    # answer to "does sounding technical cost or save anything".
+    vstack-terse) ( cd "$SRC" && ./install.sh >/dev/null 2>&1 ) || return 1
+                  export VSTACK_TERSE=1 ;;
+    gstack) ( cd "$GSTACK_DIR" && ./setup >/dev/null 2>&1 ) || return 1 ;;
   esac
+  # Soundness before spend: refuse an arm that declares paths it does not have. This is the check
+  # whose absence let sixty gstack reviews be scored on a pathway with no helpers.
+  local dang
+  dang=$(grep -rhoE '(~|\$HOME)/\.claude/[A-Za-z0-9._/-]+' "$HOME/.claude/skills" 2>/dev/null \
+         | sort -u | while IFS= read -r q; do
+             r="$HOME${q#\~}"; r="${r#\$HOME}"; [ -e "$HOME/.claude${r#*/.claude}" ] || printf '%s\n' "$q"
+           done | head -5)
+  if [ -n "$dang" ]; then
+    printf 'INVALID %s: declares paths that do not exist:\n%s\n' "$1" "$dang" >&2
+    return 1
+  fi
+  return 0
 }
 
 # --- pre-flight: which instances are usable at all -------------------------------------------
@@ -159,16 +204,22 @@ echo "  usable instances: $NUSE" >&2
 [ "$NUSE" -gt 0 ] || { echo "no usable instances; nothing to measure" >&2; exit 1; }
 
 # --- the runs ----------------------------------------------------------------------------------
+backup_machine
 for arm in $(echo "$ARMS_CSV" | tr ',' ' '); do
+  if ! activate_arm "$arm"; then
+    printf '%s\tINVALID\t0\t0\t0\tarm-not-installable\t0\n' "$arm" >> "$RUNLOG"
+    printf 'skipping %s: not installable on this machine\n' "$arm" >&2
+    continue
+  fi
+  printf '== arm %s active ==\n' "$arm" >&2
   for i in $USABLE; do
     id=$(jq -r ".[$i].instance_id" "$DATA")
     d="$ROOT/$arm-$id"
     if ! setup_repo "$i" "$d"; then
       printf '%s\t%s\t0\t0\t0\tsetup-failed\n' "$arm" "$id" >> "$RUNLOG"; rm -rf "$d"; continue
     fi
-    install_arm "$arm" "$d"
     prob=$(jq -r ".[$i].problem_statement" "$DATA")
-    if [ "$arm" = none ]; then pre=""; else pre="/debug "; fi
+    case "$arm" in none) pre="" ;; *) pre="/debug " ;; esac
     # --permission-mode bypassPermissions, or this measures the wrong thing entirely.
     #
     # Without it the first three runs scored 0/4 for every arm. The agent was calling Edit and
@@ -180,14 +231,16 @@ for arm in $(echo "$ARMS_CSV" | tr ',' ' '); do
     #
     # Three identical zeroes have now been a bug in this harness three separate times. They are
     # worth treating as a defect report about the scaffolding until proven otherwise.
+    t0=$(date +%s)
     ( cd "$d" && timeout 900 claude -p "${pre}Fix this bug in this repository. Change the source, not the tests.
 
 $prob" --setting-sources=project --permission-mode bypassPermissions \
         --output-format=stream-json --verbose < /dev/null >/dev/null 2>&1 )
+    secs=$(( $(date +%s) - t0 ))
     read -r p t <<< "$(run_tests "$d" "$i")"
     [ "$t" -gt 0 ] && [ "$p" -eq "$t" ] && res=1 || res=0
-    printf '%s\t%s\t%s\t%s\t%s\tok\n' "$arm" "$id" "$res" "$p" "$t" >> "$RUNLOG"
-    printf '  %-8s %-34s resolved=%s (%s/%s)\n' "$arm" "$id" "$res" "$p" "$t" >&2
+    printf '%s\t%s\t%s\t%s\t%s\tok\t%s\n' "$arm" "$id" "$res" "$p" "$t" "$secs" >> "$RUNLOG"
+    printf '  %-8s %-34s resolved=%s (%s/%s) %ss\n' "$arm" "$id" "$res" "$p" "$t" "$secs" >&2
     # Unresolved runs are kept. Deleting them left nothing to inspect when every arm scored zero,
     # which is exactly when you need to look at what the agent actually did.
     if [ "$res" = 1 ]; then rm -rf "$d"; else rm -rf "$d/.venv"; fi
@@ -197,9 +250,12 @@ done
 echo
 echo "SWE-bench Lite — $NUSE usable instance(s) per arm"
 echo
-printf '%-8s %-12s %s\n' "arm" "resolved" "rate"
-printf '%-8s %-12s %s\n' "--------" "------------" "------"
-awk -F'\t' 'NR>1 && $6=="ok"{n[$1]++; r[$1]+=$3} END{for(a in n) printf "%-8s %-12s %.0f%%\n", a, r[a]"/"n[a], 100*r[a]/n[a]}' "$RUNLOG"
+printf '%-8s %-12s %-8s %s\n' "arm" "resolved" "rate" "median s"
+printf '%-8s %-12s %-8s %s\n' "--------" "------------" "------" "--------"
+awk -F'\t' 'NR>1 && $6=="ok"{n[$1]++; r[$1]+=$3; s[$1]=s[$1]" "$7}
+  END{for(a in n){k=split(s[a],v," ");
+    for(x=1;x<k;x++)for(y=1;y<=k-x;y++)if(v[y]+0>v[y+1]+0){z=v[y];v[y]=v[y+1];v[y+1]=z}
+    printf "%-8s %-12s %-8s %s\n", a, r[a]"/"n[a], sprintf("%.0f%%",100*r[a]/n[a]), v[int((k+1)/2)]}}' "$RUNLOG"
 echo
 echo "Resolved means every FAIL_TO_PASS test passes after the agent's patch. Instances whose"
 echo "environment would not build, or whose tests already passed, were excluded before any arm"
