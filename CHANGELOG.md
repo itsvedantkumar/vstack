@@ -6,6 +6,21 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.13.5 — 2026-08-22
+
+**`doctor` now asks whether a stranger can actually fetch the release we claim to ship.** Check 24
+proves the declared version is tagged *in this repository*. It cannot prove the tag exists on the
+remote, because that means a network call and the gate has to stay offline and hermetic. So the
+question moved to `doctor`, which already talks to the network.
+
+It was not academic. Every tag from v1.13.2 on lived only on this machine while README.md handed
+strangers a URL built from it — check 24 green and the documented install path a 404, at the same
+moment, for four releases. Two true statements about different things, and nothing compared them.
+
+An unreachable network is a note, never a pass and never a failure. Being offline is not drift,
+and it is not evidence that the release is fetchable either. No remote configured is also a note:
+a repo can be local by design.
+
 ## 1.13.4 — 2026-08-22
 
 **Two skills stopped requiring skills that are not installed.** `executing-plans` and

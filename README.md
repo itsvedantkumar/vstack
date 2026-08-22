@@ -144,9 +144,9 @@ cd vstack
 **Pinned to a release, reading the script first.**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.13.4/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.13.5/bootstrap.sh -o bootstrap.sh
 less bootstrap.sh                        # about 100 lines
-VSTACK_REF=v1.13.4 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.13.5 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Check 24 fails if a version named in these docs is not a tag that exists. It was added after this

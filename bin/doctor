@@ -488,6 +488,42 @@ else
   [ -z "$perr" ] && ok "project hook stands down ($dupescanned repos, both scopes probed)" \
                  || bad "project hook stands down" "$perr"
 fi
+echo "── release reachability ──"
+# The gate can prove the declared version is tagged here. It cannot prove a stranger can fetch it,
+# because that means a network call and .claude/verify.sh has to stay offline and hermetic. So the
+# question lands here instead, where doctor already talks to the network.
+#
+# It is not academic. Every tag from v1.13.2 on lived only on this machine while README.md handed
+# strangers a URL built from it, so check 24 was green and the documented install path was a 404
+# at the same moment, for four releases. Two true statements about different things, and nothing
+# compared them.
+#
+# Unreachable network is a note, never a pass and never a failure -- being on a plane is not drift,
+# but neither is it evidence that the release is fetchable.
+_rr=$(resolve_vstack_repo 2>/dev/null) || _rr=""
+if [ -z "$_rr" ] || ! command -v git >/dev/null 2>&1; then
+  note "declared release is fetchable" "no vstack repo or git found, so nothing was checked"
+else
+  _rv=$(jq -r '.version // empty' "$_rr/claude/.claude-plugin/plugin.json" 2>/dev/null)
+  _ru=$(git -C "$_rr" remote get-url origin 2>/dev/null)
+  if [ -z "$_rv" ]; then
+    bad "declared release is fetchable" "could not read a version from claude/.claude-plugin/plugin.json"
+  elif [ -z "$_ru" ]; then
+    note "declared release is fetchable" "no origin remote, so v$_rv is local by design"
+  else
+    # Distinguishing "the remote says no" from "the remote did not answer" is the whole point: one
+    # is a broken install path, the other is a laptop offline, and reporting either as the other is
+    # how a check starts lying.
+    _out=$(GIT_TERMINAL_PROMPT=0 git -C "$_rr" ls-remote --tags origin "refs/tags/v$_rv" 2>&1); _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+      note "declared release is fetchable" "could not reach origin, so v$_rv is unverified: $(printf '%s' "$_out" | head -1)"
+    elif [ -n "$_out" ]; then
+      ok "declared release is fetchable (v$_rv on origin)"
+    else
+      bad "declared release is fetchable" "v$_rv is declared and pinned in the README but is not on origin — the documented install URL 404s (git -C $_rr push --follow-tags)"
+    fi
+  fi
+fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
 jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
