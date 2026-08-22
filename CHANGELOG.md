@@ -6,6 +6,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.12.1 — 2026-08-22
+
+`bin/doctor` classifies `autoMode`, `editorMode` and `verbose` as user-scope. The CLI sets them,
+not this repo, so `--drift` was right to notice them and wrong to leave them unclassified.
+
+Community health files: CONTRIBUTING, SECURITY, a pull-request template, dependabot for actions,
+and CODEOWNERS. `LICENSE` is pure MIT text again, with the mixed-license note moved to `NOTICE`,
+so GitHub classifies the repository as MIT rather than "other". GitHub Releases now exist for
+every tag; six were bare.
+
+The benchmark's arm switching was rebuilt and is now testable for free with `SELFTEST=1`. Three
+defects came out of that, described in the commit: `./uninstall.sh` does not deactivate, the
+backup was 1.6 GB per run, and restoring `~/.claude` alone left the CLI wrappers missing.
+
 ## 1.12.0 — 2026-08-22
 
 **README rewritten, 469 lines to 226.** It now opens on the comparison against
