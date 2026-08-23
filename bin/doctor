@@ -184,6 +184,16 @@ if [ "${1:-}" = "--drift" ]; then
   # Symlinks are skipped on purpose: plugin- and Claude-Code-bundled skills (skill-creator,
   # pdf, docx, pptx, xlsx) link in from elsewhere and are expected.
   RUNTIME_TOP='projects sessions session-env shell-snapshots tasks todos plans telemetry plugins cache chrome daemon downloads paste-cache jobs ide statsig backups scheduled-tasks history.jsonl stats-cache.json mcp-needs-auth-cache.json settings.json settings.local.json .credentials.json .last-update-result.json .last-cleanup .cc-writes CLAUDE.md statusline.sh hooks agents commands skills'
+  # Everything above is Claude Code's own. vstack's hooks write log files into the same
+  # directory, and those were landing in the "presumed yours" bucket -- doctor telling the
+  # operator that vstack's own output might be a stranger's leftover. Derived from the shipped
+  # hooks rather than listed by hand, because the replay log was added in 1.43.0 and a hand-kept
+  # list would have gone stale that same afternoon. If a hook writes it, doctor knows it.
+  for _rt in "$REPO"/claude/hooks/*.sh; do
+    [ -e "$_rt" ] || continue
+    _rtn=$(grep -ohE 'vstack-[a-z-]+\.jsonl' "$_rt" 2>/dev/null | sort -u | tr '\n' ' ')
+    [ -n "$_rtn" ] && RUNTIME_TOP="$RUNTIME_TOP $_rtn"
+  done
   stale=""
   for p in "$CDIR"/* "$CDIR"/.[!.]*; do
     [ -e "$p" ] || continue

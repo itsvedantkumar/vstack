@@ -1,97 +1,36 @@
 ---
 name: deploy
-description: One-command deploy to Vercel/Cloudflare/Railway with automatic checks.
+description: Deploy to production (Vercel, Cloudflare, Railway, Fly) with verification.
 ---
 
-# Deploy Command
+Deploy to production. **$ARGUMENTS**
 
-## Pre-deploy Checks
+Deployment is handled by the `deploy-auto` command, which auto-detects your deployment platform (Vercel, Cloudflare Workers, Railway, or Fly.io) and runs the full verification gate before deploying.
 
-1. Typecheck
-2. Lint
-3. Tests
-4. Build
+1. **Check that the project is deployable.** The deploy-auto helper lives at `~/.config/agents/bin/deploy-auto.sh` (installed by vstack's `install.sh`) or is inlined below if not present.
 
-## Commands
+2. **Run deploy-auto.sh** with the project directory:
+   ```bash
+   ~/.config/agents/bin/deploy-auto.sh "$PWD"
+   ```
+   The script will:
+   a. Run `.claude/verify.sh` if it exists. If verification fails, stop and report the failure.
+   b. Auto-detect the deployment target: if `vercel.json` or `.vercel/` exists, use Vercel; if `wrangler.toml` or `wrangler.jsonc` exists, use Cloudflare Workers.
+   c. Run the deploy command for that platform.
+   d. Health-check the resulting URL (HTTP status code).
+   e. Report the deployment URL and health status.
 
-```bash
-# Vercel (auto-detects)
-/deploy vercel
+3. **If deploy-auto.sh is not found,** run verification and auto-detect inline:
+   ```bash
+   bash ./.claude/verify.sh && \
+   if [ -f vercel.json ] || [ -d .vercel ]; then
+     vercel deploy --prod
+   elif [ -f wrangler.toml ] || [ -f wrangler.jsonc ]; then
+     npx wrangler deploy
+   else
+     echo "No deployment config found (vercel.json, .vercel/, wrangler.toml, or wrangler.jsonc)"
+     exit 1
+   fi
+   ```
 
-# Cloudflare Workers
-/deploy cf
-
-# Railway
-/deploy railway
-
-# Fly.io
-/deploy fly
-```
-
-## Implementation
-
-```bash
-#!/bin/bash
-# ~/.local/bin/deploy
-set -e
-
-PLATFORM=$1
-shift
-
-echo "Running pre-deploy checks..."
-
-# Typecheck
-npm run typecheck 2>&1 | tail -5 || { echo "Typecheck failed"; exit 1; }
-
-# Lint
-npm run lint 2>&1 | tail -5 || { echo "Lint failed"; exit 1; }
-
-# Tests
-npm test -- --passWithNoTests 2>&1 | tail -5 || { echo "Tests failed"; exit 1; }
-
-# Build
-npm run build 2>&1 | tail -10 || { echo "Build failed"; exit 1; }
-
-echo "Checks passed. Deploying to $PLATFORM..."
-
-case $PLATFORM in
-  vercel)
-    vercel --prod "$@"
-    ;;
-  cf|cloudflare)
-    npx wrangler deploy "$@"
-    ;;
-  railway)
-    railway up "$@"
-    ;;
-  fly)
-    fly deploy "$@"
-    ;;
-  *)
-    echo "Unknown platform: $PLATFORM"
-    exit 1
-    ;;
-esac
-```
-
-## Quick Deploy
-
-```bash
-# Production
-npm run deploy
-
-# Preview
-npm run deploy:preview
-```
-
-## package.json
-
-```json
-{
-  "scripts": {
-    "deploy": "deploy vercel",
-    "deploy:preview": "vercel",
-    "deploy:cf": "deploy cf"
-  }
-}
-```
+See `deploy-auto.md` for the full details.

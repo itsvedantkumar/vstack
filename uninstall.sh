@@ -278,8 +278,9 @@ done
 # vstack's model policy and all seventeen skillOverrides still in force. The result was not a
 # removed tool, it was a broken one, and later Claude sessions can error on the dead hooks.
 #
-# Ownership is decided by exact value, which is the only signal available. A hook whose command
-# points into the config dir vstack installed into is vstack's. A skillOverride whose value still
+# Ownership is decided by what this repo ships, never by where a file happens to sit. A hook is
+# vstack's when its command ends in one of the hook filenames vstack installs; the directory is
+# shared with the user and proves nothing. A skillOverride whose value still
 # matches what vstack shipped is vstack's; one the user has since changed is theirs and stays. A
 # top-level key is removed only if it still equals what this repo ships — edit it and it is
 # yours. That is conservative in the right direction: the failure mode is leaving something
@@ -290,10 +291,23 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/c
       . as [$live, $ship]
       | ($live.hooks // {}) as $lh
       | $live
-      # Hook entries whose command runs a script from vstack'"'"'s hooks directory.
+      # Hook entries that run one of vstack'"'"'s own hook scripts, matched by filename.
+      #
+      # Directory prefix was the first attempt and it deleted the user'"'"'s own hooks. Anyone who
+      # keeps personal scripts in ~/.claude/hooks -- the conventional location, which vstack also
+      # installs into -- had every entry pointing at them stripped, while the scripts themselves
+      # stayed on disk. The printed line still said "vstack hooks ... removed", so the tool
+      # reported a narrow cleanup while doing a broad one.
+      #
+      # The right signal was already in this repo: install.sh derives the basenames vstack ships
+      # and matches endswith("/hooks/" + name). Ownership is a filename, not a parent directory.
+      | ([$ship | .. | .command? // empty] | map(split("/") | last) | unique) as $ourbase
+      | (($ship.statusLine.command? // "") | split("/") | last) as $shipsl
       | .hooks = ( $lh
           | with_entries(.value |= map(select(
-              [.hooks[]?.command] | map(startswith($h)) | any | not )))
+              [.hooks[]?.command]
+              | map(. as $c | $ourbase | any(. as $b | $c | endswith("/hooks/" + $b)))
+              | any | not )))
           | with_entries(select(.value | length > 0)) )
       | if (.hooks | length) == 0 then del(.hooks) else . end
       # skillOverrides vstack set and the user has not changed since.
@@ -303,7 +317,8 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/c
               (.value == ($ship.skillOverrides // {})[.key]) | not )) )
       | if (.skillOverrides | length) == 0 then del(.skillOverrides) else . end
       # statusLine points at a file vstack installed and has just removed.
-      | if (.statusLine.command? // "") | startswith(($h | rtrimstr("/hooks"))) then del(.statusLine) else . end
+      | if $shipsl != "" and ((((.statusLine.command? // "") | split("/") | last)) == $shipsl)
+        then del(.statusLine) else . end
       # Top-level policy keys, removed only where the live value still equals what vstack ships.
       | reduce ($ship | keys_unsorted[]) as $k (.;
           if $k == "hooks" or $k == "skillOverrides" then .

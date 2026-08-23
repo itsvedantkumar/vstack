@@ -991,10 +991,19 @@ fi
 # machine only because a pre-vstack copy happened to survive there, so the command was broken for
 # every other human on earth and nothing noticed for months.
 #
-# This is the same defect class as the stale `orchestrate.md` — prose and installed tree
-# disagreeing — just pointing the other way. Check 12 counts things; nothing read the paths back.
+# This is the same defect class as the stale `orchestrate.md` -- prose and installed tree
+# disagreeing -- just pointing the other way. Check 12 counts things; nothing read the paths back.
 # A referenced path either maps to something in this repo that install.sh copies, or it is
-# runtime state; anything else is a promise the installer does not keep.
+# runtime state, or it is declared foreign below; anything else is a promise the installer
+# does not keep.
+#
+# The first version of this extractor matched only ~/.claude, ~/.config/agents and ~/.conductor.
+# That is an allow-list wearing a scanner's clothes: `/push` told the model to run
+# `~/.100xprompt/hooks/pre-push.sh`, a path belonging to an entirely different tool's template,
+# and the regex never saw it because it did not begin with one of the three blessed prefixes.
+# The check written to catch a command pointing at a script nobody installs could not catch a
+# command pointing at a script nobody installs, one namespace over. It now reads every ~/-rooted
+# path and a foreign one must be declared, with a reason, rather than pass by being unmatched.
 # Every ~ below is single-quoted on purpose. An unquoted tilde in a `case` pattern or a `${x#...}`
 # prefix is expanded to $HOME before the match, so the first draft of this check compared
 # "~/.claude/CLAUDE.md" against "/Users/<me>/.claude/CLAUDE.md", matched nothing, and reported
@@ -1016,6 +1025,19 @@ runtime_path(){ # paths that exist at runtime but are created by Claude Code or 
   esac
   return 1
 }
+# Paths outside every namespace this repo installs into. Each entry states why it is here; a
+# bare addition with no reason is how the ~/.100xprompt reference would have been waved through
+# a second time. "It appears in the tree" is not a reason -- the reason has to be that the path
+# belongs to something the user supplies and the docs are right to name.
+# shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
+external_path(){
+  case "$1" in
+    # The repo checkout itself. Docs name it because the installer is run from it; install.sh
+    # cannot create the directory it is being run out of.
+    '~/Projects/vstack'|'~/Projects/vstack/'*) return 0 ;;
+  esac
+  return 1
+}
 # shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
 src_for(){ # installed path -> the repo file install.sh copies there, or empty if unmapped
   case "$1" in
@@ -1034,14 +1056,15 @@ errs=""
 while IFS= read -r ref; do
   [ -n "$ref" ] || continue
   runtime_path "$ref" && continue
+  external_path "$ref" && continue
   src=$(src_for "$ref")
   if [ -z "$src" ]; then
-    errs="$errs\n$ref: no install.sh rule puts anything there"
+    errs="$errs\n$ref: no install.sh rule puts anything there, and it is not declared foreign"
   elif [ ! -e "$src" ]; then
     errs="$errs\n$ref: install.sh would copy $src, which does not exist in this repo"
   fi
 done <<EOF
-$(grep -rhoE '~/\.(claude|config/agents|conductor)[A-Za-z0-9._/-]*' \
+$(grep -rhoE '~/[A-Za-z0-9._/-]+' \
     README.md claude/commands claude/agents claude/skills 2>/dev/null \
   | sed 's#[.,:;)`"]*$##; s#/$##' | sort -u)
 EOF
@@ -2607,6 +2630,57 @@ if command -v jq >/dev/null; then
   fi
 else
   skip "dispatch counter join, both directions" "jq not installed"
+fi
+
+# --- 45. uninstall drops vstack's own settings entries and keeps the user's --------------------
+# uninstall.sh decided hook ownership by directory prefix: any entry whose command started with
+# ~/.claude/hooks was treated as vstack's. That directory is the conventional place for a user's
+# own hooks, and vstack installs into it rather than owning it, so a stranger who kept personal
+# scripts there had every hook entry pointing at them deleted -- while the scripts themselves
+# stayed on disk, and the tool printed "vstack hooks, overrides and unedited policy keys
+# removed". A destructive step reporting a narrower scope than the one it performed.
+#
+# install.sh had the right signal the whole time: the basenames this repo ships, matched with
+# endswith("/hooks/" + name). Two halves of one repo disagreed about what ownership means and
+# only the install half was ever checked. Both directions here, because a fix that removes
+# nothing passes the user's half trivially.
+if command -v jq >/dev/null; then
+  c45_home=$(mktemp -d)
+  c45_errs=""
+  c45_hook="$c45_home/.claude/hooks/not-vstacks.sh"
+  c45_sl="$c45_home/.claude/not-vstacks-statusline.sh"
+  mkdir -p "$c45_home/.claude/hooks"
+  printf '#!/bin/bash\nexit 0\n' > "$c45_hook"; chmod +x "$c45_hook"
+  printf '#!/bin/bash\nexit 0\n' > "$c45_sl";   chmod +x "$c45_sl"
+  jq -n --arg h "$c45_hook" --arg s "$c45_sl" \
+    '{theme:"dark",statusLine:{type:"command",command:$s},
+      hooks:{Notification:[{hooks:[{type:"command",command:$h}]}]}}' \
+    > "$c45_home/.claude/settings.json"
+  if HOME="$c45_home" ./install.sh >/dev/null 2>&1 \
+     && HOME="$c45_home" ./uninstall.sh --yes >/dev/null 2>&1; then
+    jq -e --arg h "$c45_hook" '[.hooks.Notification[]?.hooks[]?.command] | index($h) != null' \
+      "$c45_home/.claude/settings.json" >/dev/null 2>&1 \
+      || c45_errs="$c45_errs\nthe user's own Notification hook is gone: uninstall removed an entry it does not own"
+    jq -e --arg s "$c45_sl" '(.statusLine.command? // "") == $s' \
+      "$c45_home/.claude/settings.json" >/dev/null 2>&1 \
+      || c45_errs="$c45_errs\nthe user's own statusLine is gone: uninstall removed a key it does not own"
+    for c45_f in claude/hooks/*.sh; do
+      [ -e "$c45_f" ] || continue
+      c45_b=$(basename "$c45_f")
+      if jq -e --arg b "$c45_b" '[.. | .command? // empty] | any(endswith("/hooks/" + $b))' \
+           "$c45_home/.claude/settings.json" >/dev/null 2>&1; then
+        c45_errs="$c45_errs\n$c45_b is still wired after uninstall -- vstack left its own hook behind"
+      fi
+    done
+  else
+    c45_errs="$c45_errs\ninstall.sh or uninstall.sh failed under a throwaway HOME"
+  fi
+  rm -rf "$c45_home"
+  [ -z "$c45_errs" ] \
+    && ok "uninstall keeps foreign settings, drops its own" \
+    || bad "uninstall keeps foreign settings, drops its own" "$(printf '%b' "$c45_errs")"
+else
+  skip "uninstall keeps foreign settings, drops its own" "jq not installed"
 fi
 
 echo

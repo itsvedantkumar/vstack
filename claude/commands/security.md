@@ -1,129 +1,40 @@
 ---
 name: security
-description: Enterprise security scanning with OWASP ZAP, Trivy, Nuclei, nmap, and secret detection.
+description: Run security checks (secrets, dependencies, optional: external scanning).
 ---
 
-# Enterprise Security Commands
+Run security checks on this project. **$ARGUMENTS**
 
-## Quick Scan
+vstack ships with built-in security checks in the verification gate. External security tools (OWASP ZAP, Trivy, Nuclei, nmap) are optional and can be installed separately if desired.
 
-```bash
-# Full enterprise audit (runs all checks)
-/security full
+1. **Run the built-in verification gate.**
+   ```bash
+   bash ./.claude/verify.sh
+   ```
+   This checks for:
+   - Hardcoded secrets (API keys, tokens, credentials): reads against real token shapes (sk-ant-, sk-proj-, github_pat-, etc.)
+   - Hardcoded home paths or infrastructure identifiers
+   - Committed files that look like credentials
+   - No other files in the repo are checked — only git-tracked files via `git grep`.
+   Report the results.
 
-# Specific checks
-/security secrets     # Trivy secret scan
-/security deps        # npm audit + Trivy vuln scan
-/security infra       # IaC misconfig scan
-/security network     # port scan + web headers
-/security pentest     # OWASP ZAP + Nuclei + nmap (needs target URL)
-```
+2. **Run npm audit for dependency vulnerabilities** (JavaScript/Node projects only):
+   ```bash
+   npm audit --audit-level=high
+   ```
+   This scans `package-lock.json` and `package.json` for known vulnerabilities in your dependency tree. Report findings.
 
-## Secret Detection
+3. **Scan git history for secrets** (optional, catches mistakes that slipped through):
+   ```bash
+   git log --all --full-history -p | grep -iE 'api_key|secret|token|sk-' | head -20
+   ```
+   This searches commit history for patterns that look like credentials. If found, use `git filter-branch` or `git-filter-repo` to remove them and force-push.
 
-```bash
-# Scan entire repo
-trivy fs --scanners secret --severity HIGH,CRITICAL .
+4. **For advanced scanning (optional, tools not shipped):** If the user has installed external tools and wants to use them:
+   - Trivy (filesystem/image/SBOM scanning): `trivy fs --scanners vuln,secret,misconfig .`
+   - npm's audit CI mode (CI/CD pipelines): `npm audit --audit-level=high --production`
+   - Container image scans (if building images): `trivy image myapp:latest`
+   
+   These tools are not provided by vstack; the user must install them separately and provide their own configuration.
 
-# Scan git history
-git log --all --full-history -p | grep -i "api_key\|secret\|token\|sk-"
-
-# Single file
-trivy fs --scanners secret --file-patterns ".*\.env$" .
-```
-
-## Dependency Scanning
-
-```bash
-# npm audit
-npm audit --audit-level=high
-
-# Trivy filesystem scan
-trivy fs --scanners vuln .
-
-# Full SBOM generation
-trivy image --format cyclonedx --output sbom.cdx.json myapp:latest
-```
-
-## Web Application Pentesting
-
-```bash
-# OWASP ZAP (GUI) - best Burp Suite alternative
-open -a ZAP
-
-# Nuclei - fast vulnerability scanner
-nuclei -u https://example.com -severity high,critical
-
-# Automated scan with templates
-nuclei -u https://example.com -t ~/nuclei-templates/
-
-# nmap - network recon
-nmap -sV -sC -p- target.com
-
-# ffuf - web fuzzer
-ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/dirb/common.txt
-
-# SQLMap - SQL injection
-sqlmap -u "https://example.com/page?id=1"
-
-# mitmproxy - intercept traffic
-mitmproxy --listen-port 8080
-```
-
-## Container Security
-
-```bash
-# Image scan
-trivy image --severity HIGH,CRITICAL myapp:latest
-
-# Filesystem scan
-trivy fs --scanners vuln,secret,misconfig .
-
-# Dive into layers
-dive myapp:latest
-
-# Kubernetes scan
-kubectl trivy scan --severity HIGH,CRITICAL
-```
-
-## Infrastructure Scan
-
-```bash
-# IaC misconfigs
-trivy fs --scanners misconfig --severity HIGH,CRITICAL .
-
-# Kubernetes security
-kubectl audit
-helm install kube-bench aquasecurity/kube-bench
-```
-
-## API Security
-
-```bash
-# Schemathesis - API fuzzing
-schemathesis run http://localhost:3000/openapi.json --checks all
-
-# Rate limit testing
-ab -n 1000 -c 100 http://localhost:3000/api/
-```
-
-## CI/CD Integration
-
-```yaml
-# .github/workflows/security.yml
-name: Security Scan
-on: [push, pull_request]
-jobs:
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Trivy Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scanners: 'vuln,secret,misconfig'
-          severity: 'HIGH,CRITICAL'
-      - name: npm audit
-        run: npm audit --audit-level=high
-```
+5. **Report summary.** Built-in gate status (pass/fail), npm audit findings (if any), git history scan (if run), and status of any optional external tools the user has installed.

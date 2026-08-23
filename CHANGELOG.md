@@ -4,6 +4,63 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.44.0 — 2026-08-24
+
+**`uninstall.sh` deleted the user's own hook entries and reported that it had removed vstack's.**
+Ownership was decided by directory prefix: any entry in `settings.json` whose command started with
+`~/.claude/hooks` was treated as vstack's. That directory is the conventional place for a person's
+own hook scripts, and vstack installs into it rather than owning it. So a stranger who kept
+personal hooks there ran `uninstall.sh --yes` and lost every entry pointing at them, while the
+scripts themselves stayed on disk and the tool printed `cleaned ... (vstack hooks, overrides and
+unedited policy keys removed)`. A destructive step reporting a narrower scope than the one it
+performed, which is worse than the deletion: the operator has no reason to go looking.
+
+The correct signal was already in this repo. `install.sh` derives the basenames vstack ships and
+matches `endswith("/hooks/" + name)`; the merge half had it right and the removal half never
+asked. `.statusLine` had the same defect for the same reason. Both now match on shipped filenames.
+Recoverable in the old behaviour only via `$BK/pre-uninstall/`, which the tool never mentioned.
+
+Found by exercising a real install-then-uninstall under a throwaway `HOME` with a foreign hook
+seeded first, not by reading the jq. Reading it is how it passed review the first time.
+
+**Check 45, `uninstall keeps foreign settings, drops its own`.** Both directions against the real
+scripts under a temp `HOME`: the user's `Notification` entry and their `statusLine` must survive,
+and every hook this repo ships must be gone. A fix that removes nothing passes the user's half
+trivially, which is why the second direction is not optional. Row 45 reverts the one line to the
+prefix test and the check goes red naming itself.
+
+**Check 20's extractor was an allow-list wearing a scanner's clothes.** It matched only
+`~/.claude`, `~/.config/agents` and `~/.conductor`. `/push` told the model to run
+`~/.100xprompt/hooks/pre-push.sh`, another tool's template path, in a command this repo installs.
+The check written to catch exactly that could not see it, because the string did not begin with
+one of three blessed prefixes. The check that exists because `/bootstrap` pointed at a script
+nobody installs was blind to `/push` pointing at a script nobody installs, one namespace over.
+
+It now reads every `~/`-rooted path. A path outside the installed namespaces has to be declared in
+`external_path()` with a reason; today that list has one entry, the repo checkout itself. Turning
+it on surfaced five references across four commands. Row 20 only ever mutated inside a blessed
+prefix, so it proved the half that already worked; **row 20b** adds the foreign-namespace lane.
+
+**Five of fifteen commands were reference documents wearing a command's frontmatter.**
+`push.md`, `observability.md`, `deploy.md`, `release.md` and `security.md` shipped in the initial
+commit from a foreign template (`## Usage` and `## Implementation` sections, tool tables, code
+samples) with no imperative instruction to the assistant anywhere in the body, and were never
+touched again. Between them they documented six argument interfaces (`/deploy vercel`,
+`/release patch`, `/security network`, `/security full` and others) whose `case` statements lived
+inside fenced blocks describing hypothetical standalone scripts at `~/.local/bin/deploy` and
+`~/.local/bin/release` that this repo has never installed, plus `~/nuclei-templates`. All five are
+now numbered instructions against tools that exist: `push` runs the real gate and names the
+`vstack trust` step, `deploy` defers to `bin/deploy-auto.sh`, `release` defers to the
+`release-manager` subagent it duplicated, `security` marks its external scanners as user-supplied.
+`observability.md` also had a PostHog JS snippet fenced as `bash`, so it failed `bash -n`.
+
+**`doctor --drift` filed vstack's own logs under "presumed yours".**
+`vstack-delegation-log.jsonl` and `vstack-replay-log.jsonl` are written by shipped hooks and were
+absent from `RUNTIME_TOP`, so on any machine that had actually used vstack, doctor told the
+operator its own output might be a stranger's leftover. The names are now derived from the shipped
+hooks rather than listed by hand. The replay log arrived in 1.43.0 and a hand-kept list would
+have gone stale the same afternoon. Cosmetic: `DRIFT` was never set by it.
+
 ## 1.43.0 — 2026-08-24
 
 **`vstack-delegation-log.jsonl` recorded only per-Stop aggregate counts, never which subagent ran

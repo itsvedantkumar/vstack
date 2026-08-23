@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -249,6 +249,7 @@ files_for(){ case "$1" in
   18c) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
+  20b) printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
   23)  printf 'claude/hooks/guard-destructive.sh' ;;
@@ -271,6 +272,7 @@ files_for(){ case "$1" in
   44)  printf 'install.sh' ;;
   44b|44c|44d|44e|44f) printf 'claude/hooks/dispatch-counter.sh' ;;
   44g) printf 'claude/settings.json' ;;
+  45)  printf 'uninstall.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -300,6 +302,7 @@ label_for(){ case "$1" in
   18c) printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
+  20b) printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
   22)  printf 'skills disclose what they do not ship' ;;
   23)  printf 'destructive guard decides correctly' ;;
@@ -327,6 +330,7 @@ label_for(){ case "$1" in
   44e) printf 'dispatch counter join, both directions' ;;
   44f) printf 'dispatch counter join, both directions' ;;
   44g) printf 'dispatch counter join, both directions' ;;
+  45)  printf 'uninstall keeps foreign settings, drops its own' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -414,6 +418,13 @@ exit 0
   20) # a command telling the model to run something no lane ever installs — exactly the
       # shape of the /bootstrap defect this check was written for
       printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
+  20b) # The same promise, one namespace over. `/push` shipped `~/.100xprompt/hooks/pre-push.sh`
+      # -- another tool's template path, referenced by a command this repo installs -- and the
+      # extractor could not see it, because it matched only ~/.claude, ~/.config/agents and
+      # ~/.conductor. Row 20 mutates inside a blessed prefix and so proves only the half that
+      # already worked. This row is the half that did not: a foreign namespace must be declared
+      # foreign, with a reason, rather than pass by never being matched at all.
+      printf '\nRun `~/.someothertool/hooks/pre-push.sh` first.\n' >> claude/commands/test.md ;;
   21) # the exact list that was nearly shipped: Claude Code's own sandbox setting, named as if
       # it were vstack's to delete
       sed -i.t "s/^RETIRED='\[\]'/RETIRED='[\"sandbox\"]'/" install.sh && rm -f install.sh.t ;;
@@ -606,6 +617,14 @@ exit 0
         && jq '.hooks.PostToolUseFailure[0].hooks += [{"type":"command","command":"\"$CLAUDE_PROJECT_DIR/.claude/hooks/dispatch-counter.sh\""}]' \
              claude/settings.json.t44g > claude/settings.json \
         && rm -f claude/settings.json.t44g ;;
+  45) # Put back the directory-prefix ownership test uninstall.sh shipped with: treat every hook
+      # entry whose command starts with the config dir's hooks/ path as vstack's. $h is still
+      # bound, so this is a one-line revert to the real defect rather than an invented one -- the
+      # user's own scripts live in that same directory, so their entries go too, and the tool
+      # still prints that it removed vstack's. Nothing about the edit is invalid jq; the program
+      # runs clean and deletes more than it says.
+      perl -pi -e 's/^ +\| map\(\. as \$c \| \$ourbase \| any\(\. as \$b \| \$c \| endswith\("\/hooks\/" \+ \$b\)\)\)\n$/              | map(startswith(\$h))\n/' \
+        uninstall.sh ;;
 esac }
 
 # Three rows outside this count also report a result every run: the green-at-baseline probe
