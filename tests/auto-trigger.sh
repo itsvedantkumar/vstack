@@ -14,6 +14,53 @@ set -uo pipefail
 PER_CASE_TIMEOUT=120   # seconds; enforced by the polling loop in run_case (macOS has no timeout(1))
 MODEL="sonnet"
 MAX_TURNS=3
+# Per-case turn budget, measured not guessed (2026-08-23). MAX_TURNS above is the one global
+# default this file actually uses -- a case with no row below inherits it unchanged, same as
+# today. This table does not change that; it exists so the next person deciding whether to
+# split MAX_TURNS per case has measurements instead of a guess. Each row is a real claude
+# invocation at that value, run outside this harness with matching flags (including the
+# "Agent" denial), workdir inspected before cleanup for terminal `subtype`, `num_turns`, and
+# whether a `Skill` tool_use appears.
+#
+# MEASURED, sufficient at the current default (3) -- no override needed:
+#   root-cause-guard                       PASS both historical runs, attempt 1
+#   idempotent-cron                        PASS both historical runs, attempt <=2
+#   boundary-discipline-api                PASS both historical runs, attempt 1
+#   sequence-verifiable-units-migration    PASS both historical runs, attempt 1
+#
+# MEASURED, needs more than the default -- recommended per-case value:
+#   prove-it-works-declare-done   -> 6     @6: subtype=success, num_turns=4/6, no Skill call,
+#                                           tools used: Grep,Grep,Read. Genuinely completes
+#                                           without ever consulting the dispatcher -- not
+#                                           starvation, a real "never fires" signal. 2 turns
+#                                           of margin measured; 6 is sufficient.
+#   encode-lessons-lint            -> 10   @3: starved, never fired in 3/3 attempts (two
+#                                           separate historical runs).
+#                                           @6: still subtype=error_max_turns, num_turns=7,
+#                                           no Skill call (transcript preserved at
+#                                           /tmp/auto-trigger-test.AJGn8t).
+#                                           @10: subtype=success, num_turns=12/10, Skill
+#                                           fired (principle-encode-lessons-in-structure).
+#                                           Turn-starved, not structurally unfireable like
+#                                           prove-it-works-declare-done -- 10 is the first
+#                                           measured-sufficient value; not tried below 10.
+#
+# MEASURED flaky at the default, but NO measurement above 3 exists -- deliberately left
+# unset rather than guessed. A guessed number here would be indistinguishable from a
+# measured one, which is exactly the confusion this table exists to prevent:
+#   build-the-lever-headers                @3: PASS attempt 2 one historical run,
+#                                           never-fired-in-3 the other. Not measured above 3.
+#   type-system-discipline-go              @3: PASS attempt 1 one historical run,
+#                                           never-fired-in-3 the other. Not measured above 3.
+#
+# UNSET -- no data, not run this session. Unset means "nobody has checked," not "3 is known
+# to be enough":
+#   readme-writing, typescript-review, swarm-audit, blast-radius-auth, feature-chain,
+#   overnight-audit-trail, ui-iterate-styles, component-registry-combobox, grill-my-plan,
+#   find-a-skill, agent-browser-screenshot, create-verification-skill-cold-start,
+#   executing-plans-checkpoints, impeccable-polish, interrogate-auth-diff,
+#   maintain-verification-skill-drift, reflect-session, unslop-draft-pass,
+#   negative-arithmetic, negative-factual
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
 # single sample is a coin flip; a skill that has actually stopped firing misses every attempt.
 # feature-chain is the measured-marginal case (~50% per attempt across runs: the model often
