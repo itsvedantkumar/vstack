@@ -243,6 +243,37 @@ new state -- including a rate number from before the change, compared against on
 Skipping the control doesn't make the harness wrong; it makes the next finding unfalsifiable,
 because a regression in the harness and a regression in dispatch produce the same printed output.
 
+## Shell traps this repo has actually hit
+
+Each of these cost someone real time here. They are recorded because the next person will write
+the same line.
+
+**macOS ships bash 3.2.57.** No `mapfile`, no associative arrays. A `case` nested inside a `while`
+nested inside `$(...)` fails to parse outright with `syntax error near unexpected token ';;'` —
+reproduced standalone in four lines while refactoring the gate. Use `[[ ]]` glob tests instead.
+Run `bash -n` immediately after any edit rather than waiting for the gate.
+
+**BSD `sort` has no `-V`.** Version comparison has to be hand-rolled, because a string sort puts
+`1.9.0` above `1.10.0`. Check 39 does this.
+
+**`while read x < file; do gh ...; done` shares stdin with the loop body.** Any command inside the
+loop that probes fd0 eats the list. `gh release create` hung for five minutes this way. Redirect
+the list to a spare descriptor: `done 3< file` with `read x <&3`, so the body's stdin stays free.
+
+**`status` is a read-only special variable in zsh.** It already holds the last command's exit code,
+so `status=$?` aborts the script with `read-only variable: status` rather than failing cleanly at
+the point of use. Use `rc=$?`.
+
+**Redirections apply left to right.** `: > "$log" 2>/dev/null` does not suppress the failure of
+`> "$log"` — the `2>/dev/null` is set up after the redirect that fails. Write
+`: 2>/dev/null > "$log"`.
+
+**`cd "-x"` parses as an option, not a path.** Without `--`, a bad argument produces
+`cd: invalid option` on stderr ahead of your own error message. Use `cd -- "$d"`.
+
+**`cmd | grep -q` returns 141 under `set -o pipefail`.** `grep -q` exits on first match and SIGPIPEs
+the writer. This has inverted three checks in this repo. Use `grep -q ... <<<"$var"`.
+
 ## Add a case
 
 Edit `tests/auto-trigger.sh`:
