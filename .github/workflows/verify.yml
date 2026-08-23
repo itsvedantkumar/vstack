@@ -104,6 +104,22 @@ jobs:
       - name: The mechanisms still decide what the README says they do
         run: ./tests/compare-baseline.sh
 
+      # A standalone reproduction of the delegation mandate in skill-mandate.sh, offline and
+      # under 2s. It is not a pass/fail harness on its own -- check 27 of the gate above is the
+      # thing that actually enforces the four cases it drives -- but it must at least run clean
+      # so its raw stdout/exit code stays trustworthy for anyone reaching for it by hand.
+      - name: skill-mandate.sh breadth reproduction runs clean
+        run: ./tests/test-breadth-mandate.sh
+
+      # Zero model calls, fixture integrity only. auto-trigger.sh and team-gating.sh need a
+      # billed, authenticated `claude` session the user has declined to give CI, so this is the
+      # one thing about skill dispatch this pipeline CAN check for free: that the fixtures those
+      # suites depend on (skill names, setup_* functions, the files they write, the case count
+      # their own docs claim) are still intact. See the header of dispatch-static.sh for what
+      # this does and does not prove -- it does not prove a skill fires.
+      - name: auto-trigger.sh fixtures are still intact (no model calls)
+        run: ./tests/dispatch-static.sh
+
       - name: Confirm the tree is restored
         run: git diff --exit-code
 
