@@ -6,6 +6,26 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Six ui-gate rules came back from the dead.** They were unconditional skips carrying "playwright
+is not vendored here", and nothing in that file ever checked for a browser. vstack ships
+`agent-browser`, a Rust binary driving Chrome over CDP, already installed and already the
+documented answer for headless work in parallel workspaces. Two thirds of the UI enforcement layer
+was inert for a stated cause that had expired, announcing that cause in every run.
+
+`COV-VIEWPORT` fails on horizontal overflow at 375px. `A11Y-KEYBOARD` requires the first tab stop
+to carry a visible focus indicator, read from computed style rather than CSS source. `A11Y-AXE`
+runs axe-core 4.12.1, which `agent-browser` vendors and executes offline — a rule this same commit
+had first written off as "axe-core is not vendored", a second remembered fact that turned out
+false minutes later. Capability probes beat recollection.
+
+`TOK-TYPE-SCALE` stops enforcing a scale nobody derived. `12|14|16|20|24|32|48` was typed into the
+file, and a project stepping 1.333 from 18px failed on every heading. It reads
+`.impeccable/brand.json` when the target ships one, and reports which scale it used and where that
+came from.
+
+Mutation coverage went from 3 falsifiable rules to 6. The three still skipping name what they
+need: a state fixture convention, a baseline image store, a declared lab budget.
+
 ## 1.21.0 — 2026-08-23
 
 **Register constraint added to the shipped policy.** Reports now read as a CTO reporting to a CTO:
