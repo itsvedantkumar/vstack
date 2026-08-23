@@ -4,7 +4,46 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
-## Unreleased
+## 1.34.0 — 2026-08-23
+
+**The grill nudge was displacing the skills it sits next to.** `tests/auto-trigger.sh` had never
+run in CI and, as far as the log shows, never run at all. Run locally against v1.31.0 it scored 19
+of 28. Nine of the failures were long prompts where the expected skill never fired, and in nine
+attempts across those cases the thing that fired instead was `grill-me`.
+
+The cause was in the nudge, not in any skill. It triggers on character count alone, 320 characters
+or 120 on the first prompt of a session, and it said "run the grill-me skill on this request now,
+before any code or plan. Not optional." An unconditional imperative attached to a length threshold
+fires on essentially every substantive request and outranks situation matched routing, so
+`principle-boundary-discipline`, `impeccable`, `create-verification-skill` and
+`principle-sequence-verifiable-units` lost to it on prompts that were about none of those things.
+
+The nudge now yields: it runs when no skill matches the situation more specifically, and says so.
+Re run after the change, same suite, same fixtures: 22 of 28, and grill-me hijacks went from nine
+to zero. Stated honestly, one case moved the other way, `principle-build-the-lever` passed before
+and failed after, and skill dispatch is a model decision, so a single paired run carries noise. The
+hijack count going to zero is the part that is not noise.
+
+Six failures remain and they are a different defect: nothing fires at all, `(none)` in every
+attempt, and four of the six are `principle-*` skills. The principles lane is not being displaced,
+it is not being reached. Not fixed here.
+
+**How often 1.30.0's 300K window actually binds, measured.** 120 real session transcripts under
+`~/.claude/projects` were scanned for peak context occupancy. 20 percent of sessions exceed 230K,
+which is where the 300K setting really triggers. 7 percent exceed 680K, where the old unset default
+would have triggered. The two largest peaked at 999,445 and 997,674 tokens, and several sessions
+sat at 905K, 906K and 765K having never compacted at all. So the change is neither inert nor
+constant: it alters behaviour on about one session in five, and the sessions it catches are the
+ones that were previously running the entire way at 900K of context.
+
+**The synthetic A/B was abandoned, and why is the interesting part.** Three attempts to drive a
+session past the window failed because this configuration prevented it. The digest tells the model
+to batch independent tool calls, so one step went from 40K to 321K with no turn boundary in
+between. The same digest says never read whole files and prefer grep with line ranges, so an arm
+built to read 359K of source instead grep'd it and peaked at 32K across three turns. The config is
+extremely good at keeping context small, which is the reason compaction is rare here, and it is
+also the reason a synthetic harness cannot reproduce the conditions it is meant to measure. The
+transcript scan above replaced it and answers the same question from real data.
 
 ## 1.33.0 — 2026-08-23
 
@@ -73,47 +112,6 @@ shipped in its own payload.
 
 `tests/bin-scripts.sh` is green (37/0) and stable across repeated runs; nothing in this release
 touches what ships to `claude plugin install` beyond these three wrapper scripts.
-
-## Unreleased
-
-**The grill nudge was displacing the skills it sits next to.** `tests/auto-trigger.sh` had never
-run in CI and, as far as the log shows, never run at all. Run locally against v1.31.0 it scored 19
-of 28. Nine of the failures were long prompts where the expected skill never fired, and in nine
-attempts across those cases the thing that fired instead was `grill-me`.
-
-The cause was in the nudge, not in any skill. It triggers on character count alone, 320 characters
-or 120 on the first prompt of a session, and it said "run the grill-me skill on this request now,
-before any code or plan. Not optional." An unconditional imperative attached to a length threshold
-fires on essentially every substantive request and outranks situation matched routing, so
-`principle-boundary-discipline`, `impeccable`, `create-verification-skill` and
-`principle-sequence-verifiable-units` lost to it on prompts that were about none of those things.
-
-The nudge now yields: it runs when no skill matches the situation more specifically, and says so.
-Re run after the change, same suite, same fixtures: 22 of 28, and grill-me hijacks went from nine
-to zero. Stated honestly, one case moved the other way, `principle-build-the-lever` passed before
-and failed after, and skill dispatch is a model decision, so a single paired run carries noise. The
-hijack count going to zero is the part that is not noise.
-
-Six failures remain and they are a different defect: nothing fires at all, `(none)` in every
-attempt, and four of the six are `principle-*` skills. The principles lane is not being displaced,
-it is not being reached. Not fixed here.
-
-**How often 1.30.0's 300K window actually binds, measured.** 120 real session transcripts under
-`~/.claude/projects` were scanned for peak context occupancy. 20 percent of sessions exceed 230K,
-which is where the 300K setting really triggers. 7 percent exceed 680K, where the old unset default
-would have triggered. The two largest peaked at 999,445 and 997,674 tokens, and several sessions
-sat at 905K, 906K and 765K having never compacted at all. So the change is neither inert nor
-constant: it alters behaviour on about one session in five, and the sessions it catches are the
-ones that were previously running the entire way at 900K of context.
-
-**The synthetic A/B was abandoned, and why is the interesting part.** Three attempts to drive a
-session past the window failed because this configuration prevented it. The digest tells the model
-to batch independent tool calls, so one step went from 40K to 321K with no turn boundary in
-between. The same digest says never read whole files and prefer grep with line ranges, so an arm
-built to read 359K of source instead grep'd it and peaked at 32K across three turns. The config is
-extremely good at keeping context small, which is the reason compaction is rare here, and it is
-also the reason a synthetic harness cannot reproduce the conditions it is meant to measure. The
-transcript scan above replaced it and answers the same question from real data.
 
 ## 1.31.0 — 2026-08-23
 
