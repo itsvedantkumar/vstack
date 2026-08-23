@@ -1,5 +1,6 @@
 {
   "agentPushNotifEnabled": true,
+  "autoCompactWindow": 300000,
   "autoUpdatesChannel": "latest",
   "awaySummaryEnabled": false,
   "cleanupPeriodDays": 14,

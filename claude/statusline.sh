@@ -4,15 +4,20 @@
 input=$(cat)
 
 # Single jq pass -> tab-separated fields.
-IFS=$'\t' read -r model cdir style cost added removed <<<"$(
+# Separator is US (\037), not tab. Tab is IFS-whitespace, so bash coalesces runs of it and a
+# single empty field shifts every field after it -- an absent output_style rendered the cost as
+# the style and the token count as the cost. @tsv has the same hazard for the same reason, so the
+# fields are joined on a control character that cannot appear in a display name, path or number.
+IFS=$'\037' read -r model cdir style cost added removed ctxused <<<"$(
   printf '%s' "$input" | jq -r '[
     (.model.display_name // "Claude"),
     (.workspace.current_dir // .cwd // ""),
     (.output_style.name // ""),
     (.cost.total_cost_usd   // ""),
     (.cost.total_lines_added   // ""),
-    (.cost.total_lines_removed // "")
-  ] | @tsv' 2>/dev/null
+    (.cost.total_lines_removed // ""),
+    (.context_window.total_input_tokens // "")
+  ] | map(tostring) | join("\u001f")' 2>/dev/null
 )"
 [ -z "$cdir" ] && cdir="$PWD"
 dir=${cdir##*/}
@@ -38,6 +43,23 @@ if [ -n "$cost" ]; then
   if [ "${whole:-0}" -ge 8 ] 2>/dev/null; then col=$RED
   elif [ "${whole:-0}" -ge 2 ] 2>/dev/null; then col=$Y; fi
   out="${out} ${D}·${R} ${col}\$${cc}${R}"
+fi
+# Context occupancy, measured against the window compaction actually fires at -- not against
+# the model's 1M, which is the number that makes 300k look like nothing. `total_input_tokens` is
+# input + cache_creation + cache_read, i.e. what occupies the window; it is null before the first
+# API call of a session and again after a compaction until the next one, so an absent value
+# renders nothing rather than a confident "0%".
+#
+# CTX_COMPACT_WINDOW must equal autoCompactWindow in claude/settings.json. It is duplicated here
+# rather than read per render because this runs on every turn and a second jq spawn is the cost
+# this file was rewritten to avoid. doctor asserts the two agree: a statusline warning at a
+# threshold the runtime does not use is exactly the green that measures nothing.
+CTX_COMPACT_WINDOW=300000
+if [ -n "$ctxused" ] && [ "$ctxused" -gt 0 ] 2>/dev/null; then
+  col=$G
+  if   [ "$ctxused" -ge "$CTX_COMPACT_WINDOW" ] 2>/dev/null; then col=$RED
+  elif [ "$ctxused" -ge $(( CTX_COMPACT_WINDOW * 2 / 3 )) ] 2>/dev/null; then col=$Y; fi
+  out="${out} ${D}·${R} ${col}ctx $(( ctxused / 1000 ))k${R}${D}/$(( CTX_COMPACT_WINDOW / 1000 ))k${R}"
 fi
 # The gate indicator. This repository spent a day removing greens that measured nothing, so an
 # indicator that only ever says "protected" would be the same defect wearing better clothes.

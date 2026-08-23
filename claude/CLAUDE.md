@@ -37,3 +37,8 @@ than working around it locally. A workaround in your session is a bug report you
 file. This is not a request to fix unrelated things you notice; it is that a defect which
 obstructed you has already proven it obstructs someone, and that evidence expires the moment you
 route around it.
+
+# Compact instructions
+
+Keep: routing rules, call sign roster, open gates, acceptance criteria, earlier constraints,
+decisions made, established paths, and what running something verified.

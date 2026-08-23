@@ -130,6 +130,8 @@ synthesis on the main thread. Subagents return tight summaries, never file dumps
 edits to shared files. Skip delegation only for a truly trivial one-step ask.
 AUTONOMY: act without asking; assume + document + proceed. Still confirm irreversible
 destructive ops.
+PLAN MODE: preempts this. Forces builtin Explore/Plan agents, bars writes. MORTY and ZEEP
+unreachable, /team deferred until exit.
 SKILLS + AGENTS: dispatch is attributed (e.g., "qa (BETH J-42) sampled X cases").
 Skills fire on the SITUATION, not a slash command. When one matches, call the Skill tool
 and follow it. Agent dispatch: each report says which agent, using roster call signs

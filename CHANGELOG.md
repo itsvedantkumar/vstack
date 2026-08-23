@@ -6,11 +6,39 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
-**The roster is documented on the front page.** The README listed fourteen bare agent names in a
-collapsed block and said nothing about call signs, the lead, the dimension codes, or the handoff
-log — all of which shipped in v1.27.0 and v1.28.0 with no way for a reader to discover them. It
-now carries the full table, what each agent is for, and the rule that an unattributed verdict
-cannot be challenged.
+**Compaction ran at the model's context limit, and nothing said so.** `autoCompactWindow` was
+never set, so Claude Code compacted only when a session reached the window — about 967K of Opus
+5's 1M — squeezing the whole conversation roughly 200:1 in one event. Compaction loss scales with
+both the compression ratio and the number of cycles (arXiv 2606.22528), so a single late squeeze
+is the worst arrangement on offer. It is pinned to 300K, holding the ratio near 60:1. That number
+is chosen from the shape of the evidence, not measured: nobody, Anthropic included, has published
+a quality curve against context length for Opus 5, and every figure circulating for the 200K–1M
+band traces to commercial blogs with no method. Cost did not drive it and does not object — the
+long context premium was removed in March, and a cached 500K turn costs a third of one cold 150K
+turn, so cache hit rate is the cost variable, not context size.
+
+**The operating policy did not survive its own compaction.** The session baseline is injected by
+the SessionStart hook, which puts it in the conversation layer — precisely what compaction
+replaces. Only the per-prompt digest refires, so a long session kept 60 tokens of digest and lost
+the routing table, the roster, and every constraint set before the squeeze. `CLAUDE.md` now
+carries a `# Compact instructions` section naming what to carry across, and doctor fails when it
+is absent.
+
+**The statusline reported dollars and not tokens.** It could not answer the question behind all
+of the above — how full is the context — so the threshold was unobservable and therefore
+untunable. It renders occupancy against the compaction window rather than against the 1M, because
+300K measured against 1M looks like nothing. Writing that field surfaced an older bug in the same
+file: fields were read with `IFS=$'\t'`, and tab is IFS whitespace, so bash coalesced runs of it
+and one empty field shifted every field after it. A session with no `output_style` rendered its
+token count in the cost position. The separator is now US, which cannot occur in a display name,
+path or number. doctor asserts the statusline threshold equals the setting, since a statusline
+warning at a number the runtime does not use is a green that measures nothing.
+
+**Plan mode silently bypassed the roster.** The routing table never mentioned it, while plan
+mode's own workflow forces the builtin Explore and Plan agents and bars writes — so MORTY and
+ZEEP were unreachable and `/team` could not run, with nothing reporting the substitution. The
+baseline states it now.
+
 
 ## 1.28.0 — 2026-08-23
 

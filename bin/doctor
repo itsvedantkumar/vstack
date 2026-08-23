@@ -601,6 +601,43 @@ else
     fi
   fi
 fi
+echo "── context ──"
+# With autoCompactWindow unset, Claude Code compacts at the model's context limit -- ~967K of
+# Opus 5's 1M -- so a session takes one ~200:1 squeeze instead of several small ones, and
+# compaction loss scales with both the compression ratio and the cycle count (arXiv 2606.22528).
+# Asserted against the LIVE file, not the repo's: a value this repo ships and the merge failed to
+# apply is the failure that matters, and it is invisible from the repo side.
+_acw_want=$(jq -r '.autoCompactWindow // empty' "${R:-/nonexistent}/claude/settings.json" 2>/dev/null)
+_acw_have=$(jq -r '.autoCompactWindow // empty' "$S" 2>/dev/null)
+if [ -z "$_acw_want" ] && [ -n "$R" ]; then
+  bad "autoCompactWindow shipped" "claude/settings.json no longer sets it -- the pin was dropped from the repo, not merely from the install"
+elif [ -n "$_acw_have" ] && { [ -z "$R" ] || [ "$_acw_have" = "$_acw_want" ]; }; then
+  ok "autoCompactWindow (${_acw_have})"
+else
+  bad "autoCompactWindow" "live settings has '${_acw_have:-unset}', repo ships '${_acw_want:-?}' -- unset means compaction waits for the model's context limit (./install.sh)"
+fi
+
+# The statusline duplicates that threshold so it can render without a second jq spawn per turn.
+# A statusline that turns red at a number the runtime does not compact at is the same defect this
+# repo spent a day removing: a green that measures nothing. Assert the copy against the source.
+_sl="$CDIR/statusline.sh"
+_slw=$(sed -n 's/^CTX_COMPACT_WINDOW=\([0-9]*\).*/\1/p' "$_sl" 2>/dev/null | head -1)
+if [ -z "$_slw" ]; then
+  bad "statusline shows context" "$_sl sets no CTX_COMPACT_WINDOW -- context occupancy is not rendered, so the window cannot be tuned by observation"
+elif [ -n "$_acw_have" ] && [ "$_slw" != "$_acw_have" ]; then
+  bad "statusline threshold" "statusline warns at $_slw but Claude Code compacts at $_acw_have"
+else
+  ok "statusline context threshold ($_slw)"
+fi
+
+# Compaction replaces the conversation layer, and the session baseline is injected into it at
+# SessionStart. Without compact instructions the routing table does not survive the first
+# compaction -- silently, which is the whole problem.
+if grep -q '^# Compact instructions' "$CDIR/CLAUDE.md" 2>/dev/null; then
+  ok "compact instructions in CLAUDE.md"
+else
+  bad "compact instructions" "$CDIR/CLAUDE.md has no '# Compact instructions' section -- the routing table will not survive a compaction"
+fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
 jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
