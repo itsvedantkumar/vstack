@@ -37,6 +37,8 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate blocks" "jq not installed"
   skip "PROOF 3: same spread as PROOF 2, attributed Task call -> breadth mandate silent" "jq not installed"
   skip "PROOF 4: six dirs, one extension, zero Task -> breadth mandate silent" "jq not installed"
+  skip "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks" "jq not installed"
+  skip "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -61,8 +63,8 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/vstack-mandate-breadth.XXXXXX")"
 # code untouched. Sweep any stale counters before running and after, so every run starts and
 # ends from the same state the hook sees on a session it has never met.
 sweep_latch_(){
-  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-4] 2>/dev/null
-  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-4].lock 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-6] 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-6].lock 2>/dev/null
 }
 sweep_latch_
 trap 'sweep_latch_; rm -rf "$WORK"' EXIT
@@ -147,6 +149,42 @@ if ! names_breadth_; then
 else
   bad "PROOF 4: six dirs, one extension, zero Task -> breadth mandate silent" \
       "expected no 'multi-directory work --' line for a single-extension sweep, got: reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 5: 3 Bash-only writes (sed -i, sed -i "", python heredoc open(w)), 0 Task calls -----
+# Positive direction, and the exact defect this suite exists to catch: every edit made through
+# Bash instead of Write/Edit/NotebookEdit was invisible to the breadth counter until now. This
+# fixture is the v1.35.0 release shape that motivated the fix -- `sed -i.bak` on hooks/a.sh,
+# `sed -i ""` (BSD empty-backup form) on lib/b.py, and a `python3 - <<PY` heredoc whose body calls
+# `open("config/c.json", "w")` -- three tool_use blocks, all name="Bash", zero name="Write" or
+# "Edit" anywhere in the transcript. 3 directories (hooks, lib, config), 3 extensions (sh, py,
+# json), 0 Task calls: both thresholds clear on Bash-extracted paths alone. No .md or .ts path is
+# produced by any rule, so there is no confound here -- an empty stdout would mean the extraction
+# found nothing, not that a different mandate ate the block.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"sed -i.bak -e s/x/y/ hooks/a.sh"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"sed -i \"\" -e s/a/b/ lib/b.py"}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"python3 - <<PY\nwith open(\"config/c.json\", \"w\") as f:\n    f.write(\"{}\")\nPY"}}]}}'
+run_hook_ proof5
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks"
+else
+  bad "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks" \
+      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 6: 5 Bash-only reads (grep/cat/git add/find/ls) across five directories --------------
+# Negative direction, and the false-positive risk the extraction has to stay clear of: a session
+# that only reads and lists files -- across as many directories as PROOF 5's writes touched --
+# must not read as multi-part work just because its arguments happen to span src/, docs/,
+# config/, test/unit/ and web/app/. None of grep, cat, git add, find or ls is a recognized write
+# shape, so the hook's own $paths (Bash-derived or otherwise) stays empty and there is nothing to
+# count. This is the strict form of PROOF 1 -- not merely "no breadth line" but completely silent
+# stdout, since this fixture has no prose or TypeScript write either to trip a different mandate.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"grep -rn TODO src/lib.py src/util.py"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"cat docs/README.md docs/guide.md"}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"git add config/settings.json docs/README.md src/lib.py"}},{"type":"tool_use","id":"4","name":"Bash","input":{"command":"find test/unit -name *.sh"}},{"type":"tool_use","id":"5","name":"Bash","input":{"command":"ls -la web/app/index.ts"}}]}}'
+run_hook_ proof6
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent"
+else
+  bad "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 echo

@@ -4,6 +4,45 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.36.0 — 2026-08-23
+
+**The breadth mandate counted Write, Edit and NotebookEdit tool calls and nothing else, so every
+edit made through Bash was invisible to it -- which is most edits, in the one mode where the
+model is told to prefer Bash over the dedicated file tools.**
+
+Cutting v1.35.0 itself was the proof: six files across five directories and three extensions,
+edited entirely with `sed -i` and `python3 - <<PY` heredocs, zero Task calls, and the
+multi-directory mandate never fired. Bypass-permissions sessions are explicitly instructed to
+"make file changes with sed, heredocs, or short scripts, rather than using the dedicated Read,
+Edit, or Write tools" -- so the mandate was blind in precisely the mode where an agent is most
+autonomous and least supervised.
+
+`claude/hooks/skill-mandate.sh` now also scans every `Bash` tool_use block's `.input.command` for
+a bounded set of write shapes -- `sed -i`/`sed -i.bak` targets, `>`/`>>`/`&>` redirection and
+`tee`, `cp`/`mv` destinations, and Python `open(PATH, 'w'...)` calls with a literal string path
+(which is what a `python3 - <<'PY' ... PY` heredoc writer looks like once flattened to one
+string) -- and folds anything it recognizes into the same path set the breadth, prose and
+TypeScript mandates already read. `grep`, `cat`, `ls`, `git add`, and `find` without `-delete`
+still match nothing, so ordinary read-heavy Bash work stays silent; a guard that cries wolf on
+reads gets disabled by the first person it inconveniences.
+
+This is not a shell parser and does not claim to be one. Documented, not chased with more regex:
+quoted paths with spaces truncate at the first space; a multi-target `sed -i`/`cp`/`mv`/`tee`
+only yields its last target; commands invoked by full path, `sudo`, `xargs`, `eval`, or
+`find -exec` are not recognized at all; a Python write through a variable, an f-string, or
+`Path.write_text(...)` is invisible; and a literal `>` inside a quoted string on the same line
+(`echo "a > b" > out`) or a `[[ "$x" > "$y" ]]` string comparison can add a spurious token to the
+path set -- checked by hand before shipping, and both are bounded to a bare `$var`-shaped token
+with no `/` and no `.`, which cannot alone supply the second directory or second extension the
+conjunctive threshold needs.
+
+Falsification: `tests/test-breadth-mandate.sh` PROOF 5 (three Bash-only writes via `sed -i`,
+`sed -i ""`, and a `python3` heredoc, spanning three directories and three extensions, zero Task
+calls) blocks naming `multi-directory work --`; PROOF 6 (five Bash-only reads -- `grep`, `cat`,
+`git add`, `find`, `ls` -- across five directories) stays completely silent. Disabling the
+`sed -i` rule alone turns PROOF 5 red; widening the `cp`/`mv` rule to also match `cat` turns
+PROOF 6 red. Both proven on an isolated `/tmp` copy of the tree and restored byte-identical.
+
 ## 1.35.0 — 2026-08-23
 
 **Eight routing entries pointed at skills that do not exist, and the check that exists to catch

@@ -80,6 +80,116 @@ skills=$(
   | sed 's/.*://' | sort -u
 )
 
+# Write/Edit/NotebookEdit tool_use blocks are not the only way a session changes a file. In
+# bypass-permissions mode the model is explicitly told to prefer Bash -- sed, heredocs, short
+# scripts -- over the dedicated Edit/Write tools, and every one of those edits was invisible to
+# every mandate above: a v1.35.0 release cut six files across five directories and three
+# extensions entirely through `sed -i` and `python3 - <<PY` heredocs, and the breadth mandate
+# never fired. This scans every Bash tool_use block's .input.command for a bounded set of write
+# patterns and folds anything it recognizes into $paths below it, so the breadth mandate (and,
+# as a side effect, the prose/TypeScript ones, which key off the same $paths) see Bash-mediated
+# edits the same way they see Edit/Write ones.
+#
+# Recognized, in order: `sed -i` / `sed -i.bak` (the last whitespace-separated argument is taken
+# as the target file); `>` / `>>` / `&>` output redirection and `tee [-a]` (this also covers
+# `cat > path <<EOF`-style heredoc writers, since it is the redirect that is matched, not the
+# heredoc body); `cp` / `mv` (the last non-flag argument is taken as the destination); and Python
+# `open(PATH, 'w'...)` / `'a'...` / `'x'...` calls with a literal string path, anywhere in the
+# command text -- which is what a `python3 - <<'PY' ... PY` heredoc writer looks like once jq has
+# flattened it to one string.
+#
+# Residual blind spots, left uncaught on purpose rather than chased with more regex:
+#   - a quoted path containing a space truncates at the first space (`> "a b.txt"` yields `a`)
+#   - a `sed -i` / `cp` / `mv` / `tee` invocation naming more than one target file only yields
+#     the last one (`sed -i '' -e s/a/b/ x.sh y.sh` sees only y.sh)
+#   - commands invoked by full path (`/bin/cp`, `/usr/bin/sed -i`), via `sudo`, `xargs`, `eval`,
+#     `find -exec`, or with a `VAR=val cmd` prefix are not recognized as the command at all
+#   - a Python write via a variable, an f-string, `pathlib.Path(...).write_text(...)`, or any
+#     open() call whose path is not a literal string is invisible
+#   - `touch`, `mkdir`, `install`, `rsync`, `dd`, and redirection to a process substitution or an
+#     fd number are not treated as writes
+#   - a literal `>` inside a quoted string earlier on the same line (`echo "a > b" > out`) can be
+#     misread as its own redirect target -- this is the price of not tokenizing the shell, and it
+#     is a false *addition* to $paths, not a false mandate-met: it can only make the breadth
+#     mandate name a Bash line it otherwise would not have, never suppress one that is real
+#   - the same trap in the mirror: `[[ "$x" > "$y" ]]` and `[ "$a" > "$b" ]` are lexicographic
+#     string comparisons, not redirects, and the redirect scan cannot tell the difference -- it
+#     reads `$y`/`$b` off as a write target. Checked before shipping this: the fallout is bounded
+#     to inert noise, because a bare `$var` has no `/` (parent dir collapses to the same `.`
+#     every extension-less token already collapses to) and no `.` (no extension token is emitted
+#     at all), so it cannot supply the second directory or the second extension the conjunctive
+#     threshold needs on its own -- confirmed by hand, not assumed
+# None of this is a shell parser. It is a best-effort net over write shapes that are actually
+# common in this repo's own history, traded deliberately against reads: `grep`, `cat`, `ls`,
+# `git add`, `find` without `-delete`, and command substitution never match any rule below, so
+# ordinary read-heavy Bash work stays silent -- a guard that cries wolf on reads gets disabled.
+bash_write_paths=""
+AWK_BIN=""
+if [ -x /usr/bin/awk ]; then AWK_BIN=/usr/bin/awk
+elif command -v awk >/dev/null 2>&1; then AWK_BIN=$(command -v awk); fi
+if [ -n "$AWK_BIN" ]; then
+  bash_cmds=$(
+    "$JQ" -r 'select(.type=="assistant") | .message.content[]?
+              | select(.type=="tool_use" and .name=="Bash") | .input.command // empty' "$tr_" 2>/dev/null
+  )
+  if [ -n "$bash_cmds" ]; then
+    bash_write_extract='
+    {
+      line = $0
+      if (match(line, /(^|[;&|]| )sed[ \t]+-i[^ \t]*[ \t]+/)) {
+        rest = substr(line, RSTART + RLENGTH)
+        n = split(rest, toks, /[ \t]+/)
+        if (n >= 1) {
+          f = toks[n]
+          gsub(/^["'"'"']|["'"'"';]+$/, "", f)
+          if (f !~ /^-/ && f != "") print f
+        }
+      }
+      work = line
+      while (match(work, />>?[ \t]*[^ \t;&|)]+/)) {
+        tgt = substr(work, RSTART, RLENGTH)
+        work = substr(work, RSTART + RLENGTH)
+        sub(/^>>?[ \t]*/, "", tgt)
+        gsub(/^["'"'"']|["'"'"']$/, "", tgt)
+        if (tgt !~ /^&/ && tgt !~ /^\/dev\//) print tgt
+      }
+      if (match(line, /(^|[;&|]| )tee[ \t]+(-a[ \t]+)?/)) {
+        rest = substr(line, RSTART + RLENGTH)
+        n = split(rest, toks, /[ \t]+/)
+        for (i = 1; i <= n; i++) {
+          t = toks[i]
+          if (t ~ /^-/) continue
+          gsub(/^["'"'"']|["'"'"']$/, "", t)
+          if (t != "") print t
+          break
+        }
+      }
+      if (match(line, /(^|[;&|]| )(cp|mv)[ \t]+/)) {
+        rest = substr(line, RSTART + RLENGTH)
+        n = split(rest, toks, /[ \t]+/)
+        if (n >= 2) {
+          f = toks[n]
+          gsub(/^["'"'"']|["'"'"']$/, "", f)
+          if (f !~ /^-/ && f != "") print f
+        }
+      }
+      s = line
+      while (match(s, /open\([ \t]*["'"'"'][^"'"'"']+["'"'"'][ \t]*,[ \t]*["'"'"'][waxWAX][^"'"'"']*["'"'"']/)) {
+        m = substr(s, RSTART, RLENGTH)
+        s = substr(s, RSTART + RLENGTH)
+        if (match(m, /["'"'"'][^"'"'"']+["'"'"']/)) {
+          print substr(m, RSTART + 1, RLENGTH - 2)
+        }
+      }
+    }
+    '
+    bash_write_paths=$(printf '%s\n' "$bash_cmds" | "$AWK_BIN" "$bash_write_extract" 2>/dev/null | sort -u)
+  fi
+fi
+# Fold into the same $paths every mandate below reads, so a Bash-mediated write counts exactly
+# like a Write/Edit/NotebookEdit one everywhere downstream -- breadth, prose, and TypeScript alike.
+[ -n "$bash_write_paths" ] && paths=$(printf '%s\n%s' "$paths" "$bash_write_paths" | sed '/^$/d' | sort -u)
+
 fired(){ printf '%s\n' "$skills" | grep -qxF "$1"; }
 
 unmet=""

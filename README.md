@@ -58,8 +58,8 @@ cd ~/Projects/vstack && ./install.sh
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.35.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.35.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.36.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.36.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Removing it restores what was there before: `./uninstall.sh --yes` puts every file it replaced
