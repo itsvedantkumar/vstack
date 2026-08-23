@@ -218,6 +218,31 @@ So: announce the paths you are taking, stage explicit paths rather than wildcard
 `git status` immediately before committing rather than at the start, and prefer a separate worktree
 over a hand-held lock when the work is more than a few minutes.
 
+## A harness change invalidates its own prior findings until the control re-runs
+
+On 2026-08-23, five commits landed in `auto-trigger.sh` in one session -- the `Agent` tool
+denied in `--disallowedTools`, a filesystem fence asserting nothing escapes a case's workdir,
+the `error_max_turns`-vs-ran-to-completion split, and per-case `MAX_TURNS` overrides. Every one
+of them touches the exact code path `auto-trigger.sh` exists to measure: what the model is
+allowed to do and how long it gets to do it. Rate numbers gathered before those commits were
+then compared against numbers gathered after, and a difference between them was reported as a
+finding about skill dispatch. It was at least partly a finding about the harness.
+
+The fix that day was a control: one case with a long, boring history of passing on attempt 1
+(`root-cause-guard`), sampled n=10 independently alongside whatever was actually in question. It
+came back 9/10, which is what made the other three numbers in that run readable as findings
+rather than as "something in the last five commits broke everything." That control was run once,
+after all five commits, not once per commit -- so it validates the harness as it stands now, not
+each intermediate state it passed through, and comparisons against any number gathered before it
+are not supported by it.
+
+**The rule this earns:** after any change to `auto-trigger.sh` that touches tool availability,
+turn budgets, retry logic, or anything else in the path between a prompt and a `Skill` tool_use,
+re-run a stable control case at n well above 1 before trusting a rate number gathered against the
+new state -- including a rate number from before the change, compared against one from after.
+Skipping the control doesn't make the harness wrong; it makes the next finding unfalsifiable,
+because a regression in the harness and a regression in dispatch produce the same printed output.
+
 ## Add a case
 
 Edit `tests/auto-trigger.sh`:

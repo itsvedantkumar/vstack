@@ -127,9 +127,21 @@ case_max_turns() {
 #   type-system-discipline-go     1/10 hit  (at the default, max-turns=3 -- same caveat)
 # All three disputed cases separate cleanly from the control (0/10 and 1/10 vs 9/10) --
 # clearly below "fires at least about half the time," clearly not turn-budget noise on the
-# order of the control's one miss. Whether that's dead dispatch or a starved default for
-# the two unset cases is not settled by this probe; only that they are not merely stochastic
-# in the way the control is.
+# order of the control's one miss.
+#
+# Follow-up (same day): the two unset cases re-sampled at --max-turns 10 as a PROBE
+# PARAMETER ONLY -- case_max_turns() was not touched, this was passed directly in a
+# throwaway probe script, the same jump where encode-lessons-lint went from failing to a
+# clean Skill call:
+#   build-the-lever-headers       0/10 @ turns=3   ->   2/10 @ turns=10
+#   type-system-discipline-go     1/10 @ turns=3   ->   1/10 @ turns=10
+# What this rules out: turn budget is not the variable for these two, unlike
+# encode-lessons-lint. Tripling the budget left both firing rarely-to-never instead of
+# flipping to reliable. Neither earns a case_max_turns() entry on this evidence --
+# 2/10 is not a result, and an entry that encodes a non-result is worse than no entry.
+# Whatever suppresses dispatch here (description overlap, listing/ranking, something in
+# the routing block) is a different investigation than the one this table answers, and it
+# needs its own allowance decision before more calls go against it.
 # ---------------------------------------------------------------------------
 
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
