@@ -200,8 +200,12 @@ scan "no infrastructure ids" \
 # --- 7. every skill named in prose exists on disk ----------------------------------------------
 # CLAUDE.md and the session hook route situations to skills by name. Deleting or renaming a
 # skill leaves those references dangling and the routing silently dead — this is the drift the
-# check catches. Short principle names (prove-it-works) resolve via the principle- prefix;
-# agent and command names are legitimate non-skill references; ALLOW covers generic hyphenated
+# check catches. Names must resolve VERBATIM. This check used to accept a short principle name
+# (prove-it-works) by prepending principle- itself, which made the gate more forgiving than the
+# runtime: the model sees a skill listing containing only principle-prove-it-works and cannot
+# resolve the short form, so eight routing entries pointed at names that do not exist while this
+# check reported them present. Measured cost was four of eight principle skills never firing.
+# Agent and command names are legitimate non-skill references; ALLOW covers generic hyphenated
 # English and git plumbing that the token pattern also matches.
 ALLOW='agent-written|auto-apply|auto-fire|cross-cutting|git-common-dir|is-inside-work-tree|multi-phase|one-line|one-step|options-survey|re-point|re-pins|re-pin|rev-parse|show-current|show-toplevel|symbolic-ref|to-the-point|token-efficient|name-only|per-prompt|session-context|session-start|operating-mode|two-line'
 errs=""
@@ -211,7 +215,6 @@ errs=""
 hook_prose=$(sed -n "/<<'EOF'/,/^EOF\$/p" claude/hooks/inject-session-context.sh)
 for tok in $( { cat claude/CLAUDE.md; printf '%s\n' "$hook_prose"; } | grep -ohE '\b[a-z][a-z0-9]*(-[a-z0-9]+)+' | sort -u); do
   [ -d "claude/skills/$tok" ] && continue
-  [ -d "claude/skills/principle-$tok" ] && continue
   [ -f "claude/agents/$tok.md" ] && continue
   [ -f "claude/commands/$tok.md" ] && continue
   printf '%s' "$tok" | grep -qE "^($ALLOW)$" && continue

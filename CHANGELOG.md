@@ -4,6 +4,35 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.35.0 — 2026-08-23
+
+**Eight routing entries pointed at skills that do not exist, and the check that exists to catch
+exactly that was rewriting the names to make them resolve.**
+
+The session hook's PRINCIPLES line routed eight situations to `prove-it-works`,
+`fix-root-causes`, `encode-lessons-in-structure`, `type-system-discipline`,
+`boundary-discipline`, `make-operations-idempotent`, `sequence-verifiable-units` and
+`build-the-lever`. Every one of those is missing the `principle-` prefix the actual skill
+directories carry. A model told to invoke `fix-root-causes` cannot resolve that against a listing
+containing only `principle-fix-root-causes`, so where the description alone was not strong enough
+to carry the match, no skill fired at all. That is 8 of 28 skills, 28.6% of the library, sharing
+one broken clause.
+
+Check 7 (`referenced skills exist`) scanned that prose and reported it clean, because it tried
+`claude/skills/$tok` and then `claude/skills/principle-$tok`. The gate was more forgiving than the
+runtime: it supplied the prefix the model has no way to supply. Its comment described this as
+intended behaviour, which is why it survived review. Names must now resolve verbatim.
+
+Found by running `tests/auto-trigger.sh`, the only suite that measures whether skills actually
+fire, which nothing in CI runs and nobody had run since the descriptions changed. Four of the
+eight principle skills were firing nothing at all.
+
+Falsification: reverting one name to its short form makes check 7 print
+`prove-it-works: referenced in prose but no such skill/agent/command`.
+
+Not yet measured: whether fixing the names makes those four cases fire. That needs a re-run of
+the eight principle cases, roughly 24 headless calls, and it has not been authorised.
+
 ## 1.34.0 — 2026-08-23
 
 **The grill nudge was displacing the skills it sits next to.** `tests/auto-trigger.sh` had never

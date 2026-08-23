@@ -154,11 +154,13 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
   test-driven-development, then executing-plans.
 - you were corrected, or found a workflow worth keeping -> reflect.
 - PRINCIPLES (load the one that matches, then apply it): before claiming done ->
-  prove-it-works. Debugging or adding a try/except guard -> fix-root-causes. Same correction
-  twice -> encode-lessons-in-structure. Designing types/signatures -> type-system-discipline.
-  Validation/error handling/auth/MCP adapters -> boundary-discipline. Cron, launchd, retry
-  loops -> make-operations-idempotent. Sweeps, migrations, stacked commits ->
-  sequence-verifiable-units. Repeated manual edits or checks -> build-the-lever.
+  principle-prove-it-works. Debugging or adding a try/except guard ->
+  principle-fix-root-causes. Same correction twice -> principle-encode-lessons-in-structure.
+  Designing types/signatures -> principle-type-system-discipline. Validation/error
+  handling/auth/MCP adapters -> principle-boundary-discipline. Cron, launchd, retry loops ->
+  principle-make-operations-idempotent. Sweeps, migrations, stacked commits ->
+  principle-sequence-verifiable-units. Repeated manual edits or checks ->
+  principle-build-the-lever.
 EOF
 )
 
