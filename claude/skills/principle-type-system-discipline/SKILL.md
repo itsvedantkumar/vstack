@@ -1,6 +1,6 @@
 ---
 name: principle-type-system-discipline
-description: "Apply when designing types or a function signature in TypeScript, Rust, Go, or other statically-typed code. Make illegal states unrepresentable; never lie to the compiler."
+description: "Apply when a struct, enum, or type can hold an invalid combination of fields that shouldn't compile. Redesign it so illegal states can't be represented — model the cases as separate variants."
 ---
 
 # Type System Discipline
