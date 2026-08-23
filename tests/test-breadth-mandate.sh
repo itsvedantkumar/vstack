@@ -84,8 +84,8 @@ export VSTACK_DELEGATION_LOG="$WORK/delegation-log.jsonl"
 # code untouched. Sweep any stale counters before running and after, so every run starts and
 # ends from the same state the hook sees on a session it has never met.
 sweep_latch_(){
-  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[0-9]* 2>/dev/null
-  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[0-9]*.lock 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*proof[0-9]* 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-*proof[0-9]*.lock 2>/dev/null
 }
 sweep_latch_
 trap 'sweep_latch_; rm -rf "$WORK"' EXIT
