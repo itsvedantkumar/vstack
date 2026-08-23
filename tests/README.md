@@ -137,7 +137,7 @@ readme-writing, typescript-review, swarm-audit, blast-radius-auth, feature-chain
 root-cause-guard, overnight-audit-trail, ui-iterate-styles, component-registry-combobox,
 idempotent-cron, negative-arithmetic, and negative-factual.
 
-## Why this cannot run in GitHub Actions
+## Why auto-trigger.sh cannot run in GitHub Actions
 
 1. **Headless auth.** `claude -p` needs a logged-in session
    (`claude auth status`). CI runners have no browser or OAuth flow and no
@@ -153,6 +153,12 @@ idempotent-cron, negative-arithmetic, and negative-factual.
 
 Run it by hand after touching `inject-session-context.sh`, a skill's
 `description` frontmatter, or the skill-routing logic.
+
+The owner of this repository was asked in August 2026 whether to add an `ANTHROPIC_API_KEY` secret
+and run this nightly, and declined. That is a standing decision, not an oversight. The consequence
+is recorded here rather than papered over: **skill dispatch is unmeasured on CI, and has been since
+this repository existed.** `dispatch-static.sh` recovers the free part of it and says in its own
+header that it is not a substitute.
 
 ## Before you edit: this checkout may not be yours alone
 
