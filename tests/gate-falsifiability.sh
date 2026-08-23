@@ -61,6 +61,21 @@ fi
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
+# EXP holds, per backed-up file, the content this suite itself last wrote there -- the
+# pre-mutation copy the instant save() runs, updated to the post-mutation copy the instant
+# break_it() returns, and updated again to the pre-mutation copy the instant a restore succeeds.
+# It is what restore() and restore_all() compare the live file against before writing $BK back
+# over it, and it has to move every time this suite itself writes the file or the comparison
+# lies: leaving $EXP on its post-mutation value after a successful restore made the *next* row
+# to touch the same file (27 then 40, both claude/hooks/skill-mandate.sh) read its own correctly
+# restored file as a stranger's edit -- a false positive caught by running rows 27 and 40 back to
+# back before trusting this. See the restore()/conflict_guard() comment below for why a plain
+# "always copy $BK back" was the defect this file exists to not have.
+EXP=$(mktemp -d)
+# Where a refused restore's pre-mutation backup goes so it is not lost along with $BK on exit.
+# Created unconditionally and removed empty by cleanup() when nothing ever refused; kept, and
+# its path printed, when something did.
+CONFLICT_DIR=$(mktemp -d)
 # Announce that this tree is being mutated on purpose, so a concurrent verify.sh refuses to run
 # rather than reporting a mutation as a real failure. Three sessions sharing one checkout got
 # three plausible-looking wrong answers out of that window -- "README pins v1.13.3" when HEAD
@@ -85,10 +100,47 @@ printf '%s\n' "$$" > "$LOCK" 2>/dev/null || LOCK=""
 # and re-copying a file that was already restored writes identical bytes. Idempotent, and it does
 # not depend on knowing where the run stopped -- which is the one thing a killed run cannot tell
 # you.
+#
+# That "just copy $BK back" used to be the whole function, and it was the defect: a row's window
+# runs from save() through the check that follows, and anything another writer put into that file
+# during the window -- an unrelated edit landing on this repo while the suite happened to be
+# mutating the same file -- got silently overwritten with this row's pre-mutation copy. No error,
+# no diff, the edit just reverted. Confirmed twice: a five-line README edit reverted mid-sweep,
+# noticed only because a second reader was watching; a real test-command fix reverted the same
+# way and shipped lost, noticed only because its author had quoted the diff elsewhere. Neither
+# was a mutation that "did NOT fail when broken" -- both were correct, committed-worthy edits
+# this suite ate.
+#
+# conflict_guard() is the fix: before writing $BK back over a file, compare the file's current
+# bytes against $EXP, this suite's own record of what it last wrote there (pre-mutation the
+# instant save() ran, post-mutation the instant break_it() returned -- see $EXP above). Equal
+# means the only writer since was this suite, and restoring is safe. Different means somebody
+# else wrote to it inside the window: restoring now would silently destroy that write, which is
+# worse than leaving the tree mutated, because a mutation left in place shows up in `git status`
+# and a silently reverted edit does not. So it refuses, names the file loudly, tucks this row's
+# pre-mutation backup under $CONFLICT_DIR instead of overwriting anything, and records the file
+# in $CONFLICT_DIR/.conflicts so cleanup() and the end-of-run summary both fail the whole run
+# over it -- a sweep that could not restore has not proven the tree is unchanged, and a green
+# verdict on top of that is void. The foreign edit itself is never touched either way.
+conflict_guard(){
+  local _f="$1"
+  [ -f "$EXP/$_f" ] || return 0
+  cmp -s "$_f" "$EXP/$_f" 2>/dev/null && return 0
+  if [ -f "$CONFLICT_DIR/.conflicts" ] && grep -qxF "$_f" "$CONFLICT_DIR/.conflicts" 2>/dev/null; then
+    return 1
+  fi
+  mkdir -p "$CONFLICT_DIR/$(dirname "$_f")" 2>/dev/null
+  cp "$BK/$_f" "$CONFLICT_DIR/$_f" 2>/dev/null
+  printf 'REFUSED restore: %s changed on disk since this run wrote it last -- a concurrent edit, not this run'"'"'s own mutation.\n' "$_f" >&2
+  printf '        leaving the concurrent edit exactly as found. this run'"'"'s pre-mutation backup is kept at: %s\n' "$CONFLICT_DIR/$_f" >&2
+  printf '%s\n' "$_f" >> "$CONFLICT_DIR/.conflicts"
+  return 1
+}
 restore_all(){
   [ -d "$BK" ] || return 0
   ( cd "$BK" 2>/dev/null && find . -type f -print ) | sed 's|^\./||' | while IFS= read -r f; do
-    [ -n "$f" ] && cp "$BK/$f" "$f" 2>/dev/null
+    [ -n "$f" ] || continue
+    conflict_guard "$f" && { cp "$BK/$f" "$f" 2>/dev/null; cp "$BK/$f" "$EXP/$f" 2>/dev/null; }
   done
 }
 cleanup(){
@@ -99,7 +151,21 @@ cleanup(){
     git rm -q -f --cached "$ORPHAN_PROBE" >/dev/null 2>&1
     rm -f "$ORPHAN_PROBE"
   fi
-  rm -rf "$BK" "$NOJQ"
+  # A killed run never reaches the end-of-loop summary below, so this is the only place a
+  # conflict born in the last row in flight is guaranteed to be reported. It leaves the foreign
+  # edit on disk untouched (conflict_guard already refused to overwrite it) and forces a failing
+  # exit even though a killed shell's $? rarely says so on its own -- "the process died" must not
+  # read as "the tree was proven clean" just because nothing printed FAIL.
+  if [ -s "$CONFLICT_DIR/.conflicts" ] 2>/dev/null; then
+    printf 'FAIL  restore integrity: refused to overwrite %s concurrently-edited file(s) -- this sweep cannot vouch for the tree; its verdict is void\n' \
+      "$(grep -c '' "$CONFLICT_DIR/.conflicts" 2>/dev/null)" >&2
+    sed 's/^/      /' "$CONFLICT_DIR/.conflicts" >&2
+    printf '      pre-mutation backups kept at: %s\n' "$CONFLICT_DIR" >&2
+    [ "$_rc" -eq 0 ] && _rc=1
+  else
+    rm -rf "$CONFLICT_DIR" 2>/dev/null
+  fi
+  rm -rf "$BK" "$NOJQ" "$EXP"
   [ -n "${LOCK:-}" ] && rm -f "$LOCK"
   exit "$_rc"
 }
@@ -123,8 +189,14 @@ pass(){ printf 'ok    check %-3s falsifiable (%s)\n' "$1" "$2"; PASSED=$((PASSED
 fail(){ printf 'FAIL  check %-3s did NOT fail when broken\n      expected label: %s\n%s\n' \
         "$1" "$2" "${3:-}"; FAILED=$((FAILED+1)); }
 
-save(){ for f in "$@"; do mkdir -p "$BK/$(dirname "$f")"; cp "$f" "$BK/$f"; done; }
-restore(){ for f in "$@"; do cp "$BK/$f" "$f"; done; }
+# save() seeds $EXP with the same pre-mutation copy it puts in $BK: until break_it() runs, "what
+# this suite last wrote" and "what it will restore to" are the same file, and the fingerprint
+# loop below moves $EXP forward to the post-mutation bytes right after break_it() returns.
+save(){ for f in "$@"; do mkdir -p "$BK/$(dirname "$f")" "$EXP/$(dirname "$f")"; cp "$f" "$BK/$f"; cp "$f" "$EXP/$f"; done; }
+# Goes through conflict_guard() first -- see the comment on it above restore_all() -- so a file
+# a concurrent writer touched during this row's window is named and left alone instead of
+# silently overwritten with $BK's pre-mutation copy.
+restore(){ for f in "$@"; do conflict_guard "$f" && { cp "$BK/$f" "$f"; cp "$BK/$f" "$EXP/$f" 2>/dev/null; }; done; }
 
 # Rows whose mutation creates a file instead of editing one. save()/restore() work by copying, so
 # a planted file has no backup to be put back from and has to be removed by name. Leaving it
@@ -488,16 +560,20 @@ exit 0
       sed -i.t 's/matcher:"Agent|Task"/matcher:"Task"/' install.sh && rm -f install.sh.t ;;
 esac }
 
-# Two rows outside this count also report a result every run: the green-at-baseline probe below
-# and the tree-unchanged comparison at the end. They are not optional even in a scoped run, so
-# the declared total is the mutation rows plus those two, not the mutation rows alone. This used
-# to print the mutation-row count here and the mutation-row-plus-two count in the footer for the
-# same run -- "falsifying 1 checks" above "3 declared" below -- which reads as two runs
-# disagreeing about their own size rather than one run reporting two different things.
+# Three rows outside this count also report a result every run: the green-at-baseline probe
+# below, the restore-integrity summary, and the tree-unchanged comparison, both at the end. They
+# are not optional even in a scoped run, so the declared total is the mutation rows plus those
+# three, not the mutation rows alone. This used to print the mutation-row count here and the
+# mutation-row-plus-two count in the footer for the same run -- "falsifying 1 checks" above
+# "3 declared" below -- which reads as two runs disagreeing about their own size rather than one
+# run reporting two different things. Restore-integrity was added as a third fixed row rather
+# than folded into tree-unchanged's count because they name different things: tree-unchanged
+# says the tree differs from where it started; restore-integrity says why -- this run refused to
+# overwrite someone else's edit rather than silently eating it.
 N_MUTATION=0
 for _ in $CHECKS; do N_MUTATION=$((N_MUTATION+1)); done
-DECLARED=$((N_MUTATION+2))
-echo "falsifying $N_MUTATION checks ($DECLARED declared rows this run: $N_MUTATION mutation + 2 fixed)"
+DECLARED=$((N_MUTATION+3))
+echo "falsifying $N_MUTATION checks ($DECLARED declared rows this run: $N_MUTATION mutation + 3 fixed)"
 echo
 
 # A green baseline, taken before anything is mutated.
@@ -585,6 +661,10 @@ for id in $CHECKS; do
         _i=$((_i+1))
         _b=$(printf '%s' "$_before" | cut -d' ' -f"$_i")
         _a=$(shasum < "$_f" 2>/dev/null | cut -d' ' -f1)
+        # Move $EXP to the post-mutation bytes now, while they are known-good: this is the
+        # instant the window conflict_guard() polices actually opens. Anything that writes to
+        # $_f between this line and this row's restore() is a concurrent edit, not us.
+        cp "$_f" "$EXP/$_f" 2>/dev/null
         [ "$_b" = "$_a" ] && _stale="$_stale $_f"
       done
     else
@@ -612,6 +692,22 @@ for id in $CHECKS; do
     rm -f "$cr"
   fi
 done
+
+echo
+# Reported before tree-unchanged below on purpose: this is the mechanism, tree-unchanged is a
+# symptom that can follow from it. A file conflict_guard() refused to restore still differs from
+# TREE_BEFORE and trips that check too -- correctly, it is still evidence the tree changed -- but
+# this is the row that names why, rather than leaving the reader to diff two `git status` dumps
+# and guess.
+if [ -s "$CONFLICT_DIR/.conflicts" ] 2>/dev/null; then
+  printf 'FAIL  restore integrity: refused to overwrite %s concurrently-edited file(s) -- this sweep cannot vouch for the tree; its verdict is void\n' \
+    "$(grep -c '' "$CONFLICT_DIR/.conflicts" 2>/dev/null)"
+  sed 's/^/      /' "$CONFLICT_DIR/.conflicts"
+  printf '      pre-mutation backups kept at: %s\n' "$CONFLICT_DIR"
+  FAILED=$((FAILED+1))
+else
+  printf 'ok    restore integrity: no concurrent edits during the run\n'; PASSED=$((PASSED+1))
+fi
 
 echo
 # Restoration has to be exact, or a row silently rewrites the repo it is testing.
