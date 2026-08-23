@@ -185,6 +185,88 @@ fi
 command -v jq >/dev/null 2>&1 || \
   skip_or_fail "'jq' not found on PATH; required to parse stream-json output."
 
+# BusyBox/Linux ships sha256sum and no shasum; macOS ships shasum and no sha256sum by default.
+# Same fallback tests/install-matrix.sh already uses for its tree fingerprint. Needed by
+# hash_snapshot() below, the content half of fence_violations().
+if command -v shasum >/dev/null 2>&1; then SUM_CMD=shasum
+elif command -v sha256sum >/dev/null 2>&1; then SUM_CMD=sha256sum
+else
+  skip_or_fail "neither 'shasum' nor 'sha256sum' found on PATH; required for fence_violations' content-hash check."
+fi
+
+# ---------------------------------------------------------------------------
+# The tool fence, and the full audit behind it (2026-08-23).
+#
+# ZEEP Z-3 found `Workflow` launched in the background in a live sample: it wrote an 863-byte
+# generator script into ~/.claude/projects/.../workflows/scripts/, then fanned out to 8 parallel
+# subagents, each told to Edit or Write a fixture file. The denial happened to hold that time --
+# every subagent got "No such tool available", nothing was modified -- but that came from
+# whatever implementation detail those 8 subagents' code path happened to inherit
+# disallowed-tools through, not from anything actually fencing `Workflow`: it was simply absent
+# from the list below. `Agent`'s own reasoning (kept in the exec block further down) already
+# said why that's not good enough: a spawned thing is not guaranteed to inherit this process's
+# disallowed-tools list on every code path, and it can keep running detached past this process's
+# own kill -9. The only reliable fence is not letting the spawn happen at all.
+#
+# That makes "can this tool spawn something that then gets its OWN tool access" the real
+# question, not "is this tool literally named Agent." Below is every tool-name string found in
+# this build's binary (`claude` v2.1.241 -- resolved via `whence -p claude`, then
+# `strings -a "$bin" | grep -x -F '"<candidate>"'` for each name already named somewhere in this
+# repo's own comments/docs or in `claude --help`'s tool-adjacent flag text; NOT a blind scan of
+# every string in the binary -- it embeds large unrelated vendored string tables and a generic
+# scan is too noisy to triage by hand). Confirmed present, one at a time:
+#
+#   DENIED, spawn-class, confirmed live in a real sample:
+#     Agent      -- launches a subagent; this build's actual dispatch tool_use name (see
+#                   docs/what-this-actually-does.md for the Task-vs-Agent history below).
+#     Workflow   -- launches a background workflow that itself fans out to subagents (the ZEEP
+#                   sample above). This is the fix this comment exists to explain.
+#
+#   DENIED, spawn-class by name and shape, capability NOT verified against a live sample --
+#   denying costs nothing (nothing in this suite's prompts needs either) so both are denied on
+#   the same reasoning as Agent rather than left open on an absence of evidence:
+#     Explore    -- reads as a lighter-weight exploration subagent. Even if it turns out to be
+#                   read-only by construction, that restriction would be enforced through the
+#                   same kind of internal plumbing that failed to reliably fence Agent/Workflow
+#                   in the ZEEP sample -- "probably read-only" is not a reason to leave it open.
+#     Task       -- legacy alias, most likely dead. docs/what-this-actually-does.md already
+#                   measured this build emitting 70 `Agent` tool_use blocks and 0 `Task` blocks
+#                   against a real 15MB transcript. Denying a name that never fires is a
+#                   zero-cost no-op; the cost of NOT denying it, if it ever turns out to be live
+#                   after all, is another Workflow-shaped gap.
+#
+#   REVIEWED, not spawn-class, left allowed -- either this suite needs them, or they cannot
+#   reach a file the way this fence would need to see:
+#     Read, Glob, Grep      -- read-only; the prompts below need Read to review seeded files.
+#     Skill                  -- the tool_use this entire suite exists to detect firing.
+#     TodoWrite              -- writes to the session's own todo list, not the filesystem.
+#     ExitPlanMode           -- a mode toggle, no filesystem effect.
+#     BashOutput, KillShell  -- operate on a shell already started via Bash, which is denied
+#                               below; moot without a live Bash to operate on.
+#     ListMcpResources,
+#     ReadMcpResource        -- read-only against configured MCP servers, and no --mcp-config
+#                               is passed to any invocation in this file, so moot here too.
+#     WebFetch, WebSearch    -- network only, cannot write into WORKDIR -- fence_violations
+#                               (which only ever diffs WORKDIR, see its own comment below) has
+#                               nothing to see either way. That is a different, UNDETECTED risk
+#                               (network exfiltration of file contents), not a false sense of
+#                               safety about the one this fence actually checks.
+#     SendMessage,
+#     SendUserMessage        -- inter-agent/user messaging. Requires an already-running peer
+#                               session to do anything; does not itself grant new, independent
+#                               tool access the way Agent/Workflow/Explore do. Same exfiltration
+#                               caveat as WebFetch/WebSearch: out of scope for a fence that only
+#                               diffs local filesystem state, not a proof nothing leaves.
+#
+#   Already denied directly below, not part of the spawn-class question at all: Write, Edit,
+#   MultiEdit, NotebookEdit, Bash -- these write files themselves, they don't delegate to
+#   something that might.
+#
+# This audit is current as of claude v2.1.241 and the tool-name strings that build embeds. A
+# version bump can add a new spawn-shaped tool name and silently reopen exactly the gap Workflow
+# just closed -- whoever next bumps the pinned version should re-run the targeted string search
+# above against the new binary and re-triage this table, not assume it is still exhaustive.
+DISALLOWED_TOOLS="Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,Workflow,Explore,Task"
 
 # ---------------------------------------------------------------------------
 # extract_fired_skills OUT_JSONL
@@ -232,28 +314,79 @@ top_level_subtype() {
 }
 
 # ---------------------------------------------------------------------------
-# fence_violations WORKDIR BASELINE OUT_JSONL ERR_LOG
-# BASELINE is a newline-separated snapshot of WORKDIR taken right after
-# setup_fn ran and before claude launched. Prints one path per line for
-# anything in WORKDIR now that wasn't in BASELINE and isn't one of the
-# harness's own two artifacts. Empty output means the fence held.
+# hash_snapshot DIR
+# One "hash  path" line per regular file under DIR (find -type f -- directories are excluded,
+# they have no content to hash; a mkdir is still caught by the path-diff half of
+# fence_violations below). Sorted by path so two snapshots taken at different times line up
+# cleanly for a line-based diff. Uses SUM_CMD, chosen once during preflight above (shasum on
+# macOS, sha256sum elsewhere -- same fallback tests/install-matrix.sh already uses).
+# ---------------------------------------------------------------------------
+hash_snapshot() {
+  local dir="$1"
+  find "$dir" -type f -exec "$SUM_CMD" {} + 2>/dev/null | sort -k2
+}
+
+# ---------------------------------------------------------------------------
+# fence_violations WORKDIR BASELINE BASELINE_HASHES OUT_JSONL ERR_LOG
+# BASELINE is a newline-separated snapshot of WORKDIR's paths taken right after setup_fn ran and
+# before claude launched. BASELINE_HASHES is hash_snapshot(WORKDIR) taken at that same moment.
+# Prints one violation per line: an added path (present now, absent from BASELINE, and not one
+# of the harness's own two artifacts), or "MODIFIED: path" for a path that existed at BASELINE
+# time, still exists now, but whose content hash changed. Empty output means the fence held.
 #
-# This exists as a second, independent layer behind --disallowedTools: a
-# subagent launched via the Agent tool is not guaranteed to inherit the
-# parent's disallowed-tools list on every code path, and it can run detached
-# in the background past this process's own kill -9 (see the "Agent" denial
-# added to --disallowedTools below, and its comment, for the full story).
-# Trusting the flag alone is trusting a single point of failure; this catches
-# whatever gets through it, by tool name or by mechanism, no matter which.
+# This exists as a second, independent layer behind --disallowedTools: a subagent or workflow
+# spawned via one of the tools denied in DISALLOWED_TOOLS (see that comment, "The tool fence",
+# for the full audit) is not guaranteed to inherit the parent's disallowed-tools list on every
+# code path, and it can run detached in the background past this process's own kill -9. Trusting
+# the flag alone is trusting a single point of failure; this catches whatever gets through it, by
+# tool name or by mechanism, no matter which.
+#
+# The path-diff half (added paths, unchanged since this function was first written) only ever
+# sees a NEW path appear -- a Write to a path that didn't exist, or a mkdir. It is blind to an
+# Edit against an existing path, or a Write that overwrites one: both leave the path listing
+# byte-identical. A run that made 32 Edit calls against seeded fixtures reported clean across 10
+# samples on exactly that blind spot (2026-08-23, ZEEP Z-3's transcript). The hash-diff half
+# below is what closes it, and it names the specific file that changed rather than just noting
+# that something did -- "fence_violations: clean" meaning "and this check could not have seen a
+# mutation anyway" is worse than no check at all.
+#
+# Scope, stated rather than left for the reader to assume: this function only ever inspects
+# WORKDIR, on both halves. A write outside it -- the ZEEP sample's 863-byte generator script
+# landed in ~/.claude/projects/.../workflows/scripts/, well outside any case's temp dir -- is
+# invisible to this check, full stop. Widening it to catch that would mean snapshotting $HOME
+# (or wider) before and after every attempt, which is slow, and on this machine specifically
+# risky: several Claude sessions edit shared trees like ~/Projects/vstack directly and
+# concurrently (see tests/README.md, "this checkout may not be yours alone"), so hashing a
+# peer's live working set out from under it is its own hazard, not a free safety upgrade. That
+# is a materially bigger, separately-designed check, not a one-line extension of this one --
+# left undone here on purpose, not by oversight. --disallowedTools denying
+# Agent/Workflow/Explore/Task is what actually stood between the ZEEP sample and that write;
+# this function's real job is catching what happens if that flag is the one that fails, inside
+# the one directory it can safely watch.
 # ---------------------------------------------------------------------------
 fence_violations() {
-  local workdir="$1" baseline="$2" out_jsonl="$3" err_log="$4"
-  local now
+  local workdir="$1" baseline="$2" baseline_hashes="$3" out_jsonl="$4" err_log="$5"
+  local now added now_hashes hdiff removed_paths added_paths modified
+
   now="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
-  diff <(printf '%s\n' "$baseline") <(printf '%s\n' "$now") 2>/dev/null \
+  added="$(diff <(printf '%s\n' "$baseline") <(printf '%s\n' "$now") 2>/dev/null \
     | sed -n 's/^> //p' \
     | grep -v -F -x -e "$out_jsonl" -e "$err_log" \
-    | grep -v '^$'
+    | grep -v '^$')"
+
+  now_hashes="$(hash_snapshot "$workdir")"
+  hdiff="$(diff <(printf '%s\n' "$baseline_hashes") <(printf '%s\n' "$now_hashes") 2>/dev/null)"
+  # A modified file shows up as ONE line lost from the baseline hash-set (old hash + path) and
+  # ONE line gained in the current set (new hash + same path). Stripping the hash off each side
+  # and taking the intersection (comm -12, both inputs sorted) leaves exactly the paths present
+  # in both -- i.e. still there, content changed -- with no while-loop or associative-array
+  # lookup needed (macOS bash 3.2 has neither).
+  removed_paths="$(printf '%s\n' "$hdiff" | sed -n 's/^< //p' | sed -E 's/^[^ ]+  //' | sort)"
+  added_paths="$(printf '%s\n' "$hdiff" | sed -n 's/^> //p' | sed -E 's/^[^ ]+  //' | sort)"
+  modified="$(comm -12 <(printf '%s\n' "$removed_paths") <(printf '%s\n' "$added_paths") 2>/dev/null \
+    | sed 's/^/MODIFIED: /')"
+
+  { printf '%s\n' "$added"; printf '%s\n' "$modified"; } | grep -v '^$'
 }
 
 # ---------------------------------------------------------------------------
@@ -277,7 +410,7 @@ run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
   selected_ "$name" || return 0
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
-  local baseline violations term_subtype last_fired_csv=""
+  local baseline baseline_hashes violations term_subtype last_fired_csv=""
   local case_turns; case_turns="$(case_max_turns "$name")"
 
   # Skill dispatch is a model decision, not a deterministic branch, so one sample is a coin
@@ -288,6 +421,7 @@ run_case() {
     workdir="$(mktemp -d "/tmp/auto-trigger-test.XXXXXX")"
     [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
     baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
+    baseline_hashes="$(hash_snapshot "$workdir")"
     out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
 
     # exec is load-bearing: without it the subshell forks claude as a child, and the
@@ -297,14 +431,12 @@ run_case() {
       cd "$workdir" || exit 1
       # Mutation tools are denied: with bypassPermissions inherited from user settings, a
       # test prompt once wrote a real script into ~/.config/agents/bin. Detection only needs
-      # the Skill tool call, which still happens. Agent is denied alongside them: --disallowedTools
-      # is not guaranteed to propagate to a subagent spawned via the Agent tool on every code path
-      # (see tests/README.md), and a subagent can run detached in the background past this
-      # process's own kill -9 -- the only reliable fence is not letting Agent be called at all.
+      # the Skill tool call, which still happens. DISALLOWED_TOOLS's own comment above ("The
+      # tool fence") has the full audit of which spawn-shaped tools are denied here and why.
       exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
         claude -p "$prompt" \
           --output-format stream-json --verbose \
-          --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
+          --disallowedTools "$DISALLOWED_TOOLS" \
           --model "$MODEL" --max-turns "$case_turns" \
           < /dev/null > "$out_jsonl" 2> "$err_log"
     ) &
@@ -338,7 +470,7 @@ run_case() {
       fi
     fi
 
-    violations="$(fence_violations "$workdir" "$baseline" "$out_jsonl" "$err_log")"
+    violations="$(fence_violations "$workdir" "$baseline" "$baseline_hashes" "$out_jsonl" "$err_log")"
     rm -rf "$workdir"
 
     if [[ -n "$violations" ]]; then
@@ -382,18 +514,19 @@ run_case() {
 run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
   selected_ "$name" || return 0
-  local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline violations
+  local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline baseline_hashes violations
   local case_turns; case_turns="$(case_max_turns "$name")"
 
   workdir="$(mktemp -d "/tmp/auto-trigger-neg.XXXXXX")"
   baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
+  baseline_hashes="$(hash_snapshot "$workdir")"
   out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
   (
     cd "$workdir" || exit 1
     exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
       claude -p "$prompt" \
         --output-format stream-json --verbose \
-        --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
+        --disallowedTools "$DISALLOWED_TOOLS" \
         --model "$MODEL" --max-turns "$case_turns" \
         < /dev/null > "$out_jsonl" 2> "$err_log"
   ) &
@@ -408,7 +541,7 @@ run_negative_case() {
   fired=""
   [[ -s "$out_jsonl" ]] && fired="$(extract_fired_skills "$out_jsonl")"
   fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"; [[ -z "$fired_csv" ]] && fired_csv="(none)"
-  violations="$(fence_violations "$workdir" "$baseline" "$out_jsonl" "$err_log")"
+  violations="$(fence_violations "$workdir" "$baseline" "$baseline_hashes" "$out_jsonl" "$err_log")"
   rm -rf "$workdir"
 
   if [[ -n "$violations" ]]; then

@@ -6,6 +6,23 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**Closed two holes in `tests/auto-trigger.sh`'s tool fence, both found in live transcripts rather
+than by reading.** `Workflow` was never denied, and it is `Agent`'s capability class — a sample
+called it, and it launched in the background, wrote a generator script into `~/.claude/projects/`
+and fanned out to eight parallel subagents each told to edit a fixture. The denial did propagate
+and nothing was touched, which is exactly the guarantee the fence's own `Agent` comment says
+cannot be relied on: the safe outcome came from an implementation detail. `Workflow` is now
+denied, along with `Explore` and `Task` on the same reasoning, after an audit of every tool name
+in the CLI binary with a written verdict per name — the two confirmed by transcript are recorded
+separately from the two denied defensively at zero cost. Second, `fence_violations()` compared the
+file *listing* before and after, so an in-place `Edit` or a `Write` over an existing path left it
+byte-identical and it reported clean while 32 edit attempts were made against seeded fixtures. It
+now hashes fixture contents and names the modified file. The regression test was checked against
+the old logic, which returns nothing on the same mutation. Writes outside the work directory stay
+outside what this function sees, stated in the comment rather than left to be assumed: hashing a
+peer's live working set in a shared checkout is its own hazard, and the tool denial is what
+actually stood between that sample and the write. (EVIL-MORTY E-44.)
+
 **Added `tests/dispatch-fleet.sh`**, the fleet-wide dispatch measurement over the 54 frozen
 fixtures in `~/vstack-dispatch/`. `auto-trigger.sh` measures recall per skill and nothing else;
 this scores the four classes separately, because a harness that fires everything scores perfectly
