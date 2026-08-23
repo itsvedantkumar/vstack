@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -155,6 +155,7 @@ files_for(){ case "$1" in
   37)  printf 'tests/evals/optimize.sh' ;;
   38)  printf 'tests/README.md' ;;
   34)  printf 'overlay.sh' ;;
+  39)  printf 'CHANGELOG.md' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -202,6 +203,7 @@ label_for(){ case "$1" in
   36)  printf 'run logs are opened append-safe' ;;
   37)  printf 'optimiser decides correctly' ;;
   38)  printf 'every repository path named in prose exists' ;;
+  39)  printf 'CHANGELOG.md structure' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -390,6 +392,10 @@ exit 0
       # the other eight, because nothing ever handed the hook a secret.
       perl -0pi -e 's/^redact\(\)\{.*?\n\}$/redact(){ sed -E "s\/(sk-ant-|ghp_)[A-Za-z0-9_]+\/\\1[REDACTED]\/g"; }/ms' \
         claude/hooks/failure-diagnose.sh ;;
+  39) # The exact shape of 2cda849: duplicate the top heading directly beneath itself. Only the
+      # first "## " line is touched -- no /g -- so this proves the duplicate-heading assertion
+      # in isolation rather than also tripping the ordering one.
+      perl -0pi -e 's/(^## \S.*\n)/$1$1/m' CHANGELOG.md ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"

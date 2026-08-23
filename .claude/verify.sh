@@ -2143,6 +2143,87 @@ fi
   && ok "every repository path named in prose exists ($p_seen reference(s) across $p_n document(s))" \
   || bad "every repository path named in prose exists" "$(printf '%b' "$p_errs")"
 
+# --- 39. CHANGELOG.md is structurally sound ------------------------------------------------
+# Commit 2cda849 landed a second "## Unreleased" heading directly beneath the first. One
+# session anchored its entry on what it believed was the top of the file while a different
+# session concurrently shipped two releases above it; both were right about the heading they
+# were looking at and wrong about the file as it actually stood. The duplicate sat in
+# committed history for eight minutes before the next commit renamed it away. Nothing else
+# here reads the shape of this file -- check 12 compares the numbers in its prose against the
+# tree, not its heading structure, and would have said nothing.
+#
+# The convention below is read off the file's own 44 existing headings, not invented. "## " is
+# followed by `Unreleased` or a bare semver, optionally a parenthetical suffix -- the one
+# precedent is "1.8.0 (earlier entries)", two dated sections sharing a version because 1.8.0
+# shipped across two sessions a day apart, which is why duplicate detection below keys on the
+# full heading line rather than the bare version -- and optionally an em dash and an ISO date.
+# `## Unreleased` is not present in the file today, confirmed by grep before writing this, but
+# it is still accepted as a legal heading: the incident this check exists to catch was two of
+# them.
+if [ -f CHANGELOG.md ]; then
+  c_errs=""
+  c_heads=$(grep -n '^## ' CHANGELOG.md)
+  c_fmt='^[0-9]+:## (Unreleased|[0-9]+\.[0-9]+\.[0-9]+)( \([^)]*\))?( — [0-9]{4}-[0-9]{2}-[0-9]{2})?$'
+
+  # 4. every "## " line parses under the convention above, or it is not a section at all.
+  c_bad=$(printf '%s\n' "$c_heads" | grep -vE "$c_fmt")
+  [ -n "$c_bad" ] && c_errs="$c_errs\nmalformed heading(s):\n$c_bad"
+
+  # 1. no duplicate heading. Byte-identical text twice is exactly what 2cda849 shipped; two
+  # differently-dated or differently-suffixed sections for the same version, like 1.8.0's, are
+  # not this defect and are left alone.
+  c_dup=$(printf '%s\n' "$c_heads" | sed -E 's/^[0-9]+://' | sort | uniq -d)
+  [ -n "$c_dup" ] && c_errs="$c_errs\nduplicate heading(s):\n$c_dup"
+
+  # Numeric-field semver compare, ignoring any parenthetical suffix and date. macOS ships BSD
+  # sort, which has no -V, and a plain string sort puts 1.9.0 above 1.10.0.
+  _c_ge(){ # _c_ge A B -> true if version A is not older than version B
+    local a1 a2 a3 b1 b2 b3
+    IFS=. read -r a1 a2 a3 <<<"$1"
+    IFS=. read -r b1 b2 b3 <<<"$2"
+    a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}; b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+    [ "$a1" -gt "$b1" ] && return 0; [ "$a1" -lt "$b1" ] && return 1
+    [ "$a2" -gt "$b2" ] && return 0; [ "$a2" -lt "$b2" ] && return 1
+    [ "$a3" -ge "$b3" ]
+  }
+  # Only well-formed headings feed the ordering and top-version checks below -- a malformed
+  # line is already reported above, and letting free text reach a numeric compare here would
+  # print a raw shell arithmetic error instead of a finding.
+  c_ok=$(printf '%s\n' "$c_heads" | grep -E "$c_fmt")
+  c_vers=$(printf '%s\n' "$c_ok" | sed -E 's/^[0-9]+:## //; s/ \([^)]*\)//; s/ — .*$//')
+  c_prev="" c_top=""
+  while IFS= read -r c_v; do
+    [ -n "$c_v" ] || continue
+    [ "$c_v" = "Unreleased" ] && continue
+    [ -z "$c_top" ] && c_top="$c_v"
+    # 2. versions descend going down the file.
+    if [ -n "$c_prev" ] && ! _c_ge "$c_prev" "$c_v"; then
+      c_errs="$c_errs\nversions do not descend: $c_prev sits above $c_v"
+    fi
+    c_prev="$c_v"
+  done <<EOF
+$c_vers
+EOF
+
+  # 3. the newest real version heading is the release the manifests actually declare -- the
+  # assertion that would have caught 2cda849, because a release filed under the wrong heading
+  # is a release nobody can find.
+  if command -v jq >/dev/null; then
+    c_mv=$(jq -r '.version // empty' claude/.claude-plugin/plugin.json 2>/dev/null)
+    c_mkv=$(jq -r '.plugins[0].version // empty' .claude-plugin/marketplace.json 2>/dev/null)
+    [ -n "$c_mv" ] && [ -n "$c_top" ] && [ "$c_mv" != "$c_top" ] \
+      && c_errs="$c_errs\ntop heading is $c_top, plugin.json declares $c_mv"
+    [ -n "$c_mkv" ] && [ -n "$c_top" ] && [ "$c_mkv" != "$c_top" ] \
+      && c_errs="$c_errs\ntop heading is $c_top, marketplace.json declares $c_mkv"
+  fi
+
+  [ -z "$c_errs" ] \
+    && ok "CHANGELOG.md structure ($(printf '%s\n' "$c_heads" | grep -c .) headings, top $c_top)" \
+    || bad "CHANGELOG.md structure" "$(printf '%b' "$c_errs")"
+else
+  bad "CHANGELOG.md structure" "CHANGELOG.md is missing"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
