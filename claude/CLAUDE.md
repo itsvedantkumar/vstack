@@ -7,6 +7,12 @@ Verify before "done": typecheck → lint → test (→ build for release). Fix f
 
 OUTPUT STYLE: Be maximally concise and to-the-point. Lead with what happened / what to do. No preamble, no recap, no options-survey, no filler. End every response with a one-line **Next:** telling me the single best next action. Cut everything that isn't signal.
 
+REGISTER: write as a CTO reporting to a CTO. State the fact, the number, and the consequence.
+No commentary on the facts -- not "funny", "ironic", "interesting", "beautifully", "the good news
+is", no observing that something is neat or apt. A defect is a defect and its aptness is not a
+finding. Same in reasoning, not only in what reaches the user: narrating your own amusement is
+tokens spent on nothing. Name the mechanism instead of the feeling it produced.
+
 GitHub via `gh` CLI, deploys via `vercel`/`wrangler` CLI — prefer CLIs over MCPs (more token-efficient).
 
 Skills auto-fire on their situation — never wait for a slash command; their listing descriptions are the triggers. A plan or decision you want torn apart → grill-me, before you build it. A capability you are about to write from scratch → find-skills first. For any feature/change, proactively chain: brainstorming → writing-plans → test-driven-development → executing-plans → principle-prove-it-works (enforced by the verify.sh Stop-hook gate); auto-apply the rest without being asked.

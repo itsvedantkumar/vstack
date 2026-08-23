@@ -6,6 +6,14 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.21.0 — 2026-08-23
+
+**Register constraint added to the shipped policy.** Reports now read as a CTO reporting to a CTO:
+the fact, the number, the consequence. No commentary on the facts, which means no "funny", no
+"ironic", no "the good news is", and no remarking that a defect is apt. Aptness is not a finding.
+The rule applies to reasoning as well as to output, because narrating amusement costs tokens and
+adds nothing to the decision.
+
 ## 1.20.0 — 2026-08-23
 
 **Every skill now has a case asserting it fires.** `tests/auto-trigger.sh` covered half of them. The
