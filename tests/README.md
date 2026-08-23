@@ -243,6 +243,29 @@ new state -- including a rate number from before the change, compared against on
 Skipping the control doesn't make the harness wrong; it makes the next finding unfalsifiable,
 because a regression in the harness and a regression in dispatch produce the same printed output.
 
+## compaction-effect.sh
+
+Zero-model-call local parsing: does auto-compaction at the configured `autoCompactWindow`
+correlate with worse behaviour in the turns right after it? Streams this machine's own
+`~/.claude/projects/*/*.jsonl`, and around each `compact_boundary` compares tool_result
+`is_error` rate, Read/Grep re-reads of files already touched, and near-duplicate user turns in a
+fixed window before and after, split by auto- versus manual-trigger.
+
+Correlational only, and the script says so in its own header: a session that reaches the trigger
+is longer and harder than one that never does, so any spike is association rather than cause.
+Thresholds are pre-registered in the header, written before real data was read.
+
+```bash
+tests/compaction-effect.sh
+```
+
+**Read the sample size before the verdict.** Of 3,134 transcripts on this machine, only **8**
+contain a compaction event, because `autoCompactWindow` was set on 2026-08-23 and the corpus
+mostly predates it. The auto-trigger arm has 2 qualifying boundaries and reports NOT EVALUATED
+rather than a rate. The manual arm shows no signal at n=6, which is not evidence of no effect —
+it is too little data to detect anything short of a large one. Re-run this once the corpus has
+grown; the script needs no changes to become useful, only time.
+
 ## Shell traps this repo has actually hit
 
 Each of these cost someone real time here. They are recorded because the next person will write
