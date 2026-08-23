@@ -66,6 +66,14 @@ if [ ! -x "$hook" ]; then
 fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/vstack-mandate-breadth.XXXXXX")"
+
+# skill-mandate.sh's delegation-drift logger (see the "delegation-drift logger" comment in the
+# hook) writes one line per evaluated Stop to $VSTACK_DELEGATION_LOG, defaulting to the
+# operator's real ~/.claude/vstack-delegation-log.jsonl when that var is unset. Every run_hook_
+# call below is a synthetic fixture, not a real session, so it must never land there -- pointed
+# at a file under $WORK instead, which the EXIT trap below already removes with everything else.
+# Without this, a plain run of this suite writes ~12 synthetic lines into the real analysis log.
+export VSTACK_DELEGATION_LOG="$WORK/delegation-log.jsonl"
 # skill-mandate.sh's 2-strike latch (a session that hits 2 blocks stops blocking, so the
 # gate cannot trap someone it cannot get through to) persists in a file keyed by session_id
 # under $TMPDIR, not under $WORK -- it has to survive across the hook's own separate

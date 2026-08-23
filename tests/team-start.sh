@@ -320,7 +320,13 @@ run_fixture() {
     # read as 0/5 by construction rather than by measurement.
     (
       cd "$workdir" || exit 1
+      # This is a real claude -p session, so the installed Stop hook's delegation-drift logger
+      # (claude/hooks/skill-mandate.sh, default ~/.claude/vstack-delegation-log.jsonl) fires
+      # against it same as any genuine session. Pointed at a file under $workdir instead: these
+      # samples are throwaway harness runs, not operator work, and the log exists to measure the
+      # latter. $workdir is rm -rf'd right after this sample is scored, taking the log with it.
       exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+        VSTACK_DELEGATION_LOG="$workdir/.delegation-log.jsonl" \
         claude -p "$prompt" \
           --output-format stream-json --verbose \
           --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash" \

@@ -1457,8 +1457,14 @@ if command -v jq >/dev/null; then
   else
     md=$(mktemp -d); errs=""
     say_(){ printf '%s\n' "$@" > "$md/t.jsonl"; }
+    # VSTACK_NO_DELEGATION_LOG=1: every hit_ call below feeds the hook a synthetic fixture
+    # transcript under a "vfy-*" session id, not a real session. Without this, each gate run
+    # appends ~12 synthetic lines to the operator's real ~/.claude/vstack-delegation-log.jsonl
+    # (one per case that reaches the logger before stop_hook_active/VSTACK_NO_MANDATE/the
+    # 2-strike latch short-circuits it) -- the exact vfy-* contamination found predating any
+    # instrumented run of this suite.
     hit_(){ printf '{"session_id":"vfy-%s","transcript_path":"%s/t.jsonl","stop_hook_active":%s}' \
-              "$1" "$md" "${2:-false}" | "./$sm" 2>/dev/null; }
+              "$1" "$md" "${2:-false}" | VSTACK_NO_DELEGATION_LOG=1 "./$sm" 2>/dev/null; }
     W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
     T='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}}]}}'
     U='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"unslop"}}]}}'
