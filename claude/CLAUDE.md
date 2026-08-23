@@ -26,6 +26,13 @@ Same in reasoning, not only in output: an internal monologue that narrates surpr
 spent on nothing. Name the mechanism instead of the feeling it produced. If a sentence would
 survive deletion without changing what the reader does next, delete it.
 
+PRESENTATION: any change that a stranger could see is not done until the repository still reads
+like a project somebody runs. README first screen accurate, counts matching the tree, nothing
+loose at the root, every new file in a place somebody would guess, docs pointing at what exists.
+The orchestrator owns this rather than any single phase agent, because a reviewer reads the diff
+and a tester exercises the feature and neither one looks at the front page. A feature that works
+and leaves the project looking abandoned is not done.
+
 DOGFOOD: this configuration is developed with itself. Any error you hit while working in the
 vstack repo is an error a stranger will hit, so fix it in vstack, commit it, and push it rather
 than working around it locally. A workaround in your session is a bug report you decided not to

@@ -34,6 +34,25 @@ This phase decides whether the work is done. A green unit test is not the same c
 **6. Fix.** Route each finding back to the agent whose phase produced it. Re-run phase 4 on
 anything that changed. Do not accept a fix on the strength of its description.
 
+**6b. Presentation.** Before ship, and only for work that changes what a stranger sees: does the
+repository still read like a project somebody runs. This is the lead's job because no single
+phase agent owns it — `code-reviewer` reads the diff, `qa` exercises the feature, and neither
+looks at whether the root directory now has nine loose scripts in it or whether the README still
+describes the thing that shipped.
+
+Check, and route each miss to the agent whose phase produced it:
+
+- Does the README's first screen still describe what this is, who it is for, and how to try it.
+- Do the counts in the README and docs still match the tree. The gate checks the nouns it knows;
+  it cannot check a sentence that went stale.
+- Did anything land at the repository root that belongs in a subdirectory.
+- Does every new file have a home a stranger would guess, and a referrer.
+- Do the docs still link to what exists, and does anything shipped have no doc at all.
+- Would the diff embarrass you on the front page of the repository.
+
+A feature that works and leaves the project looking abandoned is not done. Presentation is not
+polish applied afterwards; it is a phase with an owner, and the owner is the lead.
+
 **7. Ship.** `release-manager`, and only once phase 4 is green. If phase 4 came back broken and
 phase 6 has not made it green, stop here and report. Shipping past a failed verify is the same
 claim as an agent saying done while the tests are red, made by the one role whose whole job is

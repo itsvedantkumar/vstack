@@ -6,6 +6,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.25.0 — 2026-08-23
+
+**Presentation is a phase with an owner.** `/team` gained phase 6b, run before ship for any change
+a stranger could see: is the README's first screen still accurate, do the counts still match the
+tree, did anything land loose at the repository root, does every new file sit somewhere a stranger
+would guess, do the docs still point at what exists.
+
+The lead owns it because no phase agent does. `code-reviewer` reads the diff, `qa` exercises the
+feature, and neither looks at whether the front page still describes the thing that shipped. The
+same rule is in the shipped `CLAUDE.md` so it applies outside `/team` as well.
+
+A feature that works and leaves the project looking abandoned is not done. Presentation is not
+polish applied afterwards.
+
 ## 1.24.0 — 2026-08-23
 
 **The four bundled reference modes shipped in 1.23.0 are deleted.** They were four sites measured
