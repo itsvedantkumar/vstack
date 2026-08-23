@@ -70,7 +70,9 @@ case "$CMD" in
     # explicit escape hatch for automation.
     YES=0
     for a in "$@"; do case "$a" in --yes|-y) YES=1 ;; esac; done
-    git -C "$REPO" fetch || exit 1
+    # Bare fetch with fetch.prune=true deletes local tags not on the remote. See bin/doctor:260
+    # and the 2026-08-20 incident where unpushed release tags were silently destroyed.
+    git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin || exit 1
     upstream=$(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
       || upstream=origin/main
     if [ -z "$(git -C "$REPO" rev-list -n 1 "HEAD..$upstream" 2>/dev/null)" ]; then

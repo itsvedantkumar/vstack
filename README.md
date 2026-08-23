@@ -58,8 +58,8 @@ cd ~/Projects/vstack && ./install.sh
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.27.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.27.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.28.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.28.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 Removing it restores what was there before: `./uninstall.sh --yes` puts every file it replaced
@@ -129,7 +129,7 @@ A project that has never found one of these has not looked.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent per session | 0 B | ~3.6 KB full / ~2.1 KB plugin |
+| Context spent per session | 0 B | ~3.8 KB full / ~2.3 KB plugin |
 
 The last row is the price, paid every session. Check 18 reads those figures back from this table
 and fails if they drift from what the hook actually emits.

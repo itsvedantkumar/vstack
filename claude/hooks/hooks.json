@@ -20,6 +20,11 @@
             "type": "command",
             "shell": "bash",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
+          },
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/skill-mandate.sh\""
           }
         ]
       }

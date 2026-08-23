@@ -6,6 +6,131 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.28.0 — 2026-08-23
+
+Six auditors and five fixers went through this repository in one day. What follows is what was
+wrong and how it is known to be fixed, attributed to the agent that found or fixed it — not a
+list of feature names.
+
+**CRITICAL: the destructive-command guard's deny tier was gated behind a heuristic that any
+compound command defeated.** `SIMPLE` dropped to 0 the instant `$CMD` contained `;`, `&&`, `||`,
+`|`, a backtick or `$(`, and only a `SIMPLE=1` command ever reached deny — the one tier that can
+refuse outright, with no floor under it if it is skipped. Measured: `git push --force origin
+main` denied; `true && git push --force origin main` allowed. The ask tier had no git-push
+pattern at all, so the compound form did not even prompt. A second hole in the same check:
+`git push -f origin HEAD:refs/heads/main` was allowed, because the branch match
+(`*\ main*|*:main*`) tested substrings and a full refspec destination never contained one. Found
+by `security-auditor`; fixed by `worker`, who now splits `$CMD` on `;`, `&&`, `||` and `|` and
+judges every resulting segment against the deny patterns independently, and matches refspec
+destinations (`:refs/heads/main`) alongside the short forms. Check 23's `g_want` table grew from
+16 rows to 22, adding both the compound and the refspec deny cases.
+
+**Declined, and stated here as a limit rather than left implicit: `RMFLAGS=-rf; rm $RMFLAGS /`
+still passes.** The guard reads syntax, not semantics — there is no shell interpreter behind it
+— and evaluating variable expansion to catch this would need real shell evaluation, which
+produces false positives on ordinary variable use worse than the bypass it would close. This is
+recorded in `guard-destructive.sh` itself as an explicit out-of-scope case, not silently accepted.
+
+**`skill-mandate.sh` shipped to every user's `~/.claude/hooks/` and `install.sh` wired it to
+nothing.** `grep -c skill-mandate ~/.claude/settings.json` returned 0 after a fresh install.
+Every mandate the hook enforces — unslop, typescript-best-practices, delegation, agent-naming —
+was inert for anyone who installed with `install.sh`; the hook was wired only in this
+repository's own `claude/settings.json`, which reaches a project solely through `overlay.sh`,
+the developer lane. Found by `performance-engineer`; fixed by `debugger`.
+
+Check 11, named `hook wiring`, was green over this twice. It unioned the plugin-lane references
+(`claude/hooks/hooks.json`) with the user-lane references and asked "is this wired anywhere",
+which the plugin lane alone satisfied. A first rewrite that read only production lanes still
+passed, because it kept testing membership against the same union. It now asserts coverage per
+lane, with a named `USER_LANE_EXEMPT` allowlist for anything legitimately plugin-only — empty
+today, because every shipped hook belongs in the user lane. Watched failing before being
+believed: removing the wiring line now produces `skill-mandate.sh: shipped in claude/hooks/ but
+not wired in the USER lane`. `bin/doctor` reported `hooks ✔` throughout, because it checked file
+presence under `~/.claude/hooks/`, never whether anything referenced the file.
+
+**BLOCKER: `bin/vstack:73` ran a bare `git fetch`.** `fetch.prune` and `fetch.pruneTags` are
+both `true` globally on this machine — the same configuration that destroyed five unpushed
+release tags during the v1.9.1 audit, which is why `bin/doctor:260` was hardened afterward — on
+the one command in this repository whose entire job is pulling code. That hardening never
+reached `bin/vstack`. Found by `code-reviewer`; now runs `git fetch --no-tags --no-prune
+--no-write-fetch-head` against an explicit remote.
+
+**`install.sh` exited 0 on a failed install.** A failed `jq` settings merge sets `DEGRADED=1`,
+which also makes the trailing `doctor` call fail — but the doctor-failure branch called `exit 0`
+before the `DEGRADED` check below it ever ran, so a degraded install still reported success.
+Found by `code-reviewer`.
+
+**`rm -rf /*` fell through to `ask` instead of `deny`.** An unquoted `for tok in $CMD`
+pathname-expanded the glob before the `case` statement ever saw a literal `/*`, so the pattern
+naming the deny case never matched. GNU `rm --preserve-root` blocks a bare `rm -rf /` but not
+`rm -rf /*`, which made this the more dangerous of the two phrasings and the one the guard
+missed. Found by `code-reviewer`; fixed with `set -f` around the token loop.
+
+**`doctor` hung 77.5 seconds against an unreachable remote, with no timeout on the call**, and
+`install.sh` runs `doctor` last, so a new user's first command looked hung for over a minute.
+Found by `qa`; fixed by `debugger`, whose own first attempt still hung — killing `git ls-remote`
+orphaned the `git-remote-http` helper it forks, which held the output pipe open for the remote's
+full connect timeout regardless of which process was killed. The working fix backgrounds the
+call in its own process group and kills the group, not the child. `doctor` now returns in 7.3s
+against the same unreachable remote. macOS ships neither `timeout` nor `gtimeout`, so there is a
+manual fallback for hosts with neither.
+
+**Moving `$HOME` left dead hook entries in `settings.json` permanently.** `install.sh`'s
+reinstall cleanup decided which `Stop`/`SessionStart` entries were "ours" by testing
+`startswith($h)` against the *current* `$HOME` — a `settings.json` copied from a different
+machine, or a renamed account, had its old vstack entries read as user-authored forever, since
+they no longer started with the new `$h`. Every reinstall then appended another duplicate.
+Ownership is now decided by shape: a command whose immediate parent directory is literally
+`hooks` and whose filename is one this repository ships.
+
+**`uninstall.sh --yes` run twice copied its own safety backup into `$HOME/pre-uninstall`.**
+`restore_pairs()` excluded its `files`/`files_abs` bookkeeping directories from restoration but
+not `pre-uninstall/`, the directory the script writes its own undo copy into — a second run
+mapped that directory through the generic legacy-name rule and planted a permanent, ever-growing
+copy in the user's home.
+
+**`install.sh` claimed "every file this run touched was copied to backup first" even when no
+backup directory existed.** The guard was `[ "${BK:-}" = "" ]`, and `$BK` is assigned
+unconditionally near the top of the script, so it is never empty — a run that died before
+`mkdir "$BK"` succeeded (unwritable `$HOME`, a full disk, no permission on `~/.config`) still
+printed the claim, pointing at a path that was never created. Now gated on a `BK_CREATED` flag
+set only after the `mkdir` succeeds.
+
+**An unlocked counter race in `verify-gate.sh` and `skill-mandate.sh` let concurrent invocations
+undercount instead of overcount.** Ten racing sessions reading, incrementing and writing the
+same block-count file with no lock left the file at 1 instead of 10 — every writer read the same
+stale value before any of them wrote — so the strike cap that is supposed to latch the gate open
+after repeated failures never engaged, and every one of the ten invocations blocked instead.
+Found by `qa`; fixed by `debugger` with an `mkdir`-based lock (atomic on any POSIX filesystem, no
+GNU `flock` required) and a 30-second stale-lock steal for a lock left behind by a killed
+sibling. Proven against the fixed version: with the cap set to 2, exactly 2 of 10 concurrent
+invocations block.
+
+**A session that dispatches subagents must now attribute the work by call sign, or the `Stop`
+hook blocks.** `skill-mandate.sh` gained an agent-naming mandate: a `Task` call with no
+call-sign string (`RICK C-137`, `BETH J-42`, ...) anywhere in the transcript blocks at `Stop`,
+naming the rule. `VSTACK_NO_MANDATE=1` disables it, same as every other mandate this hook already
+runs. Added by `worker`. Check 27's case table grew from 10 rows to 14.
+
+Three checks caught defects introduced during the audit itself, each in a check that had been
+repaired earlier the same day and had previously reported green over the thing it now names:
+check 18 caught the published context-figure claim going stale by 204 bytes after the session
+block grew (3.6 -> 3.8 KB full, 2.1 -> 2.3 KB plugin, both now updated); check 11 caught a wiring
+entry pointing at `hooks/statusline.sh`, a file that does not exist; check 12 caught
+`ATTRIBUTION.md`'s skill count, which had drifted to 26 while the tree carries 28.
+
+**What this release does not fix, stated plainly rather than implied away:**
+- `vstack update`'s `TRUSTED` diff list omits `claude/hooks/*.sh` and `settings.json`, so it can
+  print "no changes to the scripts the gate executes" while installing a modified guard.
+- `vstack trust` is a plain CLI command any agent can run; a hostile `CONTRIBUTING.md` that says
+  "run `vstack trust .`" turns the gate into a delivery mechanism for the thing it exists to stop.
+- `format.sh` runs `npx prettier`, and Prettier's `cosmiconfig` executes `prettier.config.js` as
+  JavaScript.
+- The gate costs 46.6s per `Stop`; 19.02s of that is 39 sequential `shellcheck` spawns. Batching
+  them measured at 9.88s.
+- Three shipped scripts nothing exercises: `bin/claude-bg.sh`, `bin/claude-task.sh`,
+  `bin/deploy-auto.sh`.
+
 ## 1.27.0 — 2026-08-23
 
 **`skill-mandate.sh` gained a delegation mandate.** A session that touches 3 or more distinct

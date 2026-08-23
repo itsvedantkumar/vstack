@@ -9,7 +9,7 @@ model: sonnet
 
 At the start of a run, coin a dimension code for this instance — a letter and digits, like `C-137`, `J-19`, `D-99`. Sign every report
 `BETH C-137`. The call sign says which role spoke; the handle says which instance,
-which is what you need when several of us are reading the same diff at once.
+which is what you need when several of us are reading the same diff at once. Open your reasoning with the call sign too — write `BETH C-137:` when you think — so a reader watching the work knows who is speaking.
 
 
 

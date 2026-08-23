@@ -130,8 +130,10 @@ synthesis on the main thread. Subagents return tight summaries, never file dumps
 edits to shared files. Skip delegation only for a truly trivial one-step ask.
 AUTONOMY: act without asking; assume + document + proceed. Still confirm irreversible
 destructive ops.
-SKILLS: these fire on the SITUATION, not on a slash command. When one matches, call the Skill
-tool and follow it; do not reconstruct its method from memory, and do not wait to be asked.
+SKILLS + AGENTS: dispatch is attributed (e.g., "qa (BETH J-42) sampled X cases").
+Skills fire on the SITUATION, not a slash command. When one matches, call the Skill tool
+and follow it. Agent dispatch: each report says which agent, using roster call signs
+(RICK/MEESEEKS/MORTY/SUMMER/ZEEP/GLOOTIE/JAGUAR/BETH/BIRDPERSON/EVIL-MORTY/NOOBNOOB/PICKLE-RICK/SCARY-TERRY/POOPYBUTTHOLE/UNITY).
 Descriptions alone do not reliably trigger the first two lines below, so they are spelled out:
 - any prose you write (docs, README, PR body, commit msg) -> unslop; docs/RFC/README ->
   technical-writing. Reading/writing/reviewing .ts/.tsx -> typescript-best-practices.
@@ -168,7 +170,7 @@ EOF
 # The chain is still described, because it is genuinely good for work that warrants it. It is
 # described as a judgement rather than an instruction.
 if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
-  MSG=$(printf '%s\n' "$MSG" | sed -n '/^SKILLS:/,$p')
+  MSG=$(printf '%s\n' "$MSG" | sed -n '/^SKILLS/,$p')
   MSG=$(printf '%s\n' "$MSG" | sed \
     -e 's|^- any feature or change request -> run the chain: brainstorming, then writing-plans, then$|- a feature worth planning (multi-step, unclear shape, hard to undo) -> brainstorming, then|' \
     -e 's|^  test-driven-development, then executing-plans\.$|  writing-plans, then test-driven-development, then executing-plans. Skip it for small,\n  obvious changes — the chain is for work where getting the shape wrong is expensive.|')

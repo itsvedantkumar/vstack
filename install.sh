@@ -38,6 +38,12 @@ if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON=
 # exclusively and step to a suffix when it is taken.
 BK_BASE="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
 BK="$BK_BASE"
+# Set only once `mkdir "$BK"` has actually succeeded below. BK itself is assigned unconditionally
+# right above, so guarding abort_note on `[ "${BK:-}" = "" ]` never fired -- BK is never empty --
+# and a run that died before the backup directory could even be created (HOME unwritable, disk
+# full, no permission on ~/.config) still printed "every file this run touched was copied to $BK
+# first" pointing at a path that was never made. This flag is the actual truth the message needs.
+BK_CREATED=0
 DRY=0
 WITH_DEPS=0
 BYPASS=0
@@ -67,7 +73,7 @@ DEGRADED=0
 abort_note(){
   st=$?
   [ "$st" = 0 ] && return 0
-  [ "${BK:-}" = "" ] && return 0
+  [ "$BK_CREATED" = 1 ] || return 0
   [ "$DRY" = 1 ] && return 0
   printf '\ninstall aborted (exit %s). Nothing of yours was lost:\n' "$st"
   printf '  every file this run touched was copied to %s first\n' "$BK"
@@ -114,6 +120,7 @@ if [ "$DRY" = 0 ]; then
     bn=$((bn+1))
     [ "$bn" -gt 500 ] && { echo "error: cannot create a backup dir under $(dirname "$BK_BASE")" >&2; exit 1; }
   done
+  BK_CREATED=1
   mkdir -p "$CDIR/hooks" "$CDIR/agents" "$CDIR/commands" \
            "$CDIR/skills" \
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
@@ -333,17 +340,34 @@ elif [ "$DRY" = 0 ]; then
             { matcher:"Edit|Write|MultiEdit",
               hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] } ],
           Stop: [
-            { hooks: [ {type:"command", command:($h+"/verify-gate.sh")} ] } ],
+            { hooks: [ {type:"command", command:($h+"/verify-gate.sh")},
+                       {type:"command", command:($h+"/skill-mandate.sh")} ] } ],
           PostToolUseFailure: [
             { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] } ]
         } as $ours
+      # Basenames of every command $ours ships (inject-session-context.sh, guard-destructive.sh,
+      # ...), derived from $ours itself rather than duplicated, so this list can never drift out
+      # of sync with the hooks actually installed above.
+      | ([$ours | .. | .command? // empty] | map(split("/") | last) | unique) as $ourbasenames
       | ($userhooks
           | with_entries(.value |= map(select(
               [.hooks[]?.command]
-              # startswith, not test(): the hooks path was being used as a regular expression,
-              # so a home directory containing [ ] ( ) + or . matched nothing and the previous
-              # vstack hooks were never removed — every reinstall appended another copy.
-              | map(startswith($h) or test("SUPERSET_HOME_DIR"))
+              # Matched by shape (a path ending in .../hooks/<one of our filenames>), not by
+              # startswith($h) against the CURRENT $CDIR/hooks. startswith tied ownership to
+              # THIS machine HOME at merge time, so a settings.json copied from a different HOME
+              # (a new machine, a restored backup, a renamed account) had its own vstack entries
+              # treated as user-authored forever, because they no longer started with $h -- doctor
+              # stayed green while every reinstall appended a duplicate SessionStart entry
+              # pointing at a path that no longer exists. A path is ours if its immediate parent
+              # directory is literally named "hooks" and its filename is one $ours installs; that
+              # survives a HOME move without also claiming a same-named script a user keeps in
+              # some unrelated hooks directory of their own, since that script is never one of
+              # ours by name.
+              | map(
+                  . as $cmd
+                  | ($cmd | test("SUPERSET_HOME_DIR"))
+                  or ($ourbasenames | any(. as $b | $cmd | endswith("/hooks/" + $b)))
+                )
               | any | not )))
           | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
@@ -468,13 +492,12 @@ fi
 say "backup: $BK"
 say ""
 if [ -x "$HOME/.config/agents/bin/doctor" ]; then
-  "$HOME/.config/agents/bin/doctor" || {
+  if ! "$HOME/.config/agents/bin/doctor"; then
     say ""
     say "doctor reports drift above. Most causes are one-time setup steps it cannot do for you:"
     say "  - fill in ~/.config/agents/secrets.env"
     say "  - exec zsh -l   (to pick up the shell lane)"
-    exit 0
-  }
+  fi
 fi
 if [ "$DEGRADED" = 1 ]; then
   say ""

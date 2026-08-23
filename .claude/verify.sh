@@ -349,10 +349,16 @@ if command -v jq >/dev/null; then
 
   # Every script named by any lane exists. The old character class [a-z-]* silently exempted
   # any hook filename containing a digit or a capital, and an empty extraction made the whole
-  # loop a no-op, so the count is asserted too.
-  refs=$( { jq -r '.hooks[][]?.hooks[]?.command' claude/settings.json 2>/dev/null
-            jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null
-          } | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh' | sort -u)
+  # loop a no-op, so the count is asserted too. Extract from hooks.json (plugin lane) and
+  # install.sh (user lane rebuild), but NOT settings.json (dev-only config). This ensures
+  # a hook cannot pass validation if it is wired only in the developer's config rather than
+  # in what actually ships to users.
+  prog=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh)
+  refs_plugin=$(jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null \
+    | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh|[a-z0-9._-]+\.sh' | sed 's|^|hooks/|;s|hooks/hooks/|hooks/|' | sort -u)
+  refs_user=$(printf '%s' "$prog" | grep -oE 'command:\(\$h\+[^)]*' | grep -oE '[a-z0-9._-]+\.sh' 2>/dev/null \
+    | grep -oE 'hooks/[A-Za-z0-9._-]+\.sh|[a-z0-9._-]+\.sh' | sed 's|^|hooks/|;s|hooks/hooks/|hooks/|' | sort -u)
+  refs=$(printf '%s\n%s\n' "$refs_plugin" "$refs_user" | grep -v '^$' | sort -u)
   nref=$(printf '%s\n' "$refs" | grep -c . )
   # Both directions, against the tree rather than a number. This was `[ "$nref" -ge 4 ]` while
   # the real count was 6, so two hooks could fall out of the wiring and the floor would still
@@ -363,14 +369,32 @@ if command -v jq >/dev/null; then
   for h in $refs; do
     [ -f "claude/$h" ] || errs="$errs\n$h: referenced in hook wiring but not in claude/hooks/"
   done
-  # refs arrives newline-separated from sort -u; flatten it so the membership test below is a
-  # word match and not an accident of where the newlines fell.
-  refs_flat=" $(printf '%s' "$refs" | tr '\n' ' ') "
+  # Coverage is asserted PER LANE, not on the union of both. This used to flatten refs_plugin and
+  # refs_user into one `refs` set and ask "is this hook in refs anywhere" -- a hook wired only in
+  # the plugin lane (claude/hooks/hooks.json) satisfied that, and skill-mandate.sh sat exactly
+  # there for two release cycles: shipped, wired into hooks.json, never wired into install.sh's
+  # hook rebuild, entirely inert for `./install.sh`, which is what every non-plugin user runs.
+  # "wired in some lane" and "wired in the lane this user actually used" are different claims,
+  # and the union check could not tell them apart. This asserts the second one directly: every
+  # shipped hook must be in refs_user specifically, because that is the set install.sh produces.
+  #
+  # A hook that legitimately ships to only the plugin lane (never install.sh) is not a bug, but
+  # it must say so here, by name, with a reason -- silence is exactly the loophole this replaces.
+  # Empty today: every shipped hook belongs in the user lane, because installing vstack for real
+  # use is what install.sh does.
+  #   format: one "basename.sh:one-line reason why it is plugin-only" per line
+  USER_LANE_EXEMPT=''
+  refs_user_flat=" $(printf '%s' "$refs_user" | tr '\n' ' ') "
   for f in claude/hooks/*.sh; do
     [ -e "$f" ] || continue
-    case "$refs_flat" in
-      *" hooks/${f##*/} "*) ;;
-      *) errs="$errs\n${f##*/}: shipped in claude/hooks/ but no lane wires it, so it never runs" ;;
+    b="${f##*/}"
+    exempt=$(printf '%s\n' "$USER_LANE_EXEMPT" | grep "^$b:")
+    if [ -n "$exempt" ]; then
+      continue
+    fi
+    case "$refs_user_flat" in
+      *" hooks/$b "*) ;;
+      *) errs="$errs\n$b: shipped in claude/hooks/ but not wired in the USER lane (install.sh's hook rebuild) -- \`./install.sh\` ships it inert. Wire it into install.sh, or add it to USER_LANE_EXEMPT in this check with a reason." ;;
     esac
   done
   ndisk=0
@@ -1148,13 +1172,19 @@ if command -v jq >/dev/null; then
   g_want 'rm -rf /'                      deny
   g_want 'rm -rf ~'                      deny
   g_want 'rm -rf $HOME'                  deny
+  g_want 'rm -rf /*'                     deny
+  g_want 'rm -rf ~/*'                    deny
   g_want 'git push --force origin main'  deny
   g_want 'git push -f origin master'     deny
+  g_want 'true && git push --force origin main' deny
+  g_want 'git push -f origin HEAD:refs/heads/main' deny
+  g_want 'echo hi; rm -rf /'             deny
+  g_want 'git push --force origin refs/heads/main:refs/heads/main' deny
   g_want 'rm -rf /etc/nginx'             ask
   g_want 'git reset --hard HEAD~3'       ask
   g_want 'psql -c "DROP TABLE users"'    ask
   g_want 'terraform destroy'             ask
-  g_want 'echo x && rm -rf /'            ask
+  g_want 'npm test && rm -rf node_modules' allow
   g_want 'rm -rf node_modules /etc'      ask
   g_want 'rm -rf node_modules'           allow
   g_want 'rm -rf dist'                   allow
@@ -1179,7 +1209,7 @@ if command -v jq >/dev/null; then
     d=$(printf '%s' "$bad" | bash claude/hooks/guard-destructive.sh 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
     [ "$d" = ask ] || errs="$errs\nmalformed payload -> $d, expected ask"
   done
-  [ -z "$errs" ] && ok "destructive guard decides correctly (16 commands, 3 tiers)" \
+  [ -z "$errs" ] && ok "destructive guard decides correctly (22 commands, 3 tiers)" \
     || bad "destructive guard decides correctly" "$(printf '%b' "$errs")"
 else
   skip "destructive guard decides correctly" "jq not installed"
@@ -1390,6 +1420,8 @@ if command -v jq >/dev/null; then
     T='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}}]}}'
     U='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"unslop"}}]}}'
     P='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/main.py"}}]}}'
+    TA='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"running"}]}}'
+    TB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"qa (BETH J-42)"}]}}'
 
     # blocks when the rule is unmet
     say_ "$W"; hit_ a | grep -q '"decision":"block"' || errs="$errs\nwrote prose without unslop and it did not block"
@@ -1409,9 +1441,14 @@ if command -v jq >/dev/null; then
     say_ "$F2"; hit_ i | grep -q '"decision":"block"' || errs="$errs\nthree dirs with two extensions did not block multi-dir mandate"
     F3='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".editorconfig","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"home/.gitignore","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"proj/.npmrc","content":""}}]}}'
     say_ "$F3"; [ -z "$(hit_ j)" ] || errs="$errs\nthree dotfiles across three dirs falsely blocked multi-dir mandate"
+    # agent naming: dispatch attribution required
+    say_ "$TA"; hit_ k | grep -q '"decision":"block"' || errs="$errs\nTask call with no call sign did not block"
+    say_ "$TB"; [ -z "$(hit_ l)" ] || errs="$errs\nTask call with call sign (BETH) blocked anyway"
+    say_ "$P"; [ -z "$(hit_ m)" ] || errs="$errs\nzero Task calls falsely blocked on naming rule"
+    say_ "$TA"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ n)" ] || errs="$errs\nVSTACK_NO_MANDATE=1 did not disable agent naming block"
 
     rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-vfy-* 2>/dev/null
-    [ -z "$errs" ] && ok "skill mandate decides correctly (10 cases, both directions)" \
+    [ -z "$errs" ] && ok "skill mandate decides correctly (14 cases, both directions)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
   fi
 else

@@ -290,6 +290,43 @@ p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖
 # vstack itself installs and can therefore be held to.
 note(){ p "$1" "· $2"; }
 
+# Bounds a command's wall time without assuming GNU coreutils' `timeout` is installed. Stock
+# macOS ships neither `timeout` nor `gtimeout` -- only `brew install coreutils` adds the latter
+# -- so a network call left unbounded (e.g. `git ls-remote` against a blackholed remote) hangs
+# for the underlying transport's own connect timeout, 75+ seconds for git-over-http. That is
+# doctor's problem specifically because install.sh runs doctor unconditionally at the end, so a
+# new user's very first command looks hung for over a minute with no feedback.
+run_with_timeout(){
+  _rwt_secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_rwt_secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$_rwt_secs" "$@"
+  else
+    # Manual fallback: background the real command, race it against a sleeping watcher that
+    # SIGTERMs it if it's still alive when the clock runs out, then reap both so no zombie or
+    # orphaned sleep survives doctor's own exit.
+    #
+    # `set -m` (job control) is load-bearing, not decoration: `git ls-remote` over http forks a
+    # `git-remote-http` helper that inherits our fd 1, and that helper is still blocked in
+    # connect() to the blackholed remote when TERM is sent to only the direct child. It becomes
+    # an orphan that keeps fd 1 open, and the `_out=$(...)` capturing our output then blocks
+    # waiting for EOF on that fd for the remote's own 75s timeout regardless of the child we
+    # actually killed. Job control gives the backgrounded job its own process group, so
+    # `kill -- "-$pid"` (negative pid = the group) reaches the helper too.
+    (
+      set -m
+      "$@" &
+      _rwt_cpid=$!
+      ( sleep "$_rwt_secs"; kill -TERM -- "-$_rwt_cpid" 2>/dev/null ) &
+      _rwt_wpid=$!
+      wait "$_rwt_cpid" 2>/dev/null; _rwt_rc=$?
+      kill "$_rwt_wpid" 2>/dev/null; wait "$_rwt_wpid" 2>/dev/null
+      exit "$_rwt_rc"
+    )
+  fi
+}
+
 get_perms(){
   if [ "$(/usr/bin/uname -s 2>/dev/null || uname -s 2>/dev/null)" = "Darwin" ]; then
     stat -f '%Lp' "$1" 2>/dev/null
@@ -552,9 +589,11 @@ else
     # Distinguishing "the remote says no" from "the remote did not answer" is the whole point: one
     # is a broken install path, the other is a laptop offline, and reporting either as the other is
     # how a check starts lying.
-    _out=$(GIT_TERMINAL_PROMPT=0 git -C "$_rr" ls-remote --tags origin "refs/tags/v$_rv" 2>&1); _rc=$?
+    _out=$(GIT_TERMINAL_PROMPT=0 run_with_timeout 5 git -C "$_rr" ls-remote --tags origin "refs/tags/v$_rv" 2>&1); _rc=$?
     if [ "$_rc" -ne 0 ]; then
-      note "declared release is fetchable" "could not reach origin, so v$_rv is unverified: $(printf '%s' "$_out" | head -1)"
+      _reason="could not reach origin"
+      if [ "$_rc" -eq 124 ] || [ "$_rc" -eq 143 ]; then _reason="origin did not answer within 5s"; fi
+      note "declared release is fetchable" "$_reason, so v$_rv is unverified: $(printf '%s' "$_out" | head -1)"
     elif [ -n "$_out" ]; then
       ok "declared release is fetchable (v$_rv on origin)"
     else

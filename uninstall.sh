@@ -122,7 +122,12 @@ restore_pairs() {
   for e in "$BK"/*; do
     [ -e "$e" ] || continue
     n=$(basename "$e")
-    case "$n" in files|files_abs) continue ;; esac
+    # pre-uninstall/ is this script's OWN safety backup (see `back()`/$UNDO above), written into
+    # $BK by this exact run. Without this exclusion it fell through to the legacy-flat-name
+    # branch below, map_target had no rule for it so it mapped to $HOME/pre-uninstall, and a
+    # second `uninstall.sh --yes` against the same backup copied uninstall's own backup-of-a-
+    # backup into the user's home as a permanent, ever-growing directory.
+    case "$n" in files|files_abs|pre-uninstall) continue ;; esac
     printf '%s|%s\n' "$e" "$(map_target "$n")"
   done
 }

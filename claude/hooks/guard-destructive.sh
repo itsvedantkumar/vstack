@@ -21,6 +21,12 @@
 # built at runtime — walks straight past. It is a guard against a bad afternoon, not against
 # an attacker. Treating it as the latter would be the dangerous mistake.
 #
+# OUT OF SCOPE: Commands that rely on variable expansion to become destructive (e.g.
+# `RMFLAGS=-rf; rm $RMFLAGS /`) are not caught because the guard reads syntax, not semantics.
+# Attempts to detect this would require shell evaluation and generate false positives on
+# legitimate uses of variables. The guard defends against the obvious and direct destructive
+# commands; shell-level indirection is beyond its design.
+#
 # Failure is always toward asking. A hook that gates destructive commands and defaults to
 # "allow" when it cannot parse its input has inverted its own purpose.
 
@@ -64,88 +70,156 @@ printf '%s' "$payload" | jq -e . >/dev/null 2>&1 \
 # Genuinely no command field (a non-Bash payload reaching a Bash matcher): nothing to judge.
 [ -n "$CMD" ] || allow
 
-# Compound commands are not decomposed. `a && rm -rf /` would need real shell parsing to judge,
-# and a half-parse that misreads it is worse than no parse, so anything with a separator falls
-# through to the pattern families below rather than reaching the deny tier.
-SIMPLE=1
-case "$CMD" in
-  *';'*|*'&&'*|*'||'*|*'|'*|*'`'*|*'$('*|*$'\n'*) SIMPLE=0 ;;
-esac
+# Compound commands are split and each segment evaluated separately against the deny tier.
+# This is necessary because a command that is harmless on its own (rm -rf node_modules) is
+# catastrophic in a compound (echo hi; rm -rf /). Without this split, `true && git push -f origin main`
+# would skip the deny tier entirely and land on allow.
+#
+# We split on ; && || and | (backticks and $() are harder to parse and their contents fall through
+# to the ask tier if destructive). Each segment is checked against the same deny patterns.
 
-# --- deny: the small set that is never a mistake worth allowing -----------------------------
-# Deliberately tiny. Every entry is something with no plausible legitimate use from an agent
-# session, and each is only denied in its unambiguous simple form.
-if [ "$SIMPLE" = 1 ]; then
+# Check if a segment contains a catastrophic command. If so, emit deny immediately.
+_check_deny_segment() {
+  local seg="$1"
+  [ -n "$seg" ] || return 0
+
+  # rm -rf against / or $HOME. Build-artifact deletes are not this.
+  case "$seg" in
+    rm\ *-*[rR]*[fF]*\ *|rm\ *-*[fF]*[rR]*\ *)
+      set -f
+      for tok in $seg; do
+        # shellcheck disable=SC2088  # matching the literal ~ the user typed; expanding it here would
+        # compare $HOME against $HOME and let `rm -rf ~` through.
+        case "$tok" in
+          /|/\*|'~'|'~/'|'~/*'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
+            emit deny "[guard] recursive delete of / or your home directory. If you truly mean this, run it yourself outside the agent session." ;;
+        esac
+      done
+      set +f ;;
+  esac
+
+  # Force-push to a protected branch. Match both simple and full refspecs.
+  case "$seg" in
+    git\ push\ *--force*|git\ push\ *-f\ *|git\ push\ *-f)
+      case "$seg" in
+        # Simple: space before branch. Full refspecs: :main :master or :refs/heads/main etc.
+        *\ main*|*\ master*|*:main*|*:master*|*:refs/heads/main*|*:refs/heads/master*)
+          emit deny "[guard] force-push to main or master. Push to a branch, or do it yourself outside the agent session." ;;
+      esac ;;
+  esac
+}
+
+# Check compound commands: split on common separators and test each segment against deny patterns
+if printf '%s' "$CMD" | grep -qE '[;&|]' || printf '%s' "$CMD" | grep -q '&&\|||'; then
+  # The command contains compound separators; split and check each segment against deny patterns
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$seg" ] || continue
+    _check_deny_segment "$seg"
+  done <<EOF
+$(printf '%s' "$CMD" | sed -e 's/;/\n/g; s/&&/\n/g; s/||/\n/g; s/|/\n/g')
+EOF
+fi
+
+# --- deny: the small set that is never a mistake worth allowing ----
+# For simple (non-compound) commands, check them directly
+if ! printf '%s' "$CMD" | grep -qE '[;&|]' && ! printf '%s' "$CMD" | grep -q '&&\|||'; then
   # rm -rf against / or $HOME. Build-artifact deletes are the common legitimate case and are
   # explicitly not this: the target has to be a filesystem or home root.
   case "$CMD" in
     rm\ *-*[rR]*[fF]*\ *|rm\ *-*[fF]*[rR]*\ *)
+      set -f
       for tok in $CMD; do
         # shellcheck disable=SC2088  # matching the literal ~ the user typed; expanding it here would
         # compare $HOME against $HOME and let `rm -rf ~` through.
         case "$tok" in
-          /|/\*|'~'|'~/'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
+          /|/\*|'~'|'~/'|'~/*'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
             emit deny "[guard] recursive delete of / or your home directory. If you truly mean this, run it yourself outside the agent session." ;;
         esac
-      done ;;
+      done
+      set +f ;;
   esac
   # Force-push to a protected branch. Recoverable in principle, ruinous in practice, and the
   # agent has no business doing it unprompted.
   case "$CMD" in
     git\ push\ *--force*|git\ push\ *-f\ *|git\ push\ *-f)
       case "$CMD" in
-        # `* main*` already covers `*origin main`, and `* master*` covers `*origin master`;
-        # both were listed and neither could ever be reached. The colon forms are not redundant:
-        # `git push --force origin HEAD:main` contains no space before "main".
-        *\ main*|*\ master*|*:main*|*:master*)
+        # Match space-separated (origin main), colon-based refspecs (:main), and full refs paths.
+        # Full refspecs like HEAD:refs/heads/main must match via the :refs/heads/ pattern.
+        *\ main*|*\ master*|*:main*|*:master*|*:refs/heads/main*|*:refs/heads/master*)
           emit deny "[guard] force-push to main or master. Push to a branch, or do it yourself outside the agent session." ;;
       esac ;;
   esac
 fi
 
-# --- ask: destructive families that are usually deliberate but sometimes are not -------------
-# These stay overridable on purpose. The cost of a wrong deny here is a blocked legitimate
-# command and an annoyed human, which is how a guard gets switched off for good.
-case "$CMD" in
-  *'DROP TABLE'*|*'DROP DATABASE'*|*'TRUNCATE TABLE'*|*'drop table'*|*'drop database'*)
-    emit ask "[guard] this drops or truncates a database table. Confirm the target is not production." ;;
-  git\ reset\ *--hard*)
-    emit ask "[guard] git reset --hard discards uncommitted work in the working tree." ;;
-  git\ clean\ *-*[dD]*[fF]*|git\ clean\ *-*[fF]*[dD]*)
-    emit ask "[guard] git clean -fd deletes untracked files, including ones never committed anywhere." ;;
-  *'kubectl delete'*|*'terraform destroy'*|*'docker system prune'*)
-    emit ask "[guard] this tears down infrastructure. Confirm the context and target." ;;
-  *'mkfs'*|*'dd if='*of=/dev/*)
-    emit ask "[guard] this writes directly to a device. Confirm the target device." ;;
-esac
+# Check if a segment triggers the ask tier
+_check_ask_segment() {
+  local seg="$1"
+  [ -n "$seg" ] || return 0
 
-# rm -rf on anything else is worth a beat, unless every target is clearly a build artifact.
-#
-# Matched anywhere in the string, not just at the start. An anchored pattern let
-# `echo x && rm -rf /` through untouched: the deny tier skips compound commands by design,
-# and an anchored ask tier then never looked at it either, so the most obvious way to phrase
-# the worst command in the file was the one shape that reached "allow".
-#
-# Targets are tokenised rather than substring-matched. `*/dist*` did not match a bare `dist`,
-# so `rm -rf dist` prompted every time — and a guard that interrupts routine work is a guard
-# that gets switched off. Checking each token also means one dangerous target among safe ones
-# still asks, instead of a single `node_modules` anywhere in the line excusing the whole command.
-case "$CMD" in
-  *rm\ -[rRfF]*|*rm\ --recursive*|*rm\ -*[rR]*[fF]*|*rm\ -*[fF]*[rR]*)
-    _unsafe=0
-    for tok in $CMD; do
-      case "$tok" in
-        rm|-*) continue ;;                           # the command and its flags (-* covers --*)
-      esac
-      case "$tok" in
-        node_modules|dist|build|target|coverage|.next|.turbo|.cache|.venv|__pycache__|.pytest_cache) continue ;;
-        */node_modules|*/node_modules/*|*/dist|*/dist/*|*/build|*/build/*|*/target|*/target/*) continue ;;
-        */coverage|*/coverage/*|*.next|*.next/*|*.turbo|*.turbo/*|*.cache|*.cache/*) continue ;;
-        */__pycache__|*/__pycache__/*|*.venv|*.venv/*|/tmp/*|"${TMPDIR:-/nonexistent}"*) continue ;;
-      esac
-      _unsafe=1
-    done
-    [ "$_unsafe" = 1 ] && emit ask "[guard] recursive delete of something that is not a build artifact. Check the path before approving." ;;
-esac
+  # Database operations
+  case "$seg" in
+    *'DROP TABLE'*|*'DROP DATABASE'*|*'TRUNCATE TABLE'*|*'drop table'*|*'drop database'*)
+      emit ask "[guard] this drops or truncates a database table. Confirm the target is not production." ;;
+  esac
+
+  # SCM operations
+  case "$seg" in
+    git\ reset\ *--hard*)
+      emit ask "[guard] git reset --hard discards uncommitted work in the working tree." ;;
+    git\ clean\ *-*[dD]*[fF]*|git\ clean\ *-*[fF]*[dD]*)
+      emit ask "[guard] git clean -fd deletes untracked files, including ones never committed anywhere." ;;
+  esac
+
+  # Infrastructure
+  case "$seg" in
+    *'kubectl delete'*|*'terraform destroy'*|*'docker system prune'*)
+      emit ask "[guard] this tears down infrastructure. Confirm the context and target." ;;
+  esac
+
+  # Device operations
+  case "$seg" in
+    *'mkfs'*|*'dd if='*of=/dev/*)
+      emit ask "[guard] this writes directly to a device. Confirm the target device." ;;
+  esac
+
+  # rm -rf with potentially unsafe targets
+  case "$seg" in
+    *rm\ -[rRfF]*|*rm\ --recursive*|*rm\ -*[rR]*[fF]*|*rm\ -*[fF]*[rR]*)
+      _unsafe=0
+      set -f
+      for tok in $seg; do
+        case "$tok" in
+          rm|-*) continue ;;
+        esac
+        case "$tok" in
+          node_modules|dist|build|target|coverage|.next|.turbo|.cache|.venv|__pycache__|.pytest_cache) continue ;;
+          */node_modules|*/node_modules/*|*/dist|*/dist/*|*/build|*/build/*|*/target|*/target/*) continue ;;
+          */coverage|*/coverage/*|*.next|*.next/*|*.turbo|*.turbo/*|*.cache|*.cache/*) continue ;;
+          */__pycache__|*/__pycache__/*|*.venv|*.venv/*|/tmp/*|"${TMPDIR:-/nonexistent}"*) continue ;;
+        esac
+        _unsafe=1
+      done
+      set +f
+      [ "$_unsafe" = 1 ] && emit ask "[guard] recursive delete of something that is not a build artifact. Check the path before approving." ;;
+  esac
+}
+
+# Apply ask tier to each segment of compound commands, or to the whole command if simple
+if printf '%s' "$CMD" | grep -qE '[;&|]' || printf '%s' "$CMD" | grep -q '&&\|||'; then
+  # Compound command: check each segment
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$seg" ] || continue
+    _check_ask_segment "$seg"
+  done <<EOF
+$(printf '%s' "$CMD" | sed -e 's/;/\n/g; s/&&/\n/g; s/||/\n/g; s/|/\n/g')
+EOF
+else
+  # Simple command: check it as a whole
+  _check_ask_segment "$CMD"
+fi
 
 allow

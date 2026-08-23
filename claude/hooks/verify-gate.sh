@@ -66,6 +66,34 @@ sid=""
 # concurrent ones, which is all the counter needs.
 [ -n "$sid" ] || sid="pid$PPID"
 cnt_file="${TMPDIR:-/tmp}/verify-gate-block-$sid"
+lock_dir="$cnt_file.lock"
+# Stop hooks from the same session can fire concurrently (parallel sub-agents finishing at
+# once), and read-cat-then-write-echo on cnt_file is a classic unlocked read-modify-write: ten
+# racing invocations all read the same starting count, each computes its own +1, and the last
+# write wins — the counter undercounts and the 3-block cap never engages, so every invocation
+# blocks forever instead of latching open after 3. `mkdir` is atomic on every POSIX filesystem
+# (exactly one caller sees it succeed), which makes it a lock GNU flock is not required for and
+# stock macOS does not need coreutils to get. A lock older than 30s is assumed abandoned by a
+# killed sibling rather than honored forever, so a crash can't wedge the gate shut.
+lock_acquired=0
+i=0
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -ge 300 ]; then
+    # stat -f (BSD/macOS) vs -c (GNU/Linux); `find -mmin` was tried first and dropped because
+    # some `find` implementations (e.g. bfs) reject fractional minute arguments outright.
+    lm=$(stat -f %m "$lock_dir" 2>/dev/null || stat -c %Y "$lock_dir" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    if [ "$lm" -gt 0 ] && [ $((now - lm)) -ge 30 ]; then
+      rm -rf "$lock_dir" 2>/dev/null
+    fi
+    i=0
+  fi
+  sleep 0.02 2>/dev/null || sleep 1
+done
+lock_acquired=1
+trap '[ "$lock_acquired" = 1 ] && rmdir "$lock_dir" 2>/dev/null' EXIT
+
 cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
 # Latched open at the cap: the counter file stays put so an unfixable failure blocks at
 # most 3 times per session, ever — not in repeating groups of 3. A later real pass below
