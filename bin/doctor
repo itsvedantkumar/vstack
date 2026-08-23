@@ -490,9 +490,21 @@ dupe_look(){
     stale="$stale $(basename "$1")"
   fi
 }
-cutoff=$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d 2>/dev/null)
+# `date -v-45d` is BSD/macOS; `date -d '45 days ago'` is GNU. BusyBox date (Alpine's only
+# date) understands neither and this used to come back empty, silently skipping every repo.
+# `date +%s` is the one flag all three agree on, so compute the cutoff as arithmetic on that
+# instead of asking any date implementation to parse a relative-time string: BSD's `-r SECONDS`
+# converts epoch seconds back to a date, and GNU/BusyBox's `-d @SECONDS` does the same — the two
+# forms below are a strict superset of the BSD/GNU cases the old code handled, so nothing else
+# needs to stay.
+cutoff=""
+now_epoch=$(date +%s 2>/dev/null)
+if [ -n "$now_epoch" ]; then
+  cutoff_epoch=$((now_epoch - 45*86400))
+  cutoff=$(date -r "$cutoff_epoch" +%Y-%m-%d 2>/dev/null || date -d @"$cutoff_epoch" +%Y-%m-%d 2>/dev/null)
+fi
 if [ -z "$cutoff" ]; then
-  # Both date forms failing left cutoff empty, which skipped every repo, which left uncovered
+  # Every date form failing left cutoff empty, which skipped every repo, which left uncovered
   # empty, which printed a tick. Total failure of the check reported as a pass.
   bad "active repos overlaid" "could not compute a cutoff date — nothing was scanned"
 else

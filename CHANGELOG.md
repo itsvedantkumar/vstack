@@ -6,6 +6,34 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.33.0 — 2026-08-23
+
+**Two shipped defects found by the first real-container install matrix against published
+GitHub tags (debian:stable-slim, alpine:latest, ubuntu:latest, no credentials mounted).**
+
+- `bin/doctor` exited 1 on a clean, correct install on Alpine. The "active repos overlaid"
+  check computed a 45-day cutoff with `date -v-45d` (BSD/macOS) falling back to
+  `date -d '45 days ago'` (GNU) — BusyBox date, Alpine's only date, understands neither, so
+  `cutoff` came back empty and the check hard-failed with "could not compute a cutoff date"
+  instead of scanning. Replaced both relative-time forms with arithmetic on `date +%s`
+  (universal across BSD/GNU/BusyBox), then formatted the epoch with `date -r SECONDS` (BSD)
+  falling back to `date -d @SECONDS` (GNU/BusyBox) — a strict superset of the two cases the
+  old code handled, so nothing else needs to stay. The empty-cutoff hard-fail is preserved for
+  the case `date +%s` itself fails.
+- `vstack update` told a user pinned to a release tag they were up to date, forever, even when
+  dozens of commits ahead. The README's own pin quickstart (`VSTACK_REF=vX.Y.Z bash
+  bootstrap.sh`) clones with `--depth 1 --branch vX.Y.Z`, which sets `remote.origin.fetch` to
+  fetch *only that tag* — `refs/remotes/origin/main` never exists. `update` resolved the
+  upstream via `@{u}`, fell back to the literal string `origin/main` when that failed, and
+  compared `HEAD..origin/main` — an unresolvable ref that failed silently (stderr discarded)
+  and produced empty stdout, read identically to "nothing to update". Fixed by repairing the
+  fetch refspec and unshallowing before comparing, rather than refusing outright: a shallow
+  fetch of just `main`'s tip would fix the drift check but leave `merge --ff-only` unable to
+  prove ancestry across two disconnected shallow histories, so the repair drops the shallow
+  boundary entirely. If the upstream still cannot be resolved after repairing — wrong remote,
+  `main` renamed, network unreachable — `update` now exits 1 with an explicit message and a
+  re-clone command, never silence.
+
 ## 1.32.0 — 2026-08-23
 
 **The three `bin/` wrappers claimed success when nothing happened.** `tests/bin-scripts.sh`

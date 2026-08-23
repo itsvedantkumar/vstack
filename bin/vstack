@@ -75,9 +75,48 @@ case "$CMD" in
     # Bare fetch with fetch.prune=true deletes local tags not on the remote. See bin/doctor:260
     # and the 2026-08-20 incident where unpushed release tags were silently destroyed.
     git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin || exit 1
-    upstream=$(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
-      || upstream=origin/main
-    if [ -z "$(git -C "$REPO" rev-list -n 1 "HEAD..$upstream" 2>/dev/null)" ]; then
+    upstream=$(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || upstream=""
+    if [ -z "$upstream" ] || ! git -C "$REPO" rev-parse --verify -q "$upstream" >/dev/null 2>&1; then
+      # No configured upstream, or it points at a ref that does not exist locally. This is the
+      # shape the README's own pin quickstart leaves behind: `VSTACK_REF=vX.Y.Z bash
+      # bootstrap.sh` clones with `--depth 1 --branch vX.Y.Z`, which sets remote.origin.fetch to
+      # fetch *only that tag* -- refs/remotes/origin/main never gets created. The old code
+      # silently fell back to the literal string "origin/main", which then failed to resolve;
+      # git wrote that to stderr (discarded), rev-list produced empty stdout, and the empty
+      # check below read that identically to "nothing to update". A pinned install could never
+      # discover it was behind.
+      #
+      # Repair rather than refuse: widen the fetch refspec to track main and drop the shallow
+      # boundary. Unshallowing matters as much as the refspec does -- a shallow fetch of just
+      # main's tip would let the rev-list check below detect drift, but `git merge --ff-only`
+      # further down needs real ancestry to prove main is a fast-forward of HEAD, which two
+      # disconnected shallow histories cannot supply.
+      upstream=origin/main
+      repair_err=$(git -C "$REPO" config remote.origin.fetch "+refs/heads/main:refs/remotes/origin/main" 2>&1)
+      if [ -z "$repair_err" ]; then
+        if [ "$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+          repair_err=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head --unshallow origin 2>&1)
+        else
+          repair_err=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin 2>&1)
+        fi
+      fi
+      if ! git -C "$REPO" rev-parse --verify -q "$upstream" >/dev/null 2>&1; then
+        echo "vstack update: could not resolve $upstream even after repairing the fetch refspec" >&2
+        [ -n "$repair_err" ] && echo "               git said: $repair_err" >&2
+        echo "               this checkout may not be a clone of the vstack repo, or main was renamed;" >&2
+        echo "               re-clone with 'git clone $(git -C "$REPO" remote get-url origin 2>/dev/null || echo "$REPO")' to recover" >&2
+        exit 1
+      fi
+    fi
+    revlist_out=$(git -C "$REPO" rev-list -n 1 "HEAD..$upstream" 2>&1)
+    revlist_rc=$?
+    if [ "$revlist_rc" -ne 0 ]; then
+      # Never let a failed comparison read as "nothing to update" -- that is the exact defect
+      # class this block exists to close. An unresolved or unwalkable ref must be loud.
+      echo "vstack update: could not compare HEAD to $upstream: $revlist_out" >&2
+      exit 1
+    fi
+    if [ -z "$revlist_out" ]; then
       echo "vstack update: already up to date with $upstream; reinstalling to clear drift"
       exec "$REPO/install.sh"
     fi
