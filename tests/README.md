@@ -145,6 +145,23 @@ other Claude Code setups and against unconfigured Claude Code. `evals/optimize.s
 change-one-thing-and-re-measure loop on top of `run-pathways.sh`; it scores against
 `evals/holdout/` only through `--validate`, and never uses that set to decide whether to keep a
 change. `evals/RESULTS.md` records every run, including the retracted one.
+`dispatch-fleet.sh`'s schema=2 runlog header records the model, turn cap, tool fence and fixture
+file every arm ran under, and refuses to append samples from a different invocation rather than
+mix two arms into one k/n. That guard caught a real case: the 55-sample collision arm in
+`/private/tmp/vstack-dispatch-pilot-col.jsonl` was produced by a local uncommitted edit to the
+harness, so nothing in git could rebuild its instrument. The fence is committed now, but the
+default has since gained `Explore` and `Task`, so resuming that specific arm needs its original
+fence named explicitly:
+
+```bash
+DISALLOWED_TOOLS="Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,Workflow" \
+MAX_TURNS=20 MODEL=sonnet FIXTURES=~/vstack-dispatch/fixtures.jsonl \
+RUNLOG=/private/tmp/vstack-dispatch-pilot-col.jsonl ./tests/dispatch-fleet.sh col-11
+```
+
+Without that line, the arm was reproducible only for as long as its own runlog survived, since the
+header was the sole record of what produced it.
+
 `tests/evals/build-the-lever/run.sh` is a single-question harness rather than a scoring pathway: it
 asks why `principle-build-the-lever` fires as rarely as it does, against the thresholds frozen
 in `evals/build-the-lever/PREREGISTRATION.md` before the first sample was drawn. Every

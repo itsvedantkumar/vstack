@@ -100,7 +100,7 @@ SELECTED=("${ARGS[@]+"${ARGS[@]}"}")
 . "$REPO_ROOT/tests/evals/lib/runlog.sh"
 
 # ---------------------------------------------------------------------------
-# The tool fence. Ported from auto-trigger.sh's --disallowedTools, with two decisions recorded
+# The tool fence. Ported from auto-trigger.sh's --disallowedTools, with the decisions recorded
 # here because a mistake in either direction would look like a clean run while measuring the
 # wrong fleet:
 #
@@ -128,13 +128,71 @@ SELECTED=("${ARGS[@]+"${ARGS[@]}"}")
 #    This is not yet evidence any fixture here has lost turns this way -- MAX_TURNS defaults to
 #    3, not 2, and no real sample has been run against this checkout. It is untested exposure,
 #    logged rather than ignored.
+#
+# 3. "Workflow" is now denied on its own live-transcript evidence, not on the convenience of
+#    matching a runlog header (E-45, 2026-08-23, same audit shape as E-44's auto-trigger.sh fence
+#    review). A live sample called Workflow, which launched in the background, wrote an 863-byte
+#    generator script into ~/.claude/projects/.../workflows/scripts/, and fanned out to 8 parallel
+#    subagents each told to Edit or Write a fixture (this is the ZEEP Z-3 sample auto-trigger.sh's
+#    own fence comment already documents in full; not reproduced here). Workflow is Agent's
+#    capability class -- a spawn that gets its own tool access this process cannot reliably fence
+#    after the fact -- so it belongs wherever Agent does. auto-trigger.sh denies it as of 2e7d1e5;
+#    this harness runs the same kind of samples against the same binary and had not caught up.
+#    GUARD_SPAWN_TOOLS_PRESENT below makes Agent's and Workflow's presence a runtime assertion,
+#    the same way GUARD_NO_SKILL_DENY does for Skill's absence, so an override that silently drops
+#    either turns this into an unfenced dispatch run without printing anything.
+#
+# 4. "Explore" and "Task" are denied by DEFAULT below but deliberately NOT covered by
+#    GUARD_SPAWN_TOOLS_PRESENT. auto-trigger.sh denies both on reasoned-but-not-live-verified
+#    grounds -- spawn-class by name and shape, and Task measured emitting zero tool_use blocks
+#    against a real 15MB transcript while Agent emitted 70 (see that file's tool-fence comment,
+#    2026-08-23 audit, for the full per-tool table; not reproduced here) -- and denying either
+#    here costs nothing, since no fixture in this set needs them, so the default below matches
+#    auto-trigger.sh's stricter fence. They are left out of the hard guard because, unlike
+#    Agent/Workflow, no live sample has yet forced either open: a future arm that deliberately
+#    wants to measure Explore- or Task-shaped dispatch should be able to narrow DISALLOWED_TOOLS
+#    via the override below without editing this file. If either is ever caught live the way
+#    Workflow was, promote it into GUARD_SPAWN_TOOLS_PRESENT the same way Workflow was promoted
+#    here, with the transcript that justifies it.
+#
+# DISALLOWED_TOOLS is env-overridable. The alternative -- a literal with no override -- is what
+# produced 55 uncommitted samples (tests/dispatch-fleet.sh @ 7140218, S-3's collision-pilot arm):
+# the fence needed to change, the file offered no way to do that without editing source, so the
+# source got edited and never committed, and the instrument that produced a published finding
+# stopped existing in git. An override does not weaken the default -- nothing here is looser
+# unless an operator explicitly sets DISALLOWED_TOOLS -- and the schema=2 RUNLOG header below
+# records the tools string actually used on every invocation, override or not, so a runlog always
+# names its own instrument and check_runlog_params() still refuses a mismatched resume regardless
+# of whether the difference came from a source edit or an env var. GUARD_SPAWN_TOOLS_PRESENT
+# below runs against whatever value ends up in DISALLOWED_TOOLS -- override or default -- so it
+# still refuses an override that drops Agent or Workflow instead of silently running unfenced.
 # ---------------------------------------------------------------------------
-DISALLOWED_TOOLS="Write,Edit,MultiEdit,NotebookEdit,Bash,Agent"
+DISALLOWED_TOOLS="${DISALLOWED_TOOLS:-Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,Workflow,Explore,Task}"
 case ",$DISALLOWED_TOOLS," in
   *,Skill,*)
     echo "BUG: DISALLOWED_TOOLS contains Skill -- this would deny the harness the only tool that" >&2
     echo "     makes skill descriptions reachable at all. Refusing to run. See the fence comment" >&2
     echo "     above dated 2026-08-23 (ZEEP's probe) for why this is a hard guard, not advice." >&2
+    exit 2
+    ;;
+esac
+case ",$DISALLOWED_TOOLS," in
+  *,Agent,*) : ;;
+  *)
+    echo "BUG: DISALLOWED_TOOLS does not contain Agent -- this build's actual dispatch tool_use" >&2
+    echo "     name. An override that drops it turns every sample into an unfenced subagent" >&2
+    echo "     launch. Refusing to run. See the fence comment above (item 3) for the reasoning." >&2
+    exit 2
+    ;;
+esac
+case ",$DISALLOWED_TOOLS," in
+  *,Workflow,*) : ;;
+  *)
+    echo "BUG: DISALLOWED_TOOLS does not contain Workflow -- a live transcript (ZEEP Z-3, cited in" >&2
+    echo "     auto-trigger.sh's fence comment) proved a live sample can call it to launch a" >&2
+    echo "     background fan-out past this process's own kill -9. An override that drops it" >&2
+    echo "     turns every sample into an unfenced dispatch run. Refusing to run. See the fence" >&2
+    echo "     comment above (item 3) for the reasoning." >&2
     exit 2
     ;;
 esac
