@@ -14,13 +14,20 @@ set -uo pipefail
 PER_CASE_TIMEOUT=120   # seconds; enforced by the polling loop in run_case (macOS has no timeout(1))
 MODEL="sonnet"
 MAX_TURNS=3
-# Per-case turn budget, measured not guessed (2026-08-23). MAX_TURNS above is the one global
-# default this file actually uses -- a case with no row below inherits it unchanged, same as
-# today. This table does not change that; it exists so the next person deciding whether to
-# split MAX_TURNS per case has measurements instead of a guess. Each row is a real claude
-# invocation at that value, run outside this harness with matching flags (including the
-# "Agent" denial), workdir inspected before cleanup for terminal `subtype`, `num_turns`, and
-# whether a `Skill` tool_use appears.
+# Per-case turn budget, measured not guessed (2026-08-23), enforced by case_max_turns() below.
+# MAX_TURNS above is still the global default -- a case with no row here is not in the case
+# statement below either, and inherits MAX_TURNS unchanged, same as before this table existed.
+# Do not silently raise the floor for a case with no row: only the two entries under
+# "needs more than the default" get an override. Each row is a real claude invocation at
+# that value, run outside this harness with matching flags (including the "Agent" denial),
+# workdir inspected before cleanup for terminal `subtype`, `num_turns`, and whether a `Skill`
+# tool_use appears. `num_turns` in that result event is NOT the same counter --max-turns
+# enforces against: it also tallies turns from spawned subagents/internal tool infrastructure
+# (a haiku-model subagent's turns showed up in the SAME result event as the capped sonnet
+# agent's own, in the encode-lessons-lint @6 transcript). The cap itself is proven binding by
+# the CLI's own error text, which cites the configured value exactly ("Reached maximum number
+# of turns (6)" at --max-turns 6) even though num_turns reported 7 for that same run --
+# read num_turns as a rough diagnostic, not as turns-consumed-of-budget.
 #
 # MEASURED, sufficient at the current default (3) -- no override needed:
 #   root-cause-guard                       PASS both historical runs, attempt 1
@@ -29,11 +36,18 @@ MAX_TURNS=3
 #   sequence-verifiable-units-migration    PASS both historical runs, attempt 1
 #
 # MEASURED, needs more than the default -- recommended per-case value:
-#   prove-it-works-declare-done   -> 6     @6: subtype=success, num_turns=4/6, no Skill call,
-#                                           tools used: Grep,Grep,Read. Genuinely completes
-#                                           without ever consulting the dispatcher -- not
-#                                           starvation, a real "never fires" signal. 2 turns
-#                                           of margin measured; 6 is sufficient.
+#   prove-it-works-declare-done   -> 6     @6, one sample: subtype=success, num_turns=4/6,
+#                                           no Skill call, tools used Grep,Grep,Read --
+#                                           completed without consulting the dispatcher. But
+#                                           a same-day 3-attempt baseline at the DEFAULT (3)
+#                                           was 0/3 miss, then 1/3 PASS on the very next run
+#                                           (attempt 1) -- a flapper, not a hard zero. One
+#                                           sample of a stochastic process is not a
+#                                           measurement of it: do NOT read this as a proven
+#                                           "never fires." 6 is still a reasonable budget
+#                                           (the one deep-dive sample used only 4 of it), but
+#                                           the dispatch-rate question is open pending a
+#                                           proper per-case sample count.
 #   encode-lessons-lint            -> 10   @3: starved, never fired in 3/3 attempts (two
 #                                           separate historical runs).
 #                                           @6: still subtype=error_max_turns, num_turns=7,
@@ -61,6 +75,20 @@ MAX_TURNS=3
 #   executing-plans-checkpoints, impeccable-polish, interrogate-auth-diff,
 #   maintain-verification-skill-drift, reflect-session, unslop-draft-pass,
 #   negative-arithmetic, negative-factual
+# ---------------------------------------------------------------------------
+# case_max_turns NAME
+# Prints the --max-turns value for NAME: the override from the table above if it has one,
+# else the global MAX_TURNS default. A plain case statement, not an associative array --
+# macOS ships bash 3.2, which doesn't have those.
+# ---------------------------------------------------------------------------
+case_max_turns() {
+  case "$1" in
+    prove-it-works-declare-done) echo 6 ;;
+    encode-lessons-lint)         echo 10 ;;
+    *)                           echo "$MAX_TURNS" ;;
+  esac
+}
+
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
 # single sample is a coin flip; a skill that has actually stopped firing misses every attempt.
 # feature-chain is the measured-marginal case (~50% per attempt across runs: the model often
@@ -195,6 +223,7 @@ run_case() {
   selected_ "$name" || return 0
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
   local baseline violations term_subtype last_fired_csv=""
+  local case_turns; case_turns="$(case_max_turns "$name")"
 
   # Skill dispatch is a model decision, not a deterministic branch, so one sample is a coin
   # flip and a single-shot assertion makes this suite cry wolf. Retry a miss up to $ATTEMPTS
@@ -221,7 +250,7 @@ run_case() {
         claude -p "$prompt" \
           --output-format stream-json --verbose \
           --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
-          --model "$MODEL" --max-turns "$MAX_TURNS" \
+          --model "$MODEL" --max-turns "$case_turns" \
           < /dev/null > "$out_jsonl" 2> "$err_log"
     ) &
     runner_pid=$!
@@ -258,10 +287,10 @@ run_case() {
     rm -rf "$workdir"
 
     if [[ -n "$violations" ]]; then
-      echo "FAIL $name -> fence breach: run wrote outside its allowed tools:"
+      echo "FAIL $name -> fence breach (max-turns=$case_turns): run wrote outside its allowed tools:"
       while IFS= read -r v; do printf '    %s\n' "$v"; done <<< "$violations"
-      RESULT_LINES+=("FAIL $name -> fence breach (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
-      HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> wrote %s' "$name" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
+      RESULT_LINES+=("FAIL $name -> fence breach, max-turns=$case_turns (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
+      HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> max-turns=%s, wrote %s' "$name" "$case_turns" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
       FAIL_COUNT=$((FAIL_COUNT + 1))
       return
     fi
@@ -271,23 +300,23 @@ run_case() {
     if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($expected_regex)$"; then
       matched="$(echo "$fired" | grep -E "^($expected_regex)$" | head -1)"
       if (( attempt > 1 )); then
-        echo "PASS $name -> $matched (on attempt $attempt of $ATTEMPTS)"
-        RESULT_LINES+=("PASS $name -> $matched (attempt $attempt)")
+        echo "PASS $name -> $matched (on attempt $attempt of $ATTEMPTS, max-turns=$case_turns)"
+        RESULT_LINES+=("PASS $name -> $matched (attempt $attempt, max-turns=$case_turns)")
       else
-        echo "PASS $name -> $matched"
-        RESULT_LINES+=("PASS $name -> $matched")
+        echo "PASS $name -> $matched (max-turns=$case_turns)"
+        RESULT_LINES+=("PASS $name -> $matched (max-turns=$case_turns)")
       fi
-      HIT_LINES+=("$(printf '%-22s attempt %s/%s  -> %s' "$name" "$attempt" "$ATTEMPTS" "$matched")")
+      HIT_LINES+=("$(printf '%-22s attempt %s/%s  -> %s (max-turns=%s)' "$name" "$attempt" "$ATTEMPTS" "$matched" "$case_turns")")
       PASS_COUNT=$((PASS_COUNT + 1))
       return
     fi
 
-    (( attempt < ATTEMPTS )) && echo "  retry $name (attempt $attempt fired: [$fired_csv])"
+    (( attempt < ATTEMPTS )) && echo "  retry $name (attempt $attempt, max-turns=$case_turns, fired: [$fired_csv])"
   done
 
-  echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts (last: [$last_fired_csv])"
-  RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts (last: $last_fired_csv)")
-  HIT_LINES+=("$(printf '%-22s never in %s   -> %s' "$name" "$ATTEMPTS" "$last_fired_csv")")
+  echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts at max-turns=$case_turns (last: [$last_fired_csv])"
+  RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts, max-turns=$case_turns (last: $last_fired_csv)")
+  HIT_LINES+=("$(printf '%-22s never in %s   -> %s (max-turns=%s)' "$name" "$ATTEMPTS" "$last_fired_csv" "$case_turns")")
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
@@ -299,6 +328,7 @@ run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
   selected_ "$name" || return 0
   local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline violations
+  local case_turns; case_turns="$(case_max_turns "$name")"
 
   workdir="$(mktemp -d "/tmp/auto-trigger-neg.XXXXXX")"
   baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
@@ -309,7 +339,7 @@ run_negative_case() {
       claude -p "$prompt" \
         --output-format stream-json --verbose \
         --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
-        --model "$MODEL" --max-turns "$MAX_TURNS" \
+        --model "$MODEL" --max-turns "$case_turns" \
         < /dev/null > "$out_jsonl" 2> "$err_log"
   ) &
   runner_pid=$!
@@ -327,23 +357,23 @@ run_negative_case() {
   rm -rf "$workdir"
 
   if [[ -n "$violations" ]]; then
-    echo "FAIL $name -> fence breach: run wrote outside its allowed tools:"
+    echo "FAIL $name -> fence breach (max-turns=$case_turns): run wrote outside its allowed tools:"
     while IFS= read -r v; do printf '    %s\n' "$v"; done <<< "$violations"
-    RESULT_LINES+=("FAIL $name -> fence breach (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
-    HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> wrote %s' "$name" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
+    RESULT_LINES+=("FAIL $name -> fence breach, max-turns=$case_turns (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
+    HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> max-turns=%s, wrote %s' "$name" "$case_turns" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
     FAIL_COUNT=$((FAIL_COUNT + 1))
     return
   fi
 
   if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($forbidden_regex)$"; then
-    echo "FAIL $name -> $forbidden_regex fired on a prompt that is not its situation [$fired_csv]"
-    RESULT_LINES+=("FAIL $name -> over-triggered")
-    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> fired: %s' "$name" "$fired_csv")")
+    echo "FAIL $name -> $forbidden_regex fired on a prompt that is not its situation (max-turns=$case_turns) [$fired_csv]"
+    RESULT_LINES+=("FAIL $name -> over-triggered, max-turns=$case_turns")
+    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> fired: %s (max-turns=%s)' "$name" "$fired_csv" "$case_turns")")
     FAIL_COUNT=$((FAIL_COUNT + 1))
   else
-    echo "PASS $name -> did not over-trigger [$fired_csv]"
-    RESULT_LINES+=("PASS $name -> no over-trigger")
-    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> clean (%s)' "$name" "$fired_csv")")
+    echo "PASS $name -> did not over-trigger (max-turns=$case_turns) [$fired_csv]"
+    RESULT_LINES+=("PASS $name -> no over-trigger, max-turns=$case_turns")
+    HIT_LINES+=("$(printf '%-22s NEGATIVE      -> clean (%s) (max-turns=%s)' "$name" "$fired_csv" "$case_turns")")
     PASS_COUNT=$((PASS_COUNT + 1))
   fi
 }
@@ -523,7 +553,8 @@ EOF
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
-echo "Running skill auto-trigger regression suite (model=$MODEL, max-turns=$MAX_TURNS, per-case timeout=${PER_CASE_TIMEOUT}s)"
+echo "Running skill auto-trigger regression suite (model=$MODEL, default max-turns=$MAX_TURNS, per-case timeout=${PER_CASE_TIMEOUT}s)"
+echo "Per-case max-turns overrides: prove-it-works-declare-done=$(case_max_turns prove-it-works-declare-done), encode-lessons-lint=$(case_max_turns encode-lessons-lint) (every other case uses the default)"
 echo "---"
 
 run_case \
