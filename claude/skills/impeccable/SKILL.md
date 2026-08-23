@@ -33,6 +33,56 @@ The mode names what the visitor's success looks like on this surface.
 
 Choose the mode from the requested surface, not the product, and persist it only in that surface brief. A tool's landing page is still Persuade; a fashion house's documentation is still Read; a docs index is Read, not Persuade. See [new-work.md](reference/new-work.md) for new surfaces and [operate.md](reference/operate.md) for deeper Operate/Read guidance.
 
+## Visual modes, measured
+
+The four surface modes above answer *what the visitor is doing*. They do not answer *what it looks
+like*, and a description of visual quality cannot produce it: the one head-to-head anyone has run
+found prose instruction without retrieval made outcomes worse than none (9.94% regression rate
+against a 6.08% baseline), while the same instruction with retrieval context reached 1.82%.
+
+So the visual bar is carried by numbers read off live sites rather than adjectives.
+[reference/modes/](reference/modes/) holds four, measured 2026-08-23 from computed styles, pixel
+histograms and canvas autocorrelation:
+
+| mode | reference | signature | base unit | texture |
+|---|---|---|---|---|
+| [pixel](reference/modes/pixel.md) | talk2hug | 4 SVG turbulence filters swapped at 10fps | 4px | grain .52 screen |
+| [plate](reference/modes/plate.md) | perseus | display face quantized to 32 units/em | **2px** | grain .06 overlay |
+| [editorial](reference/modes/editorial.md) | forge | sticky pinned hero, the page scrolls over it | 4px | **none** |
+| [scrollfield](reference/modes/scrollfield.md) | lighthouse | `animation-timeline`, reveals bound to scroll not to a clock | **2px** | **none** |
+
+[reference/modes/README.md](reference/modes/README.md) carries what held across all three —
+weight 400 everywhere, tracking as a monotonic function of size locked in em, line-height
+inverting with size, one accent hue or none, motion in two bands with nothing between 300 and
+420ms. Treat a violation of those as a defect. The divergences are the modes, and they contradict
+each other directly on base unit, texture and radius; averaging them resolves every contradiction
+toward the stock default.
+
+**These apply only where a project opted in.** A `.impeccable/brand.json` in the target repo
+selects the mode and declares the tokens; `ui-gate/rules/tokens.sh` reads its `type.scale` and
+fails a build off it. With no such file, nothing here fires and the surface is built normally.
+Schema and field-by-field rationale:
+[reference/modes/brand.schema.json](reference/modes/brand.schema.json).
+
+## Claude Design
+
+Claude Code ships `/design-sync` and `/design-login` built into the CLI binary (verified at
+2.1.239), backed by a `DesignSync` tool with `list_projects`, `create_project`, `get_project`,
+`list_files`, `write_files`, `delete_files`, `finalize_plan`. It detects Storybook or bare-package
+repo shape, builds and grades component previews, and maintains `.design-sync/` in-repo.
+
+Direction is one way: **Claude Code pushes a design system up to claude.ai/design.** Coming back is
+a manual Export, "Hand off to Claude Code". There is no in-session pull and no public API, so this
+is a publishing lane, not a generation lane. Do not plan around generating a Design artifact from
+here.
+
+Requires the feature enabled on the account. If `/design-login` reports no access, say so and tell
+the user to enable Claude Design for their account — Pro, Max and Team have it; Enterprise has it
+off by default and an admin must turn it on. Do not work around the absence.
+
+Do not copy a signature move into a project that did not ask for that mode. One jittering element
+reads as deliberate; two read as a broken renderer.
+
 ## Commands
 
 | Command | Category | Description | Reference |

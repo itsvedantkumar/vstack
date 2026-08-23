@@ -6,6 +6,40 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.23.0 — 2026-08-23
+
+**Four visual modes, measured rather than described.** `impeccable` described the bar in
+adjectives, which cannot produce it. The only head-to-head anyone has run on config-layer
+interventions found prose instruction without retrieval made outcomes worse than none — 9.94%
+regression rate against a 6.08% baseline — while the same instruction with retrieval context
+reached 1.82%. So the bar now ships as numbers read off live sites: computed styles, pixel
+histograms, canvas autocorrelation, font-outline measurement.
+
+`reference/modes/` carries `pixel`, `plate`, `editorial` and `scrollfield`, each with its
+signature mechanism written out as implementable CSS. What held across all four is separated from
+what distinguishes them, because the distinguishing properties contradict each other directly —
+base unit 2px against 4px, grain against none, binary radius against a three-step set — and
+averaging them resolves every contradiction toward the stock default.
+
+The invariants are enforceable claims, not taste: weight 400 for all display and body with
+hierarchy carried by size and tracking; tracking as a monotonic function of size locked in `em`,
+crossing zero at 15–20px; line-height inverting with size; one accent hue or none; motion in two
+bands with nothing between 300 and 420ms.
+
+**Opt-in per project.** A `.impeccable/brand.json` selects the mode and declares tokens.
+`ui-gate/rules/tokens.sh` already reads its `type.scale` and fails a build off it. With no such
+file nothing fires. A skill that decides on its own whether something deserves to be beautiful
+would fire wrongly and constantly; a file in the repo is a decision somebody made.
+
+**Claude Design documented as a publishing lane.** `/design-sync` and `/design-login` are built
+into the CLI binary at 2.1.239 with a seven-operation `DesignSync` tool. Flow is one way — push a
+design system up, export by hand to come back — so it is not a generation lane and should not be
+planned around as one. Where the account lacks access, say so and tell the user to enable it
+rather than working around the absence.
+
+Two defects were recorded from the references rather than copied: a 12px consent line failing AA
+at 4.34:1, and a scroll-driven site whose `prefers-reduced-motion` coverage misses its own hero.
+
 ## 1.22.0 — 2026-08-23
 
 **Register rule tightened after it failed once.** v1.21.0 banned commentary on the facts and did
