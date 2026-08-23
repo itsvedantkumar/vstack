@@ -60,23 +60,31 @@ measures the second one, and that cannot run in CI here by deliberate decision: 
 ## test-breadth-mandate.sh
 
 A standalone reproduction script for the delegation mandate in `skill-mandate.sh`: it feeds four
-hand-built transcripts straight into the hook and prints what the hook decided, with no gate
+hand-built transcripts straight into the hook and asserts on what the hook decided, with no gate
 scaffolding in between. Run it by hand when touching the breadth-counting logic and you want to
-see the hook's raw stdout/exit code for a case, not just pass/fail:
+see the hook's raw decision for a case, not just pass/fail:
 
 ```bash
 tests/test-breadth-mandate.sh
 ```
 
-The four cases it drives -- one directory of same-extension fixtures, a real multi-directory
-multi-extension change, the same change after a `Task` call, and a wide same-extension sweep --
-are also codified as cases h/i/j inside check 27 of `.claude/verify.sh` (`skill mandate decides
-correctly`), which is what the gate actually enforces on every run. This script is the harness
-that found the two shapes check 27 was missing before it had cases for them: five fixture writes
-to one directory that the first version of the mandate counted as five distinct things instead of
-one, and three dotfiles (`.editorconfig`, `.gitignore`, `.npmrc`) across three directories that
-the second version read as three different file extensions. Kept here as the fast, no-gate way to
-reproduce a mandate decision by hand; the gate is the source of truth.
+The four cases it drives are one directory of same-extension fixtures, a real multi-directory
+multi-extension change, the same change after an attributed `Task` call, and a wide
+same-extension sweep. Check 27 of `.claude/verify.sh` (`skill mandate decides correctly`) covers
+overlapping ground in cases h/i/j and is what the gate enforces on every run, but the two sets are
+not the same. Check 27 has no delegation-suppression case at all, and its case `i` accepts any
+block rather than requiring the block to name the breadth mandate, so an unrelated mandate firing
+would satisfy it. This script asserts the specific `multi-directory work --` line.
+
+This script is the harness that found the two shapes check 27 was missing before it had cases for
+them: five fixture writes to one directory that the first version of the mandate counted as five
+distinct things instead of one, and three dotfiles (`.editorconfig`, `.gitignore`, `.npmrc`)
+across three directories that the second version read as three different file extensions.
+
+It reads the hook's stdout JSON, not its exit code. That distinction is the whole reason the file
+is trustworthy: the hook exits 0 whether it blocks or not, so an earlier version of this script
+was structurally incapable of failing, and reported a pass over a block it never looked at. The
+gate is still the source of truth; this is the fast way to reproduce a decision by hand.
 
 ## team-gating.sh
 
