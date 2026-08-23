@@ -114,11 +114,30 @@ skills=$(
 #     mandate name a Bash line it otherwise would not have, never suppress one that is real
 #   - the same trap in the mirror: `[[ "$x" > "$y" ]]` and `[ "$a" > "$b" ]` are lexicographic
 #     string comparisons, not redirects, and the redirect scan cannot tell the difference -- it
-#     reads `$y`/`$b` off as a write target. Checked before shipping this: the fallout is bounded
-#     to inert noise, because a bare `$var` has no `/` (parent dir collapses to the same `.`
-#     every extension-less token already collapses to) and no `.` (no extension token is emitted
-#     at all), so it cannot supply the second directory or the second extension the conjunctive
-#     threshold needs on its own -- confirmed by hand, not assumed
+#     reads `$y`/`$b` off as a write target. This used to be dismissed here as inert noise on the
+#     theory that a bare `$var` has neither `/` nor `.` to supply a second directory or extension
+#     on its own. That theory was wrong, measured against a real 15MB transcript: combined with
+#     heredoc-body leakage (below), unexpanded-`$` candidates were not inert, they were the
+#     dominant term behind a reported 53 directories / 83 extensions for a session that had
+#     written one real file. `emit()` now drops any candidate containing `$` outright rather
+#     than trusting it to stay harmless -- cheap, and it removes this whole family in one place
+#     regardless of which rule produced the candidate.
+#   - a line inside an open heredoc body is skipped entirely (tracked by the in_hd/hd_delim state
+#     machine in emit()'s caller), so `cat > new-check.sh <<'EOF'` counts only new-check.sh, not
+#     every `>`/`cp`/`mv`/`open()`-shaped line the generated script's own body happens to contain.
+#     Before this, a test-fixture generator that wrote fixture code containing its own example
+#     `printf ... > path` was read as this session performing that write too -- the other half of
+#     the 53/83 measurement above. Residual within this fix: two heredocs opened on the same
+#     physical line, or a delimiter line that also carries trailing content after it, are not
+#     modeled -- both are rare enough in practice that chasing them was not worth it here.
+#   - a same-line `>` used as a comparison/arithmetic/format-string character *outside* a heredoc
+#     body -- `awk '{if (a>b) ...}'`, a `printf` format token like `%.3f` that happens to follow a
+#     stray `>` earlier on the line -- is still misread as a redirect target exactly as before.
+#     Suppressing heredoc bodies removed most of this family's real-world volume (it is what most
+#     of these lines were embedded in), and the survivors are short, extension-poor, non-slash
+#     tokens (`9.9`, `1{print`, `>>>>>`) that read the same way the existing extension-less-token
+#     analysis above already argues is bounded -- left as a known, disclosed miss rather than
+#     chased with a real shell tokenizer, which this file has never tried to be.
 # None of this is a shell parser. It is a best-effort net over write shapes that are actually
 # common in this repo's own history, traded deliberately against reads: `grep`, `cat`, `ls`,
 # `git add`, `find` without `-delete`, and command substitution never match any rule below, so
@@ -133,52 +152,119 @@ if [ -n "$AWK_BIN" ]; then
               | select(.type=="tool_use" and .name=="Bash") | .input.command // empty' "$tr_" 2>/dev/null
   )
   if [ -n "$bash_cmds" ]; then
+    # emit() is the one gate every extracted candidate passes through before it can become a
+    # path: empty, and -- new -- anything still carrying an unexpanded shell variable. A path
+    # like $g_empty/app/src/C.tsx never resolved to a real file; it is a fixture literal (this
+    # repo writes exactly that shape in its own test-generator scripts) or a template a later
+    # command substitutes into, and either way this hook has no value to substitute it with, so
+    # counting it as a directory/extension is pure noise, not a conservative guess.
+    #
+    # Heredoc-body suppression is the second half. `cat > new-check.sh <<'CHK' ... CHK` writes
+    # exactly one real file -- new-check.sh, captured by the `>` rule on the opening line, same
+    # as always -- but every line *inside* that heredoc's body is script source being written
+    # to disk, not a command running in this turn. Before this fix the same `>>?` / `cp`/`mv`
+    # regexes ran over body lines too, so a generated test fixture that itself contained
+    # `printf ... > "$g_empty/app/src/C.tsx"` or `mv .github/workflows/verify.yml /tmp/...`
+    # inside its own body text was read as a second, third, fourth real write by *this*
+    # session -- confirmed against a real 15MB transcript, where it was the dominant term
+    # behind a reported 53 directories / 83 extensions that should have been ~1. The state
+    # machine below tracks whether the current physical line is inside an open heredoc body
+    # (in_hd) and skips all extraction there, resuming only once a line equal to the opening
+    # delimiter (optionally indented, for `<<-`) is seen. It does not attempt to track nested
+    # heredocs inside a body -- while in_hd, every line is skipped outright, including one that
+    # looks like it opens another heredoc, which is correct: it is body text either way, and the
+    # only delimiter that matters is the outer one already being waited for.
+    #
+    # A here-string (`cmd <<<"$x"`) does not falsely open heredoc-suppression: after consuming
+    # `<<` plus an optional `-` plus optional spaces, the next character is still the third `<`,
+    # which matches neither the stripped-quote branch nor a bareword delimiter, so the match
+    # fails and in_hd is never set. A bitshift (`$((1 << 3))`) fails the same way -- the char
+    # after `<<` is a digit, not `[A-Za-z_]`. Checked by hand against both shapes before shipping.
+    #
+    # Suppression only engages when the SAME physical line also matched one of the write rules
+    # above (line_had_write) -- this is not incidental, it is the line separating an inert
+    # heredoc from an executed one. `cat > file <<EOF` and `tee file <<EOF` both write the body
+    # to a file verbatim; the body never runs, so any `>`/`cp`/`open()`-shaped text inside it
+    # describes what the generated file contains, not what this Bash call did. `python3 - <<PY`
+    # and `bash <<EOF`, by contrast, pipe the body to an interpreter that executes it immediately
+    # in this same tool call -- neither line matches any write rule on its own (no redirect, no
+    # cp/mv, nothing), so line_had_write is 0 and the body is scanned normally, meaning
+    # `open("config/c.json", "w")` inside that body is still counted, correctly, as a real write.
+    # Gating on line_had_write rather than on the presence of `<<` alone is what tells these two
+    # shapes apart without knowing what command is on the line -- the first version of this fix
+    # suppressed both alike and silently broke the one fixture (test-breadth-mandate.sh PROOF 5)
+    # that depends on a `python3 - <<PY` heredoc's write being seen.
     bash_write_extract='
+    function emit(f) {
+      if (f == "" || f ~ /\$/) return
+      print f
+    }
+    BEGIN { in_hd = 0; hd_delim = "" }
     {
       line = $0
+      line_had_write = 0
+      if (in_hd) {
+        d = line
+        gsub(/^[ \t]+/, "", d)
+        if (d == hd_delim) { in_hd = 0; hd_delim = "" }
+        next
+      }
       if (match(line, /(^|[;&|]| )sed[ \t]+-i[^ \t]*[ \t]+/)) {
+        line_had_write = 1
         rest = substr(line, RSTART + RLENGTH)
         n = split(rest, toks, /[ \t]+/)
         if (n >= 1) {
           f = toks[n]
           gsub(/^["'"'"']|["'"'"';]+$/, "", f)
-          if (f !~ /^-/ && f != "") print f
+          if (f !~ /^-/) emit(f)
         }
       }
       work = line
       while (match(work, />>?[ \t]*[^ \t;&|)]+/)) {
+        line_had_write = 1
         tgt = substr(work, RSTART, RLENGTH)
         work = substr(work, RSTART + RLENGTH)
         sub(/^>>?[ \t]*/, "", tgt)
         gsub(/^["'"'"']|["'"'"']$/, "", tgt)
-        if (tgt !~ /^&/ && tgt !~ /^\/dev\//) print tgt
+        if (tgt !~ /^&/ && tgt !~ /^\/dev\//) emit(tgt)
       }
       if (match(line, /(^|[;&|]| )tee[ \t]+(-a[ \t]+)?/)) {
+        line_had_write = 1
         rest = substr(line, RSTART + RLENGTH)
         n = split(rest, toks, /[ \t]+/)
         for (i = 1; i <= n; i++) {
           t = toks[i]
           if (t ~ /^-/) continue
           gsub(/^["'"'"']|["'"'"']$/, "", t)
-          if (t != "") print t
+          emit(t)
           break
         }
       }
       if (match(line, /(^|[;&|]| )(cp|mv)[ \t]+/)) {
+        line_had_write = 1
         rest = substr(line, RSTART + RLENGTH)
         n = split(rest, toks, /[ \t]+/)
         if (n >= 2) {
           f = toks[n]
           gsub(/^["'"'"']|["'"'"']$/, "", f)
-          if (f !~ /^-/ && f != "") print f
+          if (f !~ /^-/) emit(f)
         }
       }
       s = line
       while (match(s, /open\([ \t]*["'"'"'][^"'"'"']+["'"'"'][ \t]*,[ \t]*["'"'"'][waxWAX][^"'"'"']*["'"'"']/)) {
+        line_had_write = 1
         m = substr(s, RSTART, RLENGTH)
         s = substr(s, RSTART + RLENGTH)
         if (match(m, /["'"'"'][^"'"'"']+["'"'"']/)) {
-          print substr(m, RSTART + 1, RLENGTH - 2)
+          emit(substr(m, RSTART + 1, RLENGTH - 2))
+        }
+      }
+      if (line_had_write && match(line, /<<-?[ \t]*/)) {
+        rest2 = substr(line, RSTART + RLENGTH)
+        gsub(/^["'"'"']/, "", rest2)
+        if (match(rest2, /^[A-Za-z_][A-Za-z0-9_]*/)) {
+          hd_delim = substr(rest2, RSTART, RLENGTH)
+          in_hd = 1
         }
       }
     }
@@ -229,10 +315,26 @@ fi
 #
 # Dotfile handling: a file starting with . and containing no further . has no extension
 # (it is pure name, not name + type). .eslintrc.json yields json; .eslintrc yields nothing.
+#
+# Dispatch-tool name: the subagent-launch tool is called "Task" in the classic Claude Code CLI
+# and "Agent" in the Claude Agent SDK build this hook was actually dogfooded against -- a real
+# 15MB transcript logged 70 "Agent" tool_use blocks and zero "Task" ones, which meant this
+# counter read 0 and both the delegation mandate and the agent-naming mandate below misfired on
+# every session running that build: the former claimed "zero subagents" over 70 of them, the
+# latter (gated on task_count>=1) was structurally unable to ever fire. Counting both names is
+# not future-proofed against a third rename; a build using neither counts 0 and this hook falls
+# back to its existing bias (say nothing rather than guess) rather than accusing a session that
+# genuinely delegated under a name this file does not yet know.
+#
+# "TaskCreate" is deliberately NOT included here. It exists in this same build and looked like a
+# third dispatch-tool alias at a glance, but its recorded .input is {subject, description,
+# activeForm} -- a todo/checklist item, the same shape as TodoWrite -- not {prompt,
+# subagent_type} like Task/Agent. Counting it would credit a session for delegating work it only
+# planned. Confirmed against 3 real transcripts on this machine before excluding it, not assumed.
 task_count=$( "$JQ" -s '[.[] | select(.type=="assistant") | .message.content[]?
-            | select(.type=="tool_use" and .name=="Task")] | length' "$tr_" 2>/dev/null )
+            | select(.type=="tool_use" and (.name=="Task" or .name=="Agent"))] | length' "$tr_" 2>/dev/null )
 
-# Agent naming: if Task count >= 1, one of the roster must appear in assistant text.
+# Agent naming: if Task/Agent count >= 1, one of the roster must appear in assistant text.
 # Extract all assistant message text.
 if [ "$task_count" -ge 1 ]; then
   assistant_text=$( "$JQ" -r 'select(.type=="assistant") | .message.content[]?
@@ -265,7 +367,7 @@ extensions=$( printf '%s\n' "$paths" | sed -E '
 ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | grep -c . )
 if [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; then
   unmet="$unmet
-  multi-directory work -- touched $dir_count directories with $ext_count file types, zero subagents (try /team, or TaskCreate: code-reviewer, qa, worker, planner, test-writer)"
+  multi-directory work -- touched $dir_count directories with $ext_count file types, zero subagents (try /team, or dispatch one directly: code-reviewer, qa, worker, planner, test-writer)"
 fi
 
 # Prove it works: a completion claim closing this turn with zero evidence produced in it.
@@ -304,7 +406,7 @@ fi
 #              a completion claim is conversational, not a claim about code, and the false-block
 #              cost of guessing otherwise is worse than the miss (see the false-positive note by
 #              the pattern list below).
-#   silent  -- ANY Bash, Read, or Task tool_use anywhere in the turn, in any order relative to
+#   silent  -- ANY Bash, Read, or Task/Agent tool_use anywhere in the turn, in any order relative to
 #              the edit. This is deliberately generous in both directions: a Bash call is treated
 #              as evidence whether or not it happens to be a test invocation, and a Read is
 #              treated as evidence even if it came before the edit (i.e. was investigation of the
@@ -320,7 +422,7 @@ fi
 # Known false-positive shape, disclosed rather than chased: a turn that Writes a genuinely
 # unverifiable artifact -- a poem, a note, a scratch file with no "works" to check -- and closes
 # with a plain "Done." trips this exactly like an unverified code fix would, because file-write
-# plus closing "done" plus no Bash/Read/Task in the same turn is indistinguishable from here.
+# plus closing "done" plus no Bash/Read/Task/Agent in the same turn is indistinguishable from here.
 # Scoping the edit check to code-like extensions was considered and rejected: it would have
 # meant maintaining an extension allowlist this hook has no way to keep current, trading one
 # false-positive shape for a false-negative one (a `.sh` fix that never runs is exactly the case
@@ -379,7 +481,7 @@ if [ -n "$piw_final_text" ] && printf '%s' "$piw_final_text" | grep -qiE "$piw_p
 if [ "$piw_edit_n" -ge 1 ] && [ "$piw_claims" -eq 1 ] \
    && [ "$piw_bash_n" -eq 0 ] && [ "$piw_read_n" -eq 0 ] && [ "$piw_task_n" -eq 0 ]; then
   unmet="$unmet
-  prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task call in the turn to back it up"
+  prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task/Agent call in the turn to back it up"
 fi
 
 [ -n "$unmet" ] || { rm -f "$cnt_file"; exit 0; }

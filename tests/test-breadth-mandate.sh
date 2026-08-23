@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # test-breadth-mandate.sh — the hand-runnable reproduction of two mandates inside
 # claude/hooks/skill-mandate.sh: the breadth mandate (multi-directory, multi-type work with
-# zero subagents, PROOFs 1-6) and the prove-it-works mandate (a completion claim closing a
-# turn that edited a file and produced zero verifying evidence, PROOFs 7-9). The name is now
-# narrower than the file's scope; it stayed rather than churn every call site over a rename.
+# zero subagents, PROOFs 1-6 and 10-12) and the prove-it-works mandate (a completion claim
+# closing a turn that edited a file and produced zero verifying evidence, PROOFs 7-9). The name
+# is now narrower than the file's scope; it stayed rather than churn every call site over a
+# rename. PROOFs 10-12 cover the dispatch-tool-name defect (task_count only ever recognized
+# "Task", never the "Agent" name the Claude Agent SDK build actually uses) and the Bash
+# write-extraction over-match defect ($VAR-containing paths and heredoc-body content read as
+# real writes) found by dogfooding this hook against a real 15MB transcript.
 #
 # The hook's contract (Claude Code Stop-hook protocol, not exit code): a met mandate prints
 # nothing to stdout and exits 0; an unmet one prints one JSON object on stdout --
@@ -45,6 +49,9 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 7: edit + closing completion claim, zero evidence -> prove-it-works blocks" "jq not installed"
   skip "PROOF 8: edit + real Bash command + closing completion claim -> prove-it-works silent" "jq not installed"
   skip "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent" "jq not installed"
+  skip "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent" "jq not installed"
+  skip "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks" "jq not installed"
+  skip "PROOF 12: Bash write target containing an unexpanded \$VAR -> not counted as a write" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -69,8 +76,8 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/vstack-mandate-breadth.XXXXXX")"
 # code untouched. Sweep any stale counters before running and after, so every run starts and
 # ends from the same state the hook sees on a session it has never met.
 sweep_latch_(){
-  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-9] 2>/dev/null
-  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-9].lock 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[0-9]* 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[0-9]*.lock 2>/dev/null
 }
 sweep_latch_
 trap 'sweep_latch_; rm -rf "$WORK"' EXIT
@@ -238,6 +245,61 @@ if [ -z "$HOOK_OUT" ]; then
   ok "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent"
 else
   bad "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 10: same file spread as PROOF 2/3, dispatched via the Agent tool name -----------------
+# Negative direction for the exact defect this round of fixes exists to close: the subagent
+# dispatch tool is named "Task" in the classic Claude Code CLI but "Agent" in the Claude Agent
+# SDK build this hook was actually dogfooded against, and before this fix task_count only ever
+# looked for "Task" -- a real 15MB transcript logged 70 "Agent" tool_use blocks and a task_count
+# of 0, so the delegation mandate reported "zero subagents" over 70 of them. This fixture is
+# PROOF 3 with the dispatch tool's name swapped from "Task" to "Agent" and nothing else changed:
+# same 3-dir/3-ext file spread, same roster call sign (BIRDPERSON) in the closing text so agent
+# naming is satisfied and cannot confound the read. If task_count is still only counting "Task",
+# this fails exactly the way the real session did.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Agent","input":{"subagent_type":"code-reviewer","prompt":"review","description":"review"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
+run_hook_ proof10
+if ! names_breadth_; then
+  ok "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent"
+else
+  bad "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent" \
+      "expected no 'multi-directory work --' line once an Agent call is present, got: reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -------------------------
+# Positive direction, guarding the dual-name OR condition itself rather than either name alone:
+# three real sed -i / heredoc writes across hooks/, lib/ and config/ (the same shape PROOF 5
+# already covers) with no tool_use named "Task" and none named "Agent" anywhere in the
+# transcript. A fix that special-cased one name and silently dropped the other (or that always
+# evaluated the OR as true) would pass PROOF 5 or PROOF 10 alone; this is the case where both
+# names are genuinely absent and task_count must land on exactly 0, not on a stale true/false
+# from whichever name was checked last.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"sed -i.bak -e s/x/y/ hooks/a.sh"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"sed -i \"\" -e s/a/b/ lib/b.py"}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"python3 - <<PY\nwith open(\"config/c.json\", \"w\") as f:\n    f.write(\"{}\")\nPY"}}]}}'
+run_hook_ proof11
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks"
+else
+  bad "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks" \
+      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 12: a Bash write target containing an unexpanded $VAR is not counted ------------------
+# Negative direction for the second defect this round closes: three Bash redirects that, read
+# literally, span 3 directories and 3 extensions ($OUT/app/src/a.ts, $OUT/lib/b.py,
+# $OUT/doc/c.md) -- enough to clear both breadth thresholds if taken at face value. Every one of
+# them writes to a path containing a literal, unexpanded shell variable, which was never a real
+# file: it is a template the model quoted, not a location anything landed on. This is the exact
+# shape a real session hit -- `$g_empty/app/src/C.tsx`, a fixture literal grep'd out of a test
+# script -- read as three genuine files across three genuine directories. None of the three
+# should survive extraction, so $paths stays empty and the hook must be completely silent, the
+# same strict bar PROOF 1 and PROOF 6 hold.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"printf x > \"$OUT/app/src/a.ts\""}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"printf y > \"$OUT/lib/b.py\""}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"printf z > \"$OUT/doc/c.md\""}}]}}'
+run_hook_ proof12
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 12: Bash write target containing an unexpanded \$VAR -> not counted as a write"
+else
+  bad "PROOF 12: Bash write target containing an unexpanded \$VAR -> not counted as a write" \
       "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
