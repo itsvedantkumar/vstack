@@ -1830,9 +1830,32 @@ if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_m
     && o_errs="$o_errs\n  the overlay left a .claude/CLAUDE.md behind — the duplication survives a re-run"
 
   # Sandbox: no ~/.claude, so the overlay is the only lane and must carry the policy.
+  #
+  # Two ambient leaks made this scenario stop being a sandbox and start being "whichever shell
+  # happened to run verify.sh":
+  #
+  # CONDUCTOR_WORKSPACE_PATH is set by the Conductor desktop app, which injects its own workspace
+  # block and expects the hook to stand down (see the "workspace conventions" comment below in
+  # inject-session-context.sh). A cloud sandbox is never Conductor-launched, so it never has this
+  # var — but a developer measuring this check from inside a Conductor-launched terminal DOES,
+  # which silently took the ~670-byte WORKSPACE CONVENTIONS block out of the count and made the
+  # measurement pass on the author's machine while every plain terminal, CI runner and container
+  # got the block and failed. Check 18's probe() already pins this same variable for the same
+  # reason (`env CONDUCTOR_WORKSPACE_PATH="${3:-}"` a hundred lines up) — this scenario just never
+  # got the same treatment when it was written a day later. Pinned to "" here, matching that
+  # precedent: empty satisfies the hook's `[ -z ... ]` test the same as unset, so this always
+  # measures the no-Conductor branch, which is what an actual sandbox is.
+  #
+  # CLAUDE_PROJECT_DIR (and $PWD, its fallback) is how the hook finds the repo root it should
+  # describe. Never set here, the hook fell back to $PWD — which is wherever verify.sh itself was
+  # invoked from, i.e. THIS checkout's own root and branch, not $o_dir's. The "sandbox" was
+  # measuring the developer's real clone path and branch name, not the synthetic repo the check
+  # built to stand in for one. Pinned to "$o_dir" so the block it measures actually describes the
+  # sandbox under test.
   o_home="$o_tmp/empty"; mkdir -p "$o_home"
   o_out=$(printf '{"hook_event_name":"SessionStart"}' \
-          | HOME="$o_home" "$o_dir/.claude/hooks/inject-session-context.sh" 2>/dev/null \
+          | env CONDUCTOR_WORKSPACE_PATH="" CLAUDE_PROJECT_DIR="$o_dir" HOME="$o_home" \
+            "$o_dir/.claude/hooks/inject-session-context.sh" 2>/dev/null \
           | jq -r '.hookSpecificOutput.additionalContext // ""')
   case "$o_out" in
     *"$o_marker"*) ;;
@@ -1840,9 +1863,18 @@ if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_m
   esac
   # Every byte is paid on every session there, and check 18 cannot see this variant because it
   # probes the source copy, which is not an overlay and never appends the policy.
+  #
+  # 7168 (7 KiB) is not fitted to a single reading. With both leaks above pinned, this scenario
+  # measured 6886 B on macOS (the longest $TMPDIR: /private/var/folders/.../T/tmp.XXXXXXXXXX) and
+  # 6754-6784 B in debian, alpine and ubuntu containers (short /tmp/tmp.XXXXXXXXXX, and
+  # init.defaultBranch varies main/master by 2 bytes) — same commit, same content, ~130 B of pure
+  # tmpdir-naming noise, the same kind of machine-to-machine drift check 18 already documents in
+  # its own README-comparison tolerance. 7168 clears the worst of those with ~280 B of headroom,
+  # matching check 18's absolute margin on its own baseline (441 B) and skills (382 B) rows: room
+  # for a sentence added on purpose, not for a block that ran away.
   o_sz=$(printf '%s' "$o_out" | wc -c | tr -d ' ')
-  [ "${o_sz:-0}" -le 6144 ] \
-    || o_errs="$o_errs\n  the sandbox session block is $o_sz bytes, over the 6144 cap"
+  [ "${o_sz:-0}" -le 7168 ] \
+    || o_errs="$o_errs\n  the sandbox session block is $o_sz bytes, over the 7168 cap"
 
   # This machine: ~/.claude/CLAUDE.md carries the policy, so the overlay must not add a second.
   o_gh="$o_tmp/withglobal"; mkdir -p "$o_gh/.claude/hooks"
