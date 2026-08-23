@@ -350,3 +350,16 @@ fails on that.
 
 Known gap: `hooks.json` names three of the six scripts under `claude/hooks/` directly. The other
 three are invoked from inside those, so renaming one of them is not caught here.
+
+## dispatch-fleet.sh
+
+`dispatch-fleet.sh` measures the 54-fixture set in `~/vstack-dispatch/` — recall, precision,
+`AMBIGUOUS`/`CHAIN` splits and paraphrase delta, each scored separately. It is broader than
+`auto-trigger.sh` and answers a different question: not "does this one situation still route
+there" but "does a library of 28 skills compete with itself." Samples are non-retrying. Real
+calls sit behind a confirmation gate; the file header carries the sample definition and the
+exit-code contract.
+
+Do not read a blended number off it. Recall and precision are reported apart on purpose, and the
+`AMBIGUOUS` cases are distributions rather than pass/fail — a 50/50 split and a 100/0 split are
+different findings and both matter.

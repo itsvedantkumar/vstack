@@ -4,6 +4,34 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## Unreleased
+
+**Added `tests/dispatch-fleet.sh`**, the fleet-wide dispatch measurement over the 54 frozen
+fixtures in `~/vstack-dispatch/`. `auto-trigger.sh` measures recall per skill and nothing else;
+this scores the four classes separately, because a harness that fires everything scores perfectly
+on recall alone. Precision comes from the eight `neg-*` fixtures where the correct answer is no
+skill at all, the fifteen `col-*` fixtures probe the overlap clusters found by reading the
+descriptions rather than by measurement, and the six `var-*` fixtures restate the same intent
+with none of the description's literal trigger words, so a library working as a keyword index
+scores well on `pos-*` and collapses on `var-*`. One sample is one raw non-retrying invocation;
+the retry-based case run this repo used before stops at the first success and measures "did it
+ever fire" rather than a rate. Raw k/n with two-sided 95% Wilson intervals, never a bare point
+estimate: at n=10 that separates "never fires" from "fires at least about half the time" and
+nothing finer.
+
+Proven against stubs with no model calls spent. Both directions of the oracle control bite — an
+all-firing stub scores `75/75` recall against `0/24` precision, a never-firing stub the exact
+reciprocal — and the bad-selector guard was verified by reproducing the historical
+`0 passed, 0 failed, exit 0` defect under mutation. Resumption is guarded: the run log header
+pins model, turn budget, fence and fixture path, and a resume whose parameters disagree refuses
+by naming the field rather than silently mixing two arms into one k/n. `ToolSearch` is logged
+rather than denied, since denying it moves the measured environment away from the one real
+sessions run in, and `Skill` can never enter the fence — a runtime guard exits 2 at startup if it
+does, because denying it removes the skill listing from context entirely and the harness would
+measure a fleet that is not mounted. No fleet-wide figure may be published until arm A5 of
+`tests/evals/build-the-lever/PREREGISTRATION.md` reports, since the fence this harness inherits
+may itself suppress every skill whose output is an artifact. (SUMMER S-3.)
+
 ## 1.40.0 — 2026-08-23
 
 **The instrument built to measure long-session delegation drift went blind in exactly the sessions
