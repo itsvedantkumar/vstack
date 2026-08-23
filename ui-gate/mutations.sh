@@ -13,7 +13,26 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 GATE=ui-gate/ui-gate.sh
-W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+W=$(mktemp -d)
+
+# The browser families need something served, not a directory. Without this they skip during
+# mutation and every one of their rows reports "did NOT fail when broken" -- which reads as a weak
+# rule when the truth is a harness that never opened the page. Port picked high and fixed; the
+# server dies with the trap.
+UI_PORT=${UI_PORT:-8799}
+_serve_pid=""
+start_serving() {
+  [ -d "$W/serve" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -m http.server "$UI_PORT" --directory "$W/serve" >/dev/null 2>&1 &
+  _serve_pid=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS -o /dev/null "http://localhost:$UI_PORT/index.html" 2>/dev/null && break
+    sleep 0.3
+  done
+  export UI_GATE_URL="http://localhost:$UI_PORT/index.html"
+}
+trap 'rm -rf "$W"; [ -n "$_serve_pid" ] && kill "$_serve_pid" 2>/dev/null; npx --no-install agent-browser close --all >/dev/null 2>&1' EXIT
 PASSED=0; FAILED=0; EXEMPT=0
 
 clean_fixture() {
@@ -26,6 +45,16 @@ export const Card = () => (
 );
 F
   printf '.a{font-size: 16px;}\n' > "$W/app/src/a.css"
+  # A served page for the browser families. Deliberately small and correct: one focusable link
+  # with a visible ring, nothing wider than a phone, so both browser rules hold at baseline and
+  # only a mutation can break them.
+  mkdir -p "$W/serve"
+  cat > "$W/serve/index.html" <<'PAGE'
+<!doctype html><html lang="en"><head><title>ui-gate fixture</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:system-ui}a{display:inline-block;padding:12px}
+a:focus{outline:2px solid #0af;outline-offset:2px}</style></head>
+<body><h1>Fixture</h1><a href="#">Focusable</a><p>Contained copy.</p></body></html>
+PAGE
 }
 
 # rule id -> the single edit that must make that rule, by name, go red
@@ -33,10 +62,15 @@ mutate() { case "$1" in
   TOK-RAW-COLOR)  sed -i.t 's/text-fg-muted/text-fg-muted" style={{ color: "#3b82f6" }}/' "$W/app/src/Card.tsx" && rm -f "$W/app/src/Card.tsx.t" ;;
   TOK-ARBITRARY)  sed -i.t 's/mt-4/mt-[13px]/' "$W/app/src/Card.tsx" && rm -f "$W/app/src/Card.tsx.t" ;;
   TOK-TYPE-SCALE) printf '.b{font-size: 13px;}\n' >> "$W/app/src/a.css" ;;
+  # Mutated in the served page, not a component: these rules measure what a browser computes.
+  COV-VIEWPORT)   printf '<div style="width:900px;height:40px"></div>\n' >> "$W/serve/index.html" ;;
+  A11Y-KEYBOARD)  printf '<style>a:focus{outline:none;box-shadow:none;border:0}</style>\n' >> "$W/serve/index.html" ;;
+  A11Y-AXE)       printf '<button></button>\n' >> "$W/serve/index.html" ;;
   *) return 1 ;;
 esac }
 
 clean_fixture
+start_serving
 base=$("$GATE" "$W/app" 2>&1)
 if ! printf '%s' "$base" | grep -q 'UI GATE OK'; then
   printf 'FAIL  the clean fixture does not pass; nothing below would be evidence\n%s\n' "$base"
@@ -49,7 +83,11 @@ printf 'ok    clean fixture passes at baseline\n'
 # nine rules skipped, the accounting was satisfied at RAN=0, and it printed UI GATE OK and
 # exited 0. Every mutation below would have been just as green on an empty directory.
 empty=$(mktemp -d "$W/empty.XXXXXX")
-nr=$("$GATE" "$empty" 2>&1)
+# UI_GATE_URL is unset for this probe on purpose. The browser families are scoped to a URL, not
+# to the target directory, so with a server running they legitimately execute against an empty
+# directory and the gate is right to report OK. What this control asks is narrower: when there is
+# genuinely nothing to measure, does the gate refuse to claim success.
+nr=$(env -u UI_GATE_URL "$GATE" "$empty" 2>&1)
 if grep -q 'UI GATE OK' <<<"$nr"; then
   printf 'FAIL  the gate reports OK over a target with no UI files; nothing below is evidence\n%s\n' "$nr"
   exit 1

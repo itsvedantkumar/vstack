@@ -30,18 +30,39 @@ else
     || fail TOK-ARBITRARY "arbitrary values: $(printf '%s' "$hits" | head -3 | tr '\n' ' ')"
 fi
 
-# TOK-TYPE-SCALE: font sizes off the scale, and anything under 12px, which is not readable body text.
+# TOK-TYPE-SCALE: font sizes off the project's scale.
+#
+# The scale used to be the literal list 12|14|16|20|24|32|48, typed into this file. Nobody derived
+# it, no project agreed to it, and a project whose display face steps 1.333 from 18px hits it on
+# every heading. A gate that fails correct work trains people to switch the gate off, which is
+# worse than not having one.
+#
+# It reads .impeccable/brand.json now when the target ships one, so the scale a project measured
+# is the scale enforced. The old list survives as the fallback for projects that declare nothing,
+# stated as a default rather than presented as a standard.
+_ui_scale() {
+  local bj="$TARGET/.impeccable/brand.json"
+  if [ -f "$bj" ] && command -v jq >/dev/null 2>&1; then
+    local declared
+    declared=$(jq -r '(.type.scale // [])[]' "$bj" 2>/dev/null | tr '\n' ' ')
+    if [ -n "${declared// /}" ]; then printf '%s' "$declared"; return 0; fi
+  fi
+  printf '12 14 16 20 24 32 48'
+}
+
 if ! _ui_have; then
   skip TOK-TYPE-SCALE "no component or stylesheet files under $TARGET"
 else
+  _scale=$(_ui_scale)
+  _src=$([ -f "$TARGET/.impeccable/brand.json" ] && echo "declared in .impeccable/brand.json" || echo "default scale, no .impeccable/brand.json in this target")
   bad=""
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
     px=$(printf '%s' "$hit" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
-    case "$px" in 12|14|16|20|24|32|48) ;; *) bad="$bad $hit" ;; esac
+    case " $_scale " in *" $px "*) ;; *) bad="$bad $hit" ;; esac
   done <<EOF
 $(_ui_files | xargs grep -hEo 'font-size:[[:space:]]*[0-9]+(\.[0-9]+)?px' 2>/dev/null | head -20)
 EOF
-  [ -z "$bad" ] && pass TOK-TYPE-SCALE "font sizes are on the 12/14/16/20/24/32/48 scale" \
-    || fail TOK-TYPE-SCALE "off-scale font sizes:$(printf '%s' "$bad" | head -c 120)"
+  [ -z "$bad" ] && pass TOK-TYPE-SCALE "font sizes are on the scale [$_scale] ($_src)" \
+    || fail TOK-TYPE-SCALE "off the scale [$_scale] ($_src):$(printf '%s' "$bad" | head -c 110)"
 fi
