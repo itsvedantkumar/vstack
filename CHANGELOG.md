@@ -4,6 +4,42 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.43.0 — 2026-08-24
+
+**`vstack-delegation-log.jsonl` recorded only per-Stop aggregate counts, never which subagent ran
+or how it went.** A session that fanned out to two dozen helpers and got a uniform 0/5 across
+five fixtures could not be diagnosed afterward, because no record of the individual dispatches
+survived past the transcript. `claude/hooks/dispatch-counter.sh` (PostToolUse, matcher
+`Agent|Task`) now also appends one row per dispatch to
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl` -- a single well-known file,
+`VSTACK_REPLAY_LOG` overridable, findable without knowing a session id, never the same file as
+the delegation log. Each row carries `ts`, `session_id`, `dispatch_index` (the same per-session
+counter that already drives the statusline), `tool_name`, `subagent_type`, `description`, and,
+instead of the prompt/result text itself, `prompt_bytes`/`result_bytes` (size only -- a replay
+log full of verbatim prompts is a secret-leak surface, and oh-my-claudecode's own friction report
+uses the same instinct to analyse context bloat without exposing prompts). `duration_ms` and
+`tool_use_id` are carried too: both are already present on the real PostToolUse payload (confirmed
+by reading this CLI build's own hook-input constructor, not assumed) and cost nothing extra to
+record -- `duration_ms` is the field that actually answers "how did it go" without touching
+content at all. Rotation reuses skill-mandate.sh's existing `_delegation_log_row()` cap (2MB,
+keep last 5000 lines) rather than inventing a second policy. `VSTACK_NO_REPLAY_LOG=1` disables the
+replay row alone; `VSTACK_NO_DISPATCH_COUNT=1` (pre-existing) disables it along with everything
+else in this hook. First version of this change added the row via three more jq calls plus two
+`wc -c` pipes per dispatch and measured 72.8ms mean / 74.9ms p95 (n=30) against this hook's own
+24.1ms/27.3ms baseline -- almost entirely macOS fork+exec overhead, and well past the ~25ms p95
+this hook is held to. Folded into the SAME single jq call the hook already spent on
+tool_name/session_id, plus a `[ -d ]` guard before `mkdir -p` and sampling the rotation `stat`
+check to 1 dispatch in 20: re-measured back to back against a stashed pre-change baseline on the
+same machine, mean=24.5ms/p95=26.8ms against baseline mean=24.8ms/p95=25.9ms -- statistically
+flat. Verified end to end against the wired hook, not a hand-made fixture: real dispatch-shaped
+payloads (Task and Agent tool names, a Write tool call that must be ignored, a malformed dispatch
+with no `tool_input` at all, and a non-ASCII description/prompt) produced exactly the rows
+expected, with `~/.claude/vstack-delegation-log.jsonl` (a live 92-row measurement corpus)
+unchanged in line count before and after every run, and `~/.claude/vstack-replay-log.jsonl` never
+created by any test in this suite. One gap stated rather than left to be discovered: this hook's
+matcher never sees `PostToolUseFailure`, which carries `error` instead of `tool_response`, so a
+dispatch that *failed* is invisible to the replay log. The rows record what ran, not what broke.
+
 ## 1.42.0 — 2026-08-23
 
 **The cloud sandbox gate has never armed, and has shipped inert since v1.30.0.** `overlay.sh`

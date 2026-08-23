@@ -2273,7 +2273,7 @@ if command -v jq >/dev/null; then
     # comment documents -- a `VAR=x cmd1 | cmd2` scoping mistake let ~12 vfy-* rows land here
     # once already. If this check ever regresses to that mistake, this is what catches it.
     c40_real_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-delegation-log.jsonl"
-    c40_real_before=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
+    c40_real_before=0; [ -f "$c40_real_log" ] && c40_real_before=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
     [ -n "$c40_real_before" ] || c40_real_before=0
 
     c40_cleanup(){
@@ -2365,7 +2365,7 @@ if command -v jq >/dev/null; then
         || c40_errs="$c40_errs\nrow 3 is not a well-formed latched row: $c40_row3"
     fi
 
-    c40_real_after=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
+    c40_real_after=0; [ -f "$c40_real_log" ] && c40_real_after=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
     [ -n "$c40_real_after" ] || c40_real_after=0
     [ "$c40_real_before" = "$c40_real_after" ] \
       || c40_errs="$c40_errs\nthe operator's real delegation log changed ($c40_real_before -> $c40_real_after lines) -- fixture rows leaked into it"
@@ -2391,6 +2391,20 @@ fi
 # hook actually wrote -- and separately asserts the wiring that installs the reader, because a
 # join proven only in this dev checkout is exactly check 11's inert-plugin-hook shape ported to
 # a second lane.
+#
+# Extended for the same hook's replay-log addition (claude/vstack-replay-log.jsonl, one row per
+# dispatch, sizes not contents): Direction 3 drives the SAME 4-dispatch fixture above through a
+# real VSTACK_REPLAY_LOG/VSTACK_DELEGATION_LOG pair, so "the counter landed" and "the row landed"
+# are evidence from one drive, not two runs that could quietly disagree. Assertions are on
+# behaviour a grep cannot see -- the row exists with the right dispatch_index, nothing reaches
+# the delegation log (fixture destination AND the operator's real one, sampled before/after the
+# way check 40 already does), sentinel prompt/result text never appears anywhere in the log file,
+# and the VSTACK_NO_REPLAY_LOG hatch silences the row without silencing the count. Direction 4
+# pins, rather than fixes, the one gap M-6 disclosed: PostToolUseFailure carries `error` not
+# `tool_response` and this hook's own jq never branches on hook_event_name, so the ONLY thing
+# stopping a failed dispatch from producing a (malformed) row is that dispatch-counter.sh is not
+# wired under PostToolUseFailure at all -- wiring, not logic, and the only part of that gap this
+# repo's own tree can observe without the Claude Code binary actually emitting the event.
 if command -v jq >/dev/null; then
   dc="claude/hooks/dispatch-counter.sh"
   sl="claude/statusline.sh"
@@ -2401,7 +2415,11 @@ if command -v jq >/dev/null; then
     c44_sid="chk44-$$-$(date +%s 2>/dev/null || echo 0)"
     c44_cnt="${TMPDIR:-/tmp}/vstack-dispatch-count-$c44_sid"
     c44_lock="$c44_cnt.lock"
-    c44_cleanup(){ rm -f "$c44_cnt" 2>/dev/null; rmdir "$c44_lock" 2>/dev/null; }
+    c44_cleanup(){
+      rm -f "$c44_cnt" 2>/dev/null; rmdir "$c44_lock" 2>/dev/null
+      rm -rf "${c44_replay_dir:-}" "${c44_deleg_dir:-}" 2>/dev/null
+      unset VSTACK_REPLAY_LOG VSTACK_DELEGATION_LOG VSTACK_NO_REPLAY_LOG
+    }
     trap c44_cleanup EXIT
 
     c44_payload(){ printf '{"session_id":"%s","model":{"display_name":"Claude"}}' "$c44_sid"; }
@@ -2417,11 +2435,35 @@ if command -v jq >/dev/null; then
       *RICK*) c44_errs="$c44_errs\na session with zero dispatches rendered a RICK segment: $c44_out0" ;;
     esac
 
+    # Replay-log fixtures for Direction 3, wired up BEFORE the drive below so the same dispatches
+    # produce both the counter file (Direction 1) and the replay rows (Direction 3). Two isolated
+    # temp destinations, exported (not `VAR=x cmd | cmd`-scoped -- that leaked fixture rows into
+    # the real delegation log once already), plus both real logs' line counts sampled now, before
+    # anything is driven.
+    c44_replay_dir=$(mktemp -d)
+    c44_deleg_dir=$(mktemp -d)
+    c44_replay="$c44_replay_dir/replay.jsonl"
+    c44_deleg="$c44_deleg_dir/deleg.jsonl"
+    c44_real_replay="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl"
+    c44_real_deleg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-delegation-log.jsonl"
+    c44_rreplay_before=0; [ -f "$c44_real_replay" ] && c44_rreplay_before=$(wc -l < "$c44_real_replay" 2>/dev/null | tr -d ' ')
+    c44_rdeleg_before=0; [ -f "$c44_real_deleg" ] && c44_rdeleg_before=$(wc -l < "$c44_real_deleg" 2>/dev/null | tr -d ' ')
+    export VSTACK_REPLAY_LOG="$c44_replay"
+    export VSTACK_DELEGATION_LOG="$c44_deleg"
+    c44_desc="chk44-desc-$c44_sid"
+    c44_prompt="chk44-PROMPT-SECRET-$c44_sid-must-not-leak"
+    c44_result="chk44-RESULT-SECRET-$c44_sid-must-not-leak"
+    c44_full(){
+      printf '{"session_id":"%s","tool_name":"%s","tool_input":{"description":"%s","prompt":"%s","subagent_type":"qa-fixture"},"tool_response":{"content":"%s"},"duration_ms":137,"tool_use_id":"tu-%s"}' \
+        "$c44_sid" "$1" "$c44_desc" "$c44_prompt" "$c44_result" "$c44_sid" | "./$dc" >/dev/null 2>&1
+    }
+
     # Direction 1 (the join): drive the real writer -- 3 Task + 1 Agent, both tool_names the
     # hook accepts -- then one Write, which the hook must ignore, so the count asserted below is
     # the exact N driven and not just "some positive number". Then read the real reader on the
-    # same session id.
-    c44_dispatch Task; c44_dispatch Task; c44_dispatch Task; c44_dispatch Agent
+    # same session id. The first dispatch carries the sentinel description/prompt/result so
+    # Direction 3 below reads off this SAME drive rather than a second one.
+    c44_full Task; c44_dispatch Task; c44_dispatch Task; c44_dispatch Agent
     c44_n=4
     c44_dispatch Write
 
@@ -2430,6 +2472,74 @@ if command -v jq >/dev/null; then
       *"RICK"*"$c44_n"*) ;;
       *) c44_errs="$c44_errs\nafter $c44_n Agent/Task dispatches (+1 ignored Write) statusline did not render RICK ...$c44_n: $c44_out1" ;;
     esac
+
+    # Direction 3a: a dispatch writes a replay row, and dispatch_index joins the SAME counter
+    # file the statusline read above -- one row per Agent/Task dispatch, the ignored Write
+    # produces none, so the count asserted is exact, not "at least one".
+    c44_rows=$(grep -c . "$c44_replay" 2>/dev/null); [ -n "$c44_rows" ] || c44_rows=0
+    [ "$c44_rows" -eq "$c44_n" ] \
+      || c44_errs="$c44_errs\nexpected $c44_n replay rows (one per Agent/Task dispatch, Write excluded), found $c44_rows: $(cat "$c44_replay" 2>/dev/null)"
+
+    c44_row1=$(sed -n '1p' "$c44_replay")
+    c44_promptlen=$(printf '%s' "$c44_prompt" | wc -c | tr -d ' ')
+    jq -e --arg sid "$c44_sid" --arg desc "$c44_desc" --argjson plen "$c44_promptlen" \
+      '.session_id==$sid and .dispatch_index==1 and .tool_name=="Task"
+       and .description==$desc and .prompt_bytes==$plen and (.result_bytes|type)=="number"
+       and (.duration_ms|type)=="number" and (.tool_use_id|type)=="string"' \
+      <<<"$c44_row1" >/dev/null 2>&1 \
+      || c44_errs="$c44_errs\nreplay row 1 is not a well-formed row for the sentinel dispatch: $c44_row1"
+
+    c44_row_last=$(sed -n "${c44_n}p" "$c44_replay")
+    c44_cnt_val=$(cat "$c44_cnt" 2>/dev/null)
+    jq -e --arg sid "$c44_sid" --argjson n "$c44_n" \
+      '.session_id==$sid and .dispatch_index==$n' <<<"$c44_row_last" >/dev/null 2>&1 \
+      || c44_errs="$c44_errs\nreplay row $c44_n's dispatch_index does not equal $c44_n: $c44_row_last"
+    [ "$c44_cnt_val" = "$c44_n" ] \
+      || c44_errs="$c44_errs\nthe counter file the statusline reads ($c44_cnt) holds '$c44_cnt_val', not $c44_n -- replay dispatch_index and the statusline counter have drifted apart"
+
+    # Direction 3b: the secrecy boundary. description is recorded verbatim by design; prompt and
+    # result are sizes only. Asserted by grepping the WHOLE replay file for each sentinel string
+    # rather than trusting the schema -- a byte-count field can be quietly swapped for the text
+    # it was meant to summarize without ever changing its name.
+    grep -qF "$c44_desc" "$c44_replay" \
+      || c44_errs="$c44_errs\ndescription sentinel never appears in the replay log -- description is not being recorded verbatim"
+    grep -qF "$c44_prompt" "$c44_replay" \
+      && c44_errs="$c44_errs\nprompt sentinel text appears in the replay log -- prompt contents are leaking, not just prompt_bytes"
+    grep -qF "$c44_result" "$c44_replay" \
+      && c44_errs="$c44_errs\nresult sentinel text appears in the replay log -- tool_response contents are leaking, not just result_bytes"
+
+    # Direction 3c: the delegation log is a different file for a different purpose
+    # (skill-mandate.sh's per-Stop aggregate) and this hook must never write to it. Sampled two
+    # ways: the isolated destination above must stay untouched, and the operator's real
+    # ~/.claude/vstack-delegation-log.jsonl line count -- sampled before the drive, compared
+    # after cleanup below -- must be identical, the same leak check 40 already runs.
+    [ -e "$c44_deleg" ] \
+      && c44_errs="$c44_errs\ndispatch-counter.sh wrote to VSTACK_DELEGATION_LOG ($c44_deleg) -- it must never touch the delegation log"
+
+    # Direction 3d: the escape hatch. VSTACK_NO_REPLAY_LOG=1 must silence the row while leaving
+    # the counter (and therefore the statusline) advancing exactly as before -- both halves, or
+    # neither proves anything: a hatch that also stops the count is VSTACK_NO_DISPATCH_COUNT
+    # under a different name, and a hatch that keeps logging despite being set is no hatch.
+    export VSTACK_NO_REPLAY_LOG=1
+    c44_dispatch Task
+    c44_n5=5
+    c44_cnt_val5=$(cat "$c44_cnt" 2>/dev/null)
+    [ "$c44_cnt_val5" = "$c44_n5" ] \
+      || c44_errs="$c44_errs\nVSTACK_NO_REPLAY_LOG=1: counter did not advance to $c44_n5 (got '$c44_cnt_val5') -- the hatch must silence the replay row, not the count"
+    c44_rows5=$(grep -c . "$c44_replay" 2>/dev/null); [ -n "$c44_rows5" ] || c44_rows5=0
+    [ "$c44_rows5" -eq "$c44_n" ] \
+      || c44_errs="$c44_errs\nVSTACK_NO_REPLAY_LOG=1: replay row count changed ($c44_n -> $c44_rows5) -- the hatch did not suppress the row"
+    unset VSTACK_NO_REPLAY_LOG
+    unset VSTACK_REPLAY_LOG VSTACK_DELEGATION_LOG
+
+    c44_rreplay_after=0; [ -f "$c44_real_replay" ] && c44_rreplay_after=$(wc -l < "$c44_real_replay" 2>/dev/null | tr -d ' ')
+    c44_rdeleg_after=0; [ -f "$c44_real_deleg" ] && c44_rdeleg_after=$(wc -l < "$c44_real_deleg" 2>/dev/null | tr -d ' ')
+    [ "$c44_rreplay_before" = "$c44_rreplay_after" ] \
+      || c44_errs="$c44_errs\nthe operator's real replay log changed ($c44_rreplay_before -> $c44_rreplay_after lines) -- fixture rows leaked into it"
+    [ "$c44_rdeleg_before" = "$c44_rdeleg_after" ] \
+      || c44_errs="$c44_errs\nthe operator's real delegation log changed ($c44_rdeleg_before -> $c44_rdeleg_after lines) -- fixture rows leaked into it"
+
+    rm -rf "$c44_replay_dir" "$c44_deleg_dir" 2>/dev/null
 
     # Static: the wiring that installs the reader. Anchored on the object key the same way check
     # 11 anchors on it -- `grep -q dispatch-counter.sh install.sh` proves the string is present
@@ -2447,6 +2557,17 @@ if command -v jq >/dev/null; then
         *Agent*Task*|*Task*Agent*) ;;
         *) c44_errs="$c44_errs\ninstall.sh: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_im:-none found})" ;;
       esac
+
+      # Direction 4 (pin, not fix): a failed dispatch is invisible today only because
+      # dispatch-counter.sh is not wired under PostToolUseFailure -- the hook's own jq never
+      # branches on hook_event_name, so wiring it there would feed it a payload shaped for
+      # PostToolUse (tool_response) when the runtime actually sends `.error` on failure. This
+      # pins the current wiring so a future change that starts routing this hook to
+      # PostToolUseFailure -- silently making failures visible, or silently crashing on the
+      # unexpected shape -- shows up here instead of shipping unnoticed either way.
+      c44_ptf_i=$(printf '%s' "$prog" | sed -n '/PostToolUseFailure: \[/,/} as \$ours/p')
+      printf '%s' "$c44_ptf_i" | grep -q 'dispatch-counter\.sh' \
+        && c44_errs="$c44_errs\ninstall.sh: dispatch-counter.sh is now wired under PostToolUseFailure -- it was built for PostToolUse payload shape only; either update it to read .error and this comment, or this is a wiring accident"
     fi
 
     c44_sm=$(jq -r '.hooks.PostToolUse[]? | select(any(.hooks[]?.command // ""; test("dispatch-counter\\.sh"))) | .matcher // ""' claude/settings.json 2>/dev/null)
@@ -2454,6 +2575,10 @@ if command -v jq >/dev/null; then
       *Agent*Task*|*Task*Agent*) ;;
       *) c44_errs="$c44_errs\nclaude/settings.json: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_sm:-none found})" ;;
     esac
+
+    c44_ptf=$(jq -r '.hooks.PostToolUseFailure[]? | select(any(.hooks[]?.command // ""; test("dispatch-counter\\.sh"))) | .matcher // "FOUND"' claude/settings.json 2>/dev/null)
+    [ -z "$c44_ptf" ] \
+      || c44_errs="$c44_errs\nclaude/settings.json: dispatch-counter.sh is now wired under PostToolUseFailure -- see the install.sh check above for why that needs a deliberate decision, not an automatic pass"
 
     # Generalized one step: every ${TMPDIR:-/tmp}/vstack-<name> path claude/statusline.sh reads
     # must be mentioned by at least one shipped claude/hooks/*.sh script -- a candidate writer.

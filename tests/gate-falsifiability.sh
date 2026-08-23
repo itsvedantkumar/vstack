@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -269,6 +269,8 @@ files_for(){ case "$1" in
   39)  printf 'CHANGELOG.md' ;;
   40)  printf 'claude/hooks/skill-mandate.sh' ;;
   44)  printf 'install.sh' ;;
+  44b|44c|44d|44e|44f) printf 'claude/hooks/dispatch-counter.sh' ;;
+  44g) printf 'claude/settings.json' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -319,6 +321,12 @@ label_for(){ case "$1" in
   39)  printf 'CHANGELOG.md structure' ;;
   40)  printf 'latched session still logs a delegation-drift row' ;;
   44)  printf 'dispatch counter join, both directions' ;;
+  44b) printf 'dispatch counter join, both directions' ;;
+  44c) printf 'dispatch counter join, both directions' ;;
+  44d) printf 'dispatch counter join, both directions' ;;
+  44e) printf 'dispatch counter join, both directions' ;;
+  44f) printf 'dispatch counter join, both directions' ;;
+  44g) printf 'dispatch counter join, both directions' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -558,6 +566,46 @@ exit 0
       # loops in check 11 stay green while every session that dispatches via Agent (not Task)
       # goes uncounted. Only a check that reads the matcher value itself notices.
       sed -i.t 's/matcher:"Agent|Task"/matcher:"Task"/' install.sh && rm -f install.sh.t ;;
+  44b) # Direction 3a (the row lands): redirect the replay-row append to a decoy file, one line,
+      # nothing else touched. The row is still built, dispatch_index still substituted, the
+      # counter file still advances -- it just never reaches $log_file, which is exactly the
+      # regression "a dispatch writes a row, and it lands in the replay log" exists to catch and
+      # a source grep for the literal path string cannot: the path is still IN the file, spelled
+      # correctly, one variable reference away from where check 44's fixture looks for it.
+      perl -pi -e 's/>> "\$log_file" 2>\/dev\/null$/>> "\$log_file.decoy" 2>\/dev\/null/' \
+        claude/hooks/dispatch-counter.sh ;;
+  44c) # Direction 3c (nothing lands in the delegation log): dispatch-counter.sh does not
+      # reference VSTACK_DELEGATION_LOG at all today, so this row manufactures the regression
+      # rather than toggling an existing guard -- it inserts one line right after the replay-row
+      # append that writes the SAME row to the delegation log too, the exact conflation this
+      # assertion exists to catch if the two loggers are ever merged carelessly.
+      perl -pi -e '$_ .= "  printf \x27%s\\n\x27 \"\$row\" >> \"\${VSTACK_DELEGATION_LOG:-\$HOME/.claude/vstack-delegation-log.jsonl}\" 2>/dev/null\n" if /^  printf \x27%s\\n\x27 "\$row" >> "\$log_file" 2>\/dev\/null$/' \
+        claude/hooks/dispatch-counter.sh ;;
+  44d) # Direction 3b, prompt half: drop the `| length` off prompt_bytes so the field carries the
+      # raw prompt text instead of its byte count -- same key name, same schema shape from the
+      # outside, only the content behind it changed. A grep for the field name would stay green
+      # through this; only reading the field's actual content catches it.
+      perl -pi -e 's/\(\$ti\.prompt \/\/ "" \| length\)/(\$ti.prompt \/\/ "")/' \
+        claude/hooks/dispatch-counter.sh ;;
+  44e) # Direction 3b, result half: same shape as 44d, on result_bytes -- drop the `| length` so
+      # the field carries tool_response's serialized text instead of its byte count.
+      perl -pi -e 's/\(\.tool_response \| tostring \| length\)/(.tool_response | tostring)/' \
+        claude/hooks/dispatch-counter.sh ;;
+  44f) # Direction 3d (the escape hatch): drop the VSTACK_NO_REPLAY_LOG guard from the row-append
+      # condition, leaving only the "$encoded_row is non-empty" half. Setting the var no longer
+      # does anything -- the row is written regardless -- which is the exact regression "the
+      # hatch works" exists to catch.
+      perl -pi -e 's/^if \[ "\$\{VSTACK_NO_REPLAY_LOG:-0\}" != "1" \] && \[ -n "\$encoded_row" \]; then$/if [ -n "\$encoded_row" ]; then/' \
+        claude/hooks/dispatch-counter.sh ;;
+  44g) # Direction 4 (the pin): wire dispatch-counter.sh into claude/settings.json's own
+      # PostToolUseFailure array, next to failure-diagnose.sh -- the exact silent rewiring the
+      # pin exists to surface, since nothing about this edit is invalid JSON or a broken matcher;
+      # it is a config change that quietly starts feeding this hook a payload shape it was never
+      # written to expect.
+      cp claude/settings.json claude/settings.json.t44g \
+        && jq '.hooks.PostToolUseFailure[0].hooks += [{"type":"command","command":"\"$CLAUDE_PROJECT_DIR/.claude/hooks/dispatch-counter.sh\""}]' \
+             claude/settings.json.t44g > claude/settings.json \
+        && rm -f claude/settings.json.t44g ;;
 esac }
 
 # Three rows outside this count also report a result every run: the green-at-baseline probe

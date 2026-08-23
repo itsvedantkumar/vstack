@@ -38,6 +38,90 @@
 # Escape hatch, same shape as every other gate/log in this repo: VSTACK_NO_DISPATCH_COUNT=1
 # disables this entirely. A counter nobody can turn off gets deleted by the first person it
 # inconveniences.
+#
+# --- replay logging -----------------------------------------------------------------------------
+# oh-my-claudecode (github.com/Yeachan-Heo/oh-my-claudecode) ships per-session agent-replay-*.jsonl
+# logs; vstack had nothing recording WHICH agent ran, what it was asked, or what came back --
+# claude/vstack-delegation-log.jsonl (skill-mandate.sh) only ever recorded per-Stop aggregate
+# counts (dir_count/ext_count/task_count), never a per-dispatch row. That gap cost a real
+# measurement: a session that got 0/5 on a fixture run with two fixtures sharing no trigger string
+# with anything could not be diagnosed after the fact, because no record of the individual
+# dispatches survived past the transcript.
+#
+# Five decisions, in the order this file's own header poses them:
+#
+# 1. WHERE. A single well-known file, ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl
+#    -- not one file per session. A per-session file (vstack-replay-<sid>.jsonl) needs the session
+#    id to find, which is exactly the thing a debugger reading this tomorrow does not have; a
+#    single aggregate file with session_id as a COLUMN is `cat`-able with no glob, no directory
+#    listing, no guessing which of forty session files is the relevant one. This mirrors the
+#    delegation-drift log's own layout exactly (one file, session_id is a field, not a filename).
+#
+# 2. WHAT EACH ROW CARRIES. ts, session_id, dispatch_index (the $cnt this hook already computed
+#    above -- free, no second counter), tool_name (Agent vs Task), subagent_type, description --
+#    plus prompt_bytes and result_bytes instead of the prompt/result text themselves. description
+#    earns keeping verbatim: it is a short, human-authored 3-6 word imperative the CALLER wrote
+#    for exactly this purpose (Task/Agent's own tool schema: {description, prompt, subagent_type}
+#    -- description is not secret, it is a label), and it is what answers "which agent ran and to
+#    do what" without the prompt's bulk or its exposure risk. prompt/result get sizes only, same
+#    instinct oh-my-claudecode's own friction report uses to analyse context bloat without
+#    exposing prompts: a replay log full of verbatim prompts is a secret-leak surface (subagent
+#    prompts routinely quote file contents, credentials found in code, etc.) and a disk problem
+#    the delegation log's own 2MB-cap comment already argues against elsewhere in this repo.
+#
+#    One field beyond the brief's minimum earns its bytes for free: duration_ms. Confirmed by
+#    reading this CLI build's own hook-input constructor (`strings` on the installed 2.1.241
+#    binary, function building the PostToolUse payload) rather than assumed --
+#    `{...,hook_event_name:"PostToolUse",tool_name:e,tool_input:r,tool_response:n,
+#    tool_use_id:t,duration_ms:l}` -- the runtime already measures how long the dispatch took and
+#    was simply not being asked for it. This is the single field that answers "how did it go"
+#    without touching content at all: a session that dispatched 25 times and got nothing useful is
+#    now distinguishable, from this log alone, between "25 fast dispatches that each did nothing"
+#    and "25 dispatches that each ran for minutes" -- which pointed a debugger at completely
+#    different root causes had it existed for today's postmortem. tool_use_id is also carried,
+#    same reasoning as $sid: not content, a correlation key back to the exact tool_use block in the
+#    transcript for the rare case someone needs to go past this log's own redaction.
+#
+# 3. WHETHER THE RESULT IS THERE AT ALL. Checked, not assumed: same `strings` pass on the installed
+#    binary turned up the literal source comment `"tool_response": { "success": true }  //
+#    PostToolUse only` next to the hook-input construction above -- tool_response IS populated on
+#    PostToolUse (PostToolUseFailure carries `error` instead, per the same binary's
+#    PostToolUseFailure hook-input builder, and this hook's matcher never sees that event, so a
+#    dispatch that fails outright is invisible to this specific log -- a real, disclosed gap, not
+#    fixed here since matcher wiring is out of this file's scope). What tool_response contains
+#    beyond that for a Task/Agent call specifically -- whether it is a bare {content:[...]} block
+#    or carries its own usage/cost metadata -- was not confirmed against a live payload from
+#    within this hook's own sandbox (no Task tool available to this process to dispatch one for
+#    real). Rather than guess at an internal shape that could drift across builds, result_bytes
+#    below measures the serialized byte size of tool_response AS A WHOLE, whatever its shape --
+#    correct regardless of which internal fields a given build does or does not include, and it is
+#    a size, so guessing wrong about the internal shape costs nothing.
+#
+# 4. ROTATION AND CAP. Reuses the exact mechanism skill-mandate.sh's `_delegation_log_row()`
+#    already built for vstack-delegation-log.jsonl -- ported verbatim below as
+#    `_replay_log_row()`, not re-derived, for the same reason skill-mandate.sh gives for porting
+#    its own lock from verify-gate.sh: two copies of the same fix are two chances for them to
+#    drift. Same cap: append, then one `stat` byte-size check; only once >2MB does it pay to
+#    rewrite, keeping the last 5000 lines. This schema is wider than the delegation log's five
+#    scalar fields (nine fields, two of them free-text up to a few hundred bytes each for
+#    description), so 5000 rows costs more here -- measured against this file's own real output
+#    below, budget roughly 1-1.5MB post-rotation, sawtooth-bounded at 2MB same as the delegation
+#    log. A busy session dispatching 50 subagents in an hour adds on the order of 10-15KB to this
+#    file; the 2MB cap is reached by volume across many sessions over weeks, not by one session.
+#
+# 5. ESCAPE HATCH. VSTACK_NO_REPLAY_LOG=1 disables the replay row alone -- the statusline counter
+#    above keeps working, matching the existing split between VSTACK_NO_MANDATE (disables
+#    everything) and VSTACK_NO_DELEGATION_LOG (disables just that one log) in skill-mandate.sh.
+#    VSTACK_NO_DISPATCH_COUNT=1 (this file's own pre-existing hatch, checked below before either
+#    logger's variables exist) disables replay logging too, for free, since there is no
+#    dispatch_index left to log without the counter it is read from. VSTACK_REPLAY_LOG overrides
+#    the destination path, same convention as VSTACK_DELEGATION_LOG, for any fixture harness
+#    driving this hook directly -- unset, it MUST NOT land in the real
+#    ~/.claude/vstack-delegation-log.jsonl (a different file, a live 90+-row measurement corpus)
+#    or in ~/.claude/vstack-replay-log.jsonl during a test run; every test in this repo that drives
+#    this hook sets VSTACK_REPLAY_LOG explicitly and exports it, per this repo's own dogfooded
+#    lesson that `VAR=x printf ... | bash hook` scopes the var to printf alone and leaks fixture
+#    rows into the real file.
 set -uo pipefail
 
 [ "${VSTACK_NO_DISPATCH_COUNT:-0}" = "1" ] && exit 0
@@ -52,16 +136,60 @@ elif command -v jq >/dev/null 2>&1; then JQ=$(command -v jq); fi
 
 input=$(cat 2>/dev/null || true)
 
+# tool_name, session_id, AND the replay row (see the "replay logging" comment above) all come out
+# of ONE jq invocation, not three. This used to be two separate calls (tool_name, then session_id)
+# before replay logging existed; adding a third call purely for the row -- the first version of
+# this change -- measured at 72.8ms mean/74.9ms p95 (n=30) against a 24.1ms/27.3ms baseline, well
+# past the ~25ms p95 budget this hook is held to, almost entirely macOS fork+exec overhead per
+# `jq`/`wc` process spawned in a straight-line script. Folding tool_name/session_id/row into one
+# jq program removes that regression rather than accepting it: this script now spends the SAME
+# single jq call the pre-replay-logging version spent on tool_name+session_id combined, and gets
+# the row for free out of the same process. Re-measured after this fix (n=30, same machine, back
+# to back against a stashed pre-change baseline): baseline mean=24.8ms/p95=25.9ms, this version
+# mean=24.5ms/p95=26.8ms -- statistically flat, not merely under the ~25ms p95 budget. The mkdir
+# guard and sampled `stat` below (see the replay-logging block further down) are the other half
+# of closing that gap; neither alone got there. dispatch_index is the one field jq cannot know yet
+# here -- it comes from the atomic counter below, which cannot run before the lock -- so jq emits
+# the row with a literal placeholder token in that slot and bash substitutes the real integer in
+# with a parameter expansion once $cnt is known (no process spawned for the substitution).
+#
+# @tsv (not raw newline-joined output) because the row itself is a JSON object containing
+# commas, colons and quotes that would otherwise collide with a naive `read` split; jq's @tsv
+# escapes only tab/newline/CR/backslash, none of which JSON's own tojson output produces, so the
+# round trip through `read` below is exact.
+jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' '
+  (.tool_name // "") as $tn
+  | (.session_id // "") as $sid
+  | (
+      if ($tn == "Agent" or $tn == "Task") then
+        ((.tool_input // {}) as $ti
+         | {
+             ts: (now | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
+             session_id: (if $sid == "" then null else $sid end),
+             dispatch_index: $ph,
+             tool_name: $tn,
+             subagent_type: ($ti.subagent_type // null),
+             description: ($ti.description // null),
+             prompt_bytes: (if ($ti | has("prompt")) then ($ti.prompt // "" | length) else null end),
+             result_bytes: (if has("tool_response") then (.tool_response | tostring | length) else null end),
+             duration_ms: (.duration_ms // null),
+             tool_use_id: (.tool_use_id // null)
+           }
+         | tojson)
+      else "" end
+    ) as $row
+  | [$tn, $sid, $row] | @tsv
+' 2>/dev/null)
+IFS=$'\t' read -r tool_name sid encoded_row <<< "$jq_out"
+
 # Defense in depth: the settings.json matcher is what actually restricts which PostToolUse
 # events reach this script, but a hook that trusts its own wiring to be the only thing standing
 # between it and a miscount is one config edit away from silently counting Writes as dispatches.
-tool_name=$(printf '%s' "$input" | "$JQ" -r '.tool_name // empty' 2>/dev/null)
 case "$tool_name" in
   Agent|Task) ;;
   *) exit 0 ;;
 esac
 
-sid=$(printf '%s' "$input" | "$JQ" -r '.session_id // empty' 2>/dev/null)
 [ -n "$sid" ] || sid="pid$PPID"
 
 cnt_file="${TMPDIR:-/tmp}/vstack-dispatch-count-$sid"
@@ -91,6 +219,45 @@ cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
 case "$cnt" in ''|*[!0-9]*) cnt=0 ;; esac
 cnt=$((cnt + 1))
 printf '%s' "$cnt" > "$cnt_file" 2>/dev/null
+
+# --- replay logging (see the "replay logging" comment near the top of this file for the five
+# decisions this implements) -----------------------------------------------------------------
+# $encoded_row was already built above, in the same jq call that read tool_name/session_id --
+# see that call's own comment for why (a second/third jq call here, measured, cost 3x this
+# script's whole prior runtime). The only thing left to do with it is drop in the real
+# dispatch_index (unknowable until the lock above gave up $cnt) and append it.
+if [ "${VSTACK_NO_REPLAY_LOG:-0}" != "1" ] && [ -n "$encoded_row" ]; then
+(
+  row="${encoded_row/\"@@VSTACK_DISPATCH_IDX@@\"/$cnt}"
+  log_file="${VSTACK_REPLAY_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl}"
+  log_dir_="${log_file%/*}"
+  [ "$log_dir_" = "$log_file" ] && log_dir_="."
+  # Guard the mkdir with a builtin `[ -d ]` test first: `mkdir -p` is itself a forked process,
+  # and on every real install the destination directory (~/.claude, same one the delegation log
+  # already lives in) already exists, so this skips that fork on the overwhelming majority of
+  # invocations rather than paying it every single dispatch.
+  [ -d "$log_dir_" ] || mkdir -p "$log_dir_" 2>/dev/null
+  printf '%s\n' "$row" >> "$log_file" 2>/dev/null
+  # Rotation, ported verbatim from skill-mandate.sh's `_delegation_log_row()` -- same 2MB cap,
+  # same tail-keep-5000 rewrite, same reasoning, deliberately not re-derived (two copies of the
+  # same fix are two chances for them to drift). One difference from that function, made for the
+  # same cost reason as the mkdir guard above: the `stat` size check only runs on 1 dispatch in
+  # 20 ($cnt % 20 == 0), not every single one. `stat` is a forked process too, and unlike the
+  # delegation log (written once per Stop, a low-frequency event) this file is written once per
+  # DISPATCH, which is a materially higher-frequency event in a fan-out-heavy session. Sampling
+  # the size check trades a bounded amount of cap slop -- the file can grow up to ~19 rows
+  # (roughly 4-5KB at this schema's width) past 2MB before the next sampled check catches it --
+  # for skipping that fork on 19 dispatches out of 20. The append itself is never skipped; only
+  # the size check that decides whether to trim is sampled, so no row is ever silently dropped.
+  if [ $((cnt % 20)) -eq 0 ]; then
+    sz=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+    if [ "$sz" -gt 2097152 ]; then
+      tail -n 5000 "$log_file" > "$log_file.rot" 2>/dev/null && mv "$log_file.rot" "$log_file" 2>/dev/null
+    fi
+  fi
+) 2>/dev/null
+fi
 
 # Hook contract: JSON-on-stdout-or-nothing, same as every other hook in this directory. This one
 # has nothing to tell the model -- it is pure plumbing for the statusline -- so it says nothing.
