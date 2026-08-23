@@ -4,7 +4,79 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
-## Unreleased
+## 1.41.0 — 2026-08-23
+
+**The statusline's dispatch counter had a reader and no writer.** `claude/statusline.sh` renders
+`RICK ·N▸` from `${TMPDIR:-/tmp}/vstack-dispatch-count-<session_id>`, and nothing in the shipped
+tree ever created that file. The segment was verified against a counter created by hand, so it
+passed its own test while rendering nothing in production, for every session, forever. The reader
+was written to a contract its author also specified, which is the failure: both halves were
+correct against a document and neither was correct against the other. `claude/hooks/dispatch-counter.sh`
+is the missing half. It runs on `PostToolUse` with matcher `Agent|Task`, takes the `mkdir` lock
+already proven in `skill-mandate.sh` rather than a new one, never opens the transcript, and creates
+the file on first dispatch rather than at session start -- absence is how a session that has not
+delegated renders nothing instead of a confident `·0▸`. Measured at 15.2 ms mean, 21 ms p95 over
+n=30 against a real dispatch, and proven end to end rather than in halves: twenty parallel
+dispatches land a counter reading exactly twenty, and the unmodified statusline renders that number
+from the writer's own file. Wired into the project lane and into `install.sh`'s user-lane rebuild,
+which is the lane that also installs the statusline. Deliberately **not** wired into the plugin
+lane: that lane ships routing and the verify gate and does not install a statusline, so a counter
+there would be the same defect pointing the other way. `VSTACK_NO_DISPATCH_COUNT=1` turns it off.
+(POOPYBUTTHOLE P-4 built the reader and found the cost; MORTY M-5 built the writer.)
+
+**The delegation mandate went deaf for whole sessions, silently.** `skill-mandate.sh` carried one
+two-strike latch shared by every mandate family, so two early unrelated skill mandates in a session
+disarmed the delegation breadth mandate for the rest of it. Measured on the session that prompted
+this: all seven Stops between 12:34 and 13:38 logged `latched:true` with every count null, while a
+forced re-scan of the same session measured `dir_count=36 ext_count=61 task_count=90`. The latch is
+now split. The skill family keeps its two strikes per session with no re-arm. The delegation family
+gets its own counter that re-arms after `VSTACK_DELEGATE_RESET_SECS` (default 1800), plus a re-scan
+cooldown, `VSTACK_DELEGATE_SCAN_COOLDOWN_SECS` (default 60), so a session latched on skills and
+never eligible for breadth does not pay the 1.4-2.1 s transcript scan on every Stop. That cost is
+measured, not assumed: 1438 ms mean at 17.5 MB and 2009 ms at 39.1 MB, which is also why sampling
+was rejected. A latched Stop now writes a row carrying `latched:true` and explicit nulls instead of
+writing nothing, because a Stop that was never measured and a Stop that measured zero breadth are
+different facts and the log could not previously tell them apart. The breadth message names up to
+three of the directories it actually found. (MEESEEKS M-4, MORTY M-5.)
+
+**A per-prompt mandate line.** `inject-session-context.sh` now prints `MANDATE skill=N/2
+delegate=M/2` on each prompt, read from the two counter files rather than by parsing the
+transcript, and silent at `0/0`. Steady state costs 305 B of the 512 B budget, worst case 470 B.
+Until now the only way to discover a latched mandate was to read the log after the fact. (MORTY M-5.)
+
+**`tests/delegation-drift.py` crashed on the rows the fix above started writing, and reported
+success while doing it.** `eligible()`, `delegated()` and `detect_broken_extraction()` all used
+`.get(key, 0)`, which returns the default only when a key is *absent*; a latched row carries an
+explicit `null`, so each raised `TypeError` on live data -- 13 of 76 real rows by the time it was
+found. The harness printed the traceback and exited 0. Both halves are fixed. A latched row is now
+excluded from every pool by a named `measured()` predicate rather than silently counted as
+zero-breadth or not-delegated, and the number excluded is printed unconditionally in the accounting
+line, since a silent zero here is the same shape as the bug. On failure the harness now prints an
+unmissable banner to stdout, which survives a caller's `2>/dev/null` or `| tail`. Proven by
+mutation against the actual pre-fix analyser. (GLOOTIE G-5.)
+
+**Three falsifiability rows had stopped mutating anything, and this release is what broke them.**
+Rows 23, 27 and 40 anchored their `sed` patterns on lines that the latch split and the destructive
+guard's refactor moved or deleted, so the mutation applied cleanly, changed nothing, and the checks
+they guard were green with no evidence behind them. The suite's own shasum no-op detector is what
+caught it, which is the detector doing the single job it was added for. Row 23 now no-ops every
+`emit deny` call site, including the inline duplicate the refactor created, and leaves ask and allow
+alone. Row 27 makes the mandate's decision gate unconditional. Row 40 skips only the row-write
+inside the latch, so the latch still exits and only the logging claim is falsified. Each was watched
+red under its new anchor and restored shasum-identical. The anchors were chosen on the decision
+logic each check asserts rather than on whatever line was unique that day, which is what let all
+three rot through a single refactor. `VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh` now
+runs a subset, because a twenty-minute sweep is why nobody notices a rotted row for four
+releases. That selector shipped with the defect it exists to catch: a row id with no mutation
+arm mutated nothing and then reported `did NOT fail when broken`, which is the one sentence
+this suite must never say about a check it did not test. An unknown id is now a hard error
+naming the id and stating that nothing was mutated, a comma-separated value is rejected with
+the accepted spelling, and the header and footer count the same rows instead of disagreeing
+about whether the baseline probe is one of them.
+(BIRDPERSON B-4 built check 44; BIRDPERSON B-5 found and repaired all three rows.)
+
+The two entries below landed before the tag and are gate machinery rather than shipped
+payload, which is why they carried no version bump of their own.
 
 **Closed two holes in `tests/auto-trigger.sh`'s tool fence, both found in live transcripts rather
 than by reading.** `Workflow` was never denied, and it is `Agent`'s capability class — a sample

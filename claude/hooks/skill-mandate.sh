@@ -116,15 +116,74 @@ ckpt=$(cat "$ckpt_file" 2>/dev/null || echo 0)
 ckpt=$((ckpt + 1))
 printf '%s' "$ckpt" > "$ckpt_file" 2>/dev/null
 
-# Same latch as the verify gate. A mandate the model cannot satisfy must not trap the session:
-# once cnt reaches 2, skip the transcript-driven mandate evaluation entirely and never block
-# again. The delegation-drift log still gets a row for this Stop -- it just cannot carry
-# dir_count/ext_count/task_count/named, because those come from the same transcript parse the
-# mandates below do, and paying for that parse on a Stop that can no longer block anything would
-# undo the entire reason the latch exists. `latched:true` with null counts is what lets
-# tests/delegation-drift.sh tell this row apart from an evaluated one -- a row that silently meant
-# something different from its neighbours would be worse than the blind spot it replaces.
-if [ "$cnt" -ge 2 ]; then
+# Delegation-family counter (breadth + agent-naming), deliberately separate from $cnt above and
+# from $cnt_file on disk. Filenames use a ".delegate"/".delegate-ts" suffix ON TOP of $cnt_file's
+# own name rather than a different prefix so that anything that already sweeps "$cnt_file*" (this
+# repo's own tests do -- see tests/test-breadth-mandate.sh's sweep_latch_) keeps sweeping these
+# too without having to know they exist.
+#
+# Why separate from $cnt at all: dogfooded against this repo's own real 18MB session transcript
+# (2026-08-23, 5b14be87-2cee-4661-96ea-6106ef15f313), $cnt hit 2 within the session's first two
+# evaluated Stops and every one of the 7 Stops logged after that -- 64 minutes, 90 Task/Agent
+# dispatches, 36 directories -- came back latched:true, null counts, mandate silently unable to
+# fire for the entire remainder. That is the specific failure this splits: prose/typescript/
+# prove-it-works are "the model was asked and chose not to", where a 3rd nag rarely changes a
+# 3rd answer. Breadth/naming are "the model forgot", because the situation resets every time a
+# new stretch of multi-directory work starts -- reminding it again after the model has moved on
+# to a new part of the session is not the same failure as reminding it again about the same one.
+#
+# Bounded the same way $cnt is bounded (2 strikes), but the strikes expire: no unmet delegation
+# Stop in VSTACK_DELEGATE_RESET_SECS (default 1800s = 30min) rearms it at 0. A session that is
+# CONTINUOUSLY multi-directory and un-delegated pays for the full transcript scan again at most
+# once per window once $cnt has already latched shut -- not every Stop, not on the 1-in-10
+# schedule this file's own comment above rejected on tail-latency grounds. This is deliberately
+# sparser than that rejected proposal specifically so the same p95 1.4-2.1s cost objection does
+# not reapply at a materially higher frequency; it still applies once per window, which is the
+# trade being made here, not a way around it.
+dcnt_file="$cnt_file.delegate"
+dts_file="$cnt_file.delegate-ts"
+dcnt=$(cat "$dcnt_file" 2>/dev/null || echo 0)
+case "$dcnt" in ''|*[!0-9]*) dcnt=0 ;; esac
+dts=$(cat "$dts_file" 2>/dev/null || echo 0)
+case "$dts" in ''|*[!0-9]*) dts=0 ;; esac
+now_d=$(date +%s 2>/dev/null || echo 0)
+DELEGATE_RESET_SECS="${VSTACK_DELEGATE_RESET_SECS:-1800}"
+if [ "$dts" -gt 0 ] && [ "$now_d" -gt 0 ] && [ $((now_d - dts)) -ge "$DELEGATE_RESET_SECS" ]; then
+  dcnt=0
+fi
+
+# Second, SHORTER gate: how often to bother re-scanning at all once skill mandates are already
+# latched, independent of whether delegation has struck. $dcnt>=2 alone is not a sufficient skip
+# condition on its own -- a session that is skill-latched but NEVER breadth-eligible (a long
+# single-directory prose session that tripped unslop twice and then just keeps writing more
+# prose in the same directory) would have dcnt permanently stuck at 0 (nothing to strike on) and
+# would otherwise fail the "$dcnt>=2" test forever, paying the full transcript scan on literally
+# every remaining Stop of the session -- the exact regression this file's own sampling-rejection
+# comment above was written to avoid, reintroduced by accident. $dscan_file records the last
+# time a full scan ran for delegation's sake AT ALL (met or unmet, struck or not); once skill
+# mandates are latched, a scan within the last $VSTACK_DELEGATE_SCAN_COOLDOWN_SECS (default 60s)
+# is skipped regardless of $dcnt. 60s is short enough to be invisible at the real Stop cadence
+# this file was dogfooded against (7 Stops over 64 minutes, ~9 min apart) and long enough to
+# absorb a burst of Stops firing back-to-back (parallel sub-agents finishing within the same
+# second) without re-paying the scan on each one.
+dscan_file="$cnt_file.delegate-scan"
+dscan=$(cat "$dscan_file" 2>/dev/null || echo 0)
+case "$dscan" in ''|*[!0-9]*) dscan=0 ;; esac
+DELEGATE_SCAN_COOLDOWN_SECS="${VSTACK_DELEGATE_SCAN_COOLDOWN_SECS:-60}"
+dscan_recent=0
+if [ "$dscan" -gt 0 ] && [ "$now_d" -gt 0 ] && [ $((now_d - dscan)) -lt "$DELEGATE_SCAN_COOLDOWN_SECS" ]; then
+  dscan_recent=1
+fi
+
+# Combined latch: skip the transcript-driven evaluation entirely only when NEITHER family can
+# still act on it. $cnt<2 alone is enough to keep paying for the scan every Stop, unchanged from
+# before. Once $cnt>=2, the scan still runs if delegation has strikes left in the current
+# $DELEGATE_RESET_SECS window AND was not just looked at within $DELEGATE_SCAN_COOLDOWN_SECS --
+# both conditions bounded, so this can never accumulate into "every Stop forever" the way the
+# rejected 1-in-k sampling proposal above would have. The delegation-drift log still gets a row
+# for this Stop when both are exhausted -- it just cannot carry dir_count/ext_count/task_count/
+# named, same reasoning as before, now conditioned on the fuller gate rather than one counter.
+if [ "$cnt" -ge 2 ] && { [ "$dcnt" -ge 2 ] || [ "$dscan_recent" = 1 ]; }; then
   if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
     (
       ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
@@ -135,6 +194,22 @@ if [ "$cnt" -ge 2 ]; then
   fi
   exit 0
 fi
+
+# Per-family gates for everything below: which mandates are even allowed to add to $unmet this
+# Stop. skill_eval covers prose/typescript/prove-it-works (still $cnt's 2-per-session cap,
+# unchanged); deleg_eval covers breadth/agent-naming (now $dcnt's 2-per-window cap). One of the
+# two is always 1 here -- the latch above already returned otherwise -- but never assume both:
+# this Stop may have been re-entered ONLY because deleg_eval is 1 while skill_eval is 0.
+skill_eval=1; [ "$cnt" -ge 2 ] && skill_eval=0
+deleg_eval=1; [ "$dcnt" -ge 2 ] && deleg_eval=0
+skill_hit=0
+deleg_hit=0
+
+# We are doing a full scan this Stop for at least one reason (skill_eval=1 or deleg_eval=1 --
+# the latch above already exited otherwise). Record it now, unconditionally, so the cooldown
+# gate above sees an up to date "last looked" time on the very next Stop regardless of what this
+# one finds.
+date +%s > "$dscan_file" 2>/dev/null
 
 # Sampling was considered here and rejected: on every k-th latched checkpoint, pay for the full
 # transcript-driven evaluation above (real dir_count/ext_count/task_count/named) instead of the
@@ -384,16 +459,18 @@ unmet=""
 # Prose. Any Markdown that is not a machine-written log or a vendored file.
 prose=$(printf '%s\n' "$paths" | grep -iE '\.(md|mdx)$' \
         | grep -viE '(CHANGELOG\.md|node_modules|\.audit/|/(dist|build|vendor)/)' | head -5)
-if [ -n "$prose" ] && ! fired unslop; then
+if [ "$skill_eval" = 1 ] && [ -n "$prose" ] && ! fired unslop; then
   unmet="$unmet
   unslop -- you wrote prose and it never ran: $(printf '%s' "$prose" | tr '\n' ' ')"
+  skill_hit=1
 fi
 
 # TypeScript. Reading one is judgement; writing one is not.
 ts=$(printf '%s\n' "$paths" | grep -E '\.(ts|tsx)$' | grep -v node_modules | head -5)
-if [ -n "$ts" ] && ! fired typescript-best-practices; then
+if [ "$skill_eval" = 1 ] && [ -n "$ts" ] && ! fired typescript-best-practices; then
   unmet="$unmet
   typescript-best-practices -- you wrote TypeScript and it never ran: $(printf '%s' "$ts" | tr '\n' ' ')"
+  skill_hit=1
 fi
 
 # Multi-directory, multi-type work without delegation. Detects work that spans parts by
@@ -446,9 +523,10 @@ if [ "$task_count" -ge 1 ]; then
   # Roster: RICK MEESEEKS MORTY SUMMER ZEEP GLOOTIE JAGUAR BETH BIRDPERSON EVIL-MORTY NOOBNOOB PICKLE-RICK SCARY-TERRY POOPYBUTTHOLE UNITY
   if printf '%s' "$assistant_text" | grep -qiE '\b(RICK|MEESEEKS|MORTY|SUMMER|ZEEP|GLOOTIE|JAGUAR|BETH|BIRDPERSON|EVIL-MORTY|NOOBNOOB|PICKLE-RICK|SCARY-TERRY|POOPYBUTTHOLE|UNITY)\b'; then
     named=true  # at least one call sign found, mandate met
-  else
+  elif [ "$deleg_eval" = 1 ]; then
     unmet="$unmet
   agent naming -- $task_count subagent call(s) dispatched but no attribution found (name one: RICK MEESEEKS MORTY SUMMER ZEEP GLOOTIE JAGUAR BETH BIRDPERSON EVIL-MORTY NOOBNOOB PICKLE-RICK SCARY-TERRY POOPYBUTTHOLE UNITY)"
+    deleg_hit=1
   fi
 fi
 
@@ -469,9 +547,15 @@ extensions=$( printf '%s\n' "$paths" | sed -E '
   /^$/d
 ' | sort -u )
 ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | grep -c . )
-if [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; then
+if [ "$deleg_eval" = 1 ] && [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; then
+  # Names the actual parts (bounded to 3, same head-N precedent the prose/typescript mandates
+  # above already use for file paths) instead of only a count -- "touched 5 directories" tells
+  # the model a number it already knew; "touched claude/hooks, tests, docs, ..." tells it which
+  # subagent to dispatch at which part.
+  dirs_named=$(printf '%s\n' "$parent_dirs" | head -3 | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
   unmet="$unmet
-  multi-directory work -- touched $dir_count directories with $ext_count file types, zero subagents (try /team, or dispatch one directly: code-reviewer, qa, worker, planner, test-writer)"
+  multi-directory work -- touched $dir_count directories ($dirs_named$([ "$dir_count" -gt 3 ] && echo ', ...')) with $ext_count file types, zero subagents (try /team, or dispatch one directly: code-reviewer, qa, worker, planner, test-writer)"
+  deleg_hit=1
 fi
 
 # --- delegation-drift logger (tests/delegation-drift.sh) ---------------------------------------
@@ -590,6 +674,7 @@ fi
 # it look like elsewhere. jq's own `-s` slurp-then-slice of the same whole file measured ~170ms,
 # faster than just the `tail` step of the "optimization" meant to beat it. Reverted to the
 # simpler single-pass slurp below in favor of the version that is both less code and faster.
+if [ "$skill_eval" = 1 ]; then
 turn_json=$(
   "$JQ" -sc '
     . as $all
@@ -633,14 +718,46 @@ if [ "$piw_edit_n" -ge 1 ] && [ "$piw_claims" -eq 1 ] \
    && [ "$piw_bash_n" -eq 0 ] && [ "$piw_read_n" -eq 0 ] && [ "$piw_task_n" -eq 0 ]; then
   unmet="$unmet
   prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task/Agent call in the turn to back it up"
+  skill_hit=1
+fi
+fi # skill_eval: turn_json / prove-it-works
+
+# Per-family bookkeeping. $cnt and $dcnt live on disk as two independent files with two
+# independent lifetimes: $cnt_file counts strikes for the life of the session (unchanged
+# behaviour); $cnt_file.delegate counts strikes within the current $DELEGATE_RESET_SECS window
+# and is written alongside a timestamp so the next Stop can tell whether that window has already
+# elapsed. A family that was evaluated this Stop (its *_eval flag was 1) and did NOT contribute
+# to $unmet had every chance to and passed -- that family's counter resets to 0, mirroring the
+# original single-counter "fully met -> rm -f cnt_file" behaviour, now applied independently so
+# one family clearing does not reset the other's strikes.
+if [ "$skill_hit" = 1 ]; then
+  echo $((cnt + 1)) > "$cnt_file"
+elif [ "$skill_eval" = 1 ]; then
+  rm -f "$cnt_file"
+fi
+if [ "$deleg_hit" = 1 ]; then
+  echo $((dcnt + 1)) > "$dcnt_file"
+  date +%s > "$dts_file" 2>/dev/null
+elif [ "$deleg_eval" = 1 ]; then
+  rm -f "$dcnt_file" "$dts_file"
 fi
 
-[ -n "$unmet" ] || { rm -f "$cnt_file"; exit 0; }
+[ -n "$unmet" ] || exit 0
 
-echo $((cnt+1)) > "$cnt_file"
-reason="A vstack skill mandate went unmet (attempt $((cnt+1))/2). These fire every time, not when they seem relevant:
+reason="A vstack mandate went unmet. These fire every time, not when they seem relevant:
 $unmet
-
+"
+# Two independent strike counts, stated plainly, because they now expire on two different
+# schedules and a reader has to know which is which to know what happens next.
+if [ "$skill_hit" = 1 ]; then
+  reason="$reason
+Skill-mandate strike $((cnt + 1))/2 this session (unslop / typescript-best-practices / prove-it-works). After 2, these stop being enforced for the rest of the session -- self-police from here."
+fi
+if [ "$deleg_hit" = 1 ]; then
+  reason="$reason
+Delegation strike $((dcnt + 1))/2 in this ${DELEGATE_RESET_SECS}s window (multi-directory work / agent naming). Rearms at 0 after the window elapses with no further unmet Stop, independent of the skill-mandate count above -- it will keep nagging even in a long session."
+fi
+reason="$reason
 Run each named skill with the Skill tool against the files listed, apply what it says, then finish.
 For prove-it-works: run the command that proves the change, read its actual output, then restate
 the claim with that evidence -- or state the real status if the output disagrees with it.

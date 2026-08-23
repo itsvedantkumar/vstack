@@ -40,6 +40,16 @@
             "statusMessage": "format"
           }
         ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/dispatch-counter.sh\"",
+            "statusMessage": "dispatch count"
+          }
+        ]
       }
     ],
     "Stop": [

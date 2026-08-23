@@ -361,5 +361,29 @@ LIVE_CANDIDATES="$LIVE_TMP/candidates.txt"
 # in contributing_sessions 13-to-1.
 find "$PROJECTS_DIR" -type f -name '*.jsonl' -not -path '*/subagents/*' > "$LIVE_CANDIDATES" 2>/dev/null
 
+# Exit-code discipline, added 2026-08-23 after MORTY found a live run print a Python traceback
+# and still exit 0. That specific run was not reproducible with THIS exact "python3 ...; exit $?"
+# pair invoked directly and unpiped -- `exit $?` here does correctly propagate a nonzero status
+# when tested by hand, repeatedly, against the real crash. The likeliest swallow point is
+# upstream of this file: any caller that pipes this script's stdout (`| tail`, `| grep -q`, a
+# log-scraping wrapper) inherits the LAST pipeline command's exit status, not this script's,
+# unless that caller's own shell also has pipefail set -- and a caller that also redirects
+# stderr away loses the traceback entirely, leaving nothing in what they captured to say
+# anything went wrong. This script cannot fix a caller's shell options. What it CAN do is make
+# a crash impossible to mistake for success even under those conditions: capture the real exit
+# code immediately (not relying on an untouched $?), and if it is nonzero, print an unmissable
+# banner to STDOUT (not just stderr, where the traceback already goes) as the LAST thing this
+# script prints -- so it survives `2>/dev/null` and a `| tail -n N` for any reasonable N.
 python3 "$PY" "$FORWARD_LOG_PATH" "$LIVE_CANDIDATES"
-exit $?
+PY_RC=$?
+if [ "$PY_RC" -ne 0 ]; then
+  echo
+  echo "################################################################"
+  echo "# LIVE RUN FAILED: tests/delegation-drift.py exited $PY_RC."
+  echo "# See the traceback above (stderr) for where. This is a harness"
+  echo "# crash, not a measurement -- nothing printed above this banner"
+  echo "# is a result until the analyser is fixed and this banner stops"
+  echo "# appearing."
+  echo "################################################################"
+fi
+exit "$PY_RC"

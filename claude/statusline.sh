@@ -22,6 +22,23 @@ IFS=$'\037' read -r model cdir style cost added removed ctxused <<<"$(
 [ -z "$cdir" ] && cdir="$PWD"
 dir=${cdir##*/}
 
+# Lead and delegation: read dispatch count from counter file, written by a hook after each Agent
+# or Task tool_use. Session-scoped, /tmp-resident like vstack-mandate-$sid. Scales O(1), unlike
+# prior grep-based approach which cost ~128ms end-to-end and scaled with transcript size.
+# Renders nothing if counter is absent (fresh session, no dispatches yet) — this is correct,
+# not a zero. Correctness note (preserved from prior): any transcript-based counting must account
+# for tool_result blocks that might quote '"name":"Agent"' or '"name":"Task"' — grep would
+# over-count such quotations. Counter incremented by the runtime avoids this; it counts real
+# dispatches by definition.
+dispatch_count=""
+sid=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null)
+if [ -n "$sid" ]; then
+  cnt_file="${TMPDIR:-/tmp}/vstack-dispatch-count-$sid"
+  [ -f "$cnt_file" ] && dispatch_count=$(cat "$cnt_file" 2>/dev/null | tr -d ' ')
+  case "$dispatch_count" in
+    "" | "0") dispatch_count="" ;;
+  esac
+fi
 # Single git call: branch name on line 1, dirty marker on line 2.
 # `status --porcelain` (27ms, walks the whole tree) replaced by `diff --quiet` short-circuits.
 branch=""; dirty=""
@@ -60,6 +77,10 @@ if [ -n "$ctxused" ] && [ "$ctxused" -gt 0 ] 2>/dev/null; then
   if   [ "$ctxused" -ge "$CTX_COMPACT_WINDOW" ] 2>/dev/null; then col=$RED
   elif [ "$ctxused" -ge $(( CTX_COMPACT_WINDOW * 2 / 3 )) ] 2>/dev/null; then col=$Y; fi
   out="${out} ${D}·${R} ${col}ctx $(( ctxused / 1000 ))k${R}${D}/$(( CTX_COMPACT_WINDOW / 1000 ))k${R}"
+fi
+# Lead and delegation count: shows RICK and how many agents dispatched in this session.
+if [ -n "$dispatch_count" ]; then
+  out="${out} ${D}·${R} ${M}RICK${R} ${G}·${dispatch_count}▸${R}"
 fi
 # The gate indicator. This repository spent a day removing greens that measured nothing, so an
 # indicator that only ever says "protected" would be the same defect wearing better clothes.

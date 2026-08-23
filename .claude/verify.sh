@@ -2366,6 +2366,109 @@ else
   skip "latched session still logs a delegation-drift row" "jq not installed"
 fi
 
+# --- 44. the dispatch counter's writer and reader agree, in both directions --------------------
+# claude/statusline.sh renders "RICK ·N▸" by reading a per-session counter file that
+# claude/hooks/dispatch-counter.sh writes on every Agent/Task PostToolUse. The reader shipped
+# first and was verified against a hand-created fixture file -- nothing in the tree ever created
+# that file at runtime, so the segment rendered nothing in production while a check built the
+# same way would have stayed green throughout. This drives the REAL writer against the REAL
+# reader on one throwaway session id -- no fixture file, the counter under test is the one the
+# hook actually wrote -- and separately asserts the wiring that installs the reader, because a
+# join proven only in this dev checkout is exactly check 11's inert-plugin-hook shape ported to
+# a second lane.
+if command -v jq >/dev/null; then
+  dc="claude/hooks/dispatch-counter.sh"
+  sl="claude/statusline.sh"
+  if [ ! -x "$dc" ] || [ ! -f "$sl" ]; then
+    bad "dispatch counter join, both directions" "$dc missing/not executable, or $sl missing"
+  else
+    c44_errs=""
+    c44_sid="chk44-$$-$(date +%s 2>/dev/null || echo 0)"
+    c44_cnt="${TMPDIR:-/tmp}/vstack-dispatch-count-$c44_sid"
+    c44_lock="$c44_cnt.lock"
+    c44_cleanup(){ rm -f "$c44_cnt" 2>/dev/null; rmdir "$c44_lock" 2>/dev/null; }
+    trap c44_cleanup EXIT
+
+    c44_payload(){ printf '{"session_id":"%s","model":{"display_name":"Claude"}}' "$c44_sid"; }
+    c44_dispatch(){ printf '{"session_id":"%s","tool_name":"%s"}' "$c44_sid" "$1" | "./$dc" >/dev/null 2>&1; }
+
+    # Direction 2 (absence is not zero): a session with no dispatches must render no RICK
+    # segment at all. "·0▸" would claim zero delegation happened when the truth is nobody has
+    # asked yet -- a fresh session and a session that delegated zero times on purpose are not
+    # the same state, and only the absent-file case is this one.
+    [ -e "$c44_cnt" ] && c44_errs="$c44_errs\ncounter file already existed before any dispatch: $c44_cnt"
+    c44_out0=$(c44_payload | "./$sl" 2>/dev/null)
+    case "$c44_out0" in
+      *RICK*) c44_errs="$c44_errs\na session with zero dispatches rendered a RICK segment: $c44_out0" ;;
+    esac
+
+    # Direction 1 (the join): drive the real writer -- 3 Task + 1 Agent, both tool_names the
+    # hook accepts -- then one Write, which the hook must ignore, so the count asserted below is
+    # the exact N driven and not just "some positive number". Then read the real reader on the
+    # same session id.
+    c44_dispatch Task; c44_dispatch Task; c44_dispatch Task; c44_dispatch Agent
+    c44_n=4
+    c44_dispatch Write
+
+    c44_out1=$(c44_payload | "./$sl" 2>/dev/null)
+    case "$c44_out1" in
+      *"RICK"*"$c44_n"*) ;;
+      *) c44_errs="$c44_errs\nafter $c44_n Agent/Task dispatches (+1 ignored Write) statusline did not render RICK ...$c44_n: $c44_out1" ;;
+    esac
+
+    # Static: the wiring that installs the reader. Anchored on the object key the same way check
+    # 11 anchors on it -- `grep -q dispatch-counter.sh install.sh` proves the string is present
+    # somewhere in the file, not that it sits under a PostToolUse matcher naming both tool names,
+    # and a hook wired to the wrong event, or wired with only one of the two names, would pass
+    # that weaker grep and fail every session that dispatches the other way.
+    prog=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh)
+    if [ -z "$prog" ]; then
+      c44_errs="$c44_errs\ncould not extract the hook rebuild program from install.sh"
+    else
+      c44_post=$(printf '%s' "$prog" | sed -n '/PostToolUse: \[/,/Stop: \[/p')
+      c44_ctx=$(printf '%s' "$c44_post" | grep -B2 'dispatch-counter\.sh')
+      c44_im=$(printf '%s' "$c44_ctx" | grep -oE 'matcher:"[^"]*"' | tail -1 | sed -E 's/^matcher:"(.*)"$/\1/')
+      case "$c44_im" in
+        *Agent*Task*|*Task*Agent*) ;;
+        *) c44_errs="$c44_errs\ninstall.sh: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_im:-none found})" ;;
+      esac
+    fi
+
+    c44_sm=$(jq -r '.hooks.PostToolUse[]? | select(any(.hooks[]?.command // ""; test("dispatch-counter\\.sh"))) | .matcher // ""' claude/settings.json 2>/dev/null)
+    case "$c44_sm" in
+      *Agent*Task*|*Task*Agent*) ;;
+      *) c44_errs="$c44_errs\nclaude/settings.json: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_sm:-none found})" ;;
+    esac
+
+    # Generalized one step: every ${TMPDIR:-/tmp}/vstack-<name> path claude/statusline.sh reads
+    # must be mentioned by at least one shipped claude/hooks/*.sh script -- a candidate writer.
+    # This states the dispatch counter's own defect shape once, generically, so a second reader
+    # added the same way cannot ship dark the same way twice. Deliberately weak: "mentions the
+    # path" is not "proven to write it" -- the join above is the real evidence for THIS path --
+    # but a path nothing else on disk even names is exactly the state this counter was in before
+    # dispatch-counter.sh existed, and that state is what this catches.
+    c44_prefixes=$(grep -oE '\$\{TMPDIR:-/tmp\}/vstack-[a-zA-Z0-9_-]+' "$sl" | sed 's|^\${TMPDIR:-/tmp}/||' | sort -u)
+    for c44_p in $c44_prefixes; do
+      c44_found=0
+      for c44_h in claude/hooks/*.sh; do
+        [ -e "$c44_h" ] || continue
+        if grep -qF -- "$c44_p" "$c44_h" 2>/dev/null; then c44_found=1; break; fi
+      done
+      [ "$c44_found" -eq 1 ] \
+        || c44_errs="$c44_errs\n$sl reads \${TMPDIR:-/tmp}/$c44_p<id> but no shipped claude/hooks/*.sh script mentions that path -- a reader with no candidate writer"
+    done
+
+    c44_cleanup
+    trap - EXIT
+
+    [ -z "$c44_errs" ] \
+      && ok "dispatch counter join, both directions" \
+      || bad "dispatch counter join, both directions" "$(printf '%b' "$c44_errs")"
+  fi
+else
+  skip "dispatch counter join, both directions" "jq not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

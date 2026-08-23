@@ -114,8 +114,40 @@ GRILL: run the grill-me skill when no skill matches this situation more specific
 situation-matched skill outranks it. grill-me is for a request whose shape is still undecided.'
     fi
   fi
+  # Delegation-mandate strike count, re-pinned every prompt instead of stated once at
+  # SessionStart and then never again. skill-mandate.sh (Stop) is the only writer of these two
+  # small counter files; this only reads them -- a cat of two tiny files under $TMPDIR, not a
+  # transcript parse, so it costs nothing like the Stop hook's own evaluation does. It is also
+  # why this can run every single prompt with no latency argument to make: there is no scan here.
+  #
+  # Two independent counters because skill-mandate.sh's own delegation family (breadth +
+  # agent-naming) no longer shares the skill mandates' (unslop/typescript/prove-it-works)
+  # 2-strike-per-session latch -- it latches 2-per-$VSTACK_DELEGATE_RESET_SECS-window instead, so
+  # a long session's delegation reminder keeps re-arming instead of going silent forever the
+  # first time both skill mandates tripped. See skill-mandate.sh's own comment at the top of its
+  # counter-reading section for the real-session evidence (5b14be87-2cee-4661-96ea-6106ef15f313)
+  # that motivated the split.
+  #
+  # Silent (0 bytes) at 0/0, same as $grill's own steady state -- most prompts in most sessions
+  # never tripped either mandate, and the byte budget (check 18 / the grill worst-case probe in
+  # .claude/verify.sh) is a hard cap paid on every single prompt whether or not either counter is
+  # nonzero, so a line that always rendered would be the expensive default for the common case.
+  mandate=""
+  if [ "${VSTACK_NO_MANDATE:-0}" != "1" ] && [ -n "$JQ" ]; then
+    _msid=$(printf '%s' "$in" | "$JQ" -r '.session_id // empty' 2>/dev/null)
+    [ -n "$_msid" ] || _msid="pid$PPID"
+    _mcnt_file="${TMPDIR:-/tmp}/vstack-mandate-$_msid"
+    _mcnt=$(cat "$_mcnt_file" 2>/dev/null || echo 0)
+    case "$_mcnt" in ''|*[!0-9]*) _mcnt=0 ;; esac
+    _mdcnt=$(cat "$_mcnt_file.delegate" 2>/dev/null || echo 0)
+    case "$_mdcnt" in ''|*[!0-9]*) _mdcnt=0 ;; esac
+    if [ "$_mcnt" -ge 1 ] || [ "$_mdcnt" -ge 1 ]; then
+      mandate="
+MANDATE skill=$_mcnt/2 delegate=$_mdcnt/2: dispatch + name a call sign now."
+    fi
+  fi
   emit "$event" 'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
-DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'"$grill"
+DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation — call the Skill tool.'"$grill$mandate"
   exit 0
 fi
 

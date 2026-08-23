@@ -23,7 +23,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 43 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 44 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -61,8 +61,8 @@ cd ~/Projects/vstack && ./install.sh
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.40.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.40.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.41.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.41.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -108,7 +108,7 @@ checks the right one; see [Day to day](#day-to-day)).
 | Skills | 28 | `~/.claude/skills/` |
 | Subagents | 14 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
-| Hooks | 6 | `~/.claude/hooks/` |
+| Hooks | 7 | `~/.claude/hooks/` |
 | CLI wrappers | 6 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 
@@ -151,16 +151,22 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 43 checks. `tests/gate-falsifiability.sh` breaks the repository once per check, at
+The gate is 44 checks. `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
 naming that check, restores the tree byte for byte, and fails if anything was left behind.
 **Check 16 fails if any check has no mutation row**, so a check cannot be added without proof it
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 43 checks
+./.claude/verify.sh                  # 44 checks
+VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
+
+The full sweep runs the whole gate once per mutation, so it takes about twenty minutes on an
+M-series Mac and there is no partial credit: a run that is interrupted has proven nothing about
+the rows it never reached. Run it against a clone, as above. It mutates the working tree, and
+editing that tree while it runs will be reported as an unrestored file at the end.
 
 Run the falsifiability suite in a throwaway clone. It mutates real files.
 

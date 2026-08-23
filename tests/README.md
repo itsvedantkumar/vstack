@@ -145,6 +145,11 @@ other Claude Code setups and against unconfigured Claude Code. `evals/optimize.s
 change-one-thing-and-re-measure loop on top of `run-pathways.sh`; it scores against
 `evals/holdout/` only through `--validate`, and never uses that set to decide whether to keep a
 change. `evals/RESULTS.md` records every run, including the retracted one.
+`tests/evals/build-the-lever/run.sh` is a single-question harness rather than a scoring pathway: it
+asks why `principle-build-the-lever` fires as rarely as it does, against the thresholds frozen
+in `evals/build-the-lever/PREREGISTRATION.md` before the first sample was drawn. Every
+hypothesis it registered was falsified; the standing answer it recorded is that the skill does
+not fire because the model already does the thing.
 
 These cost real model calls and are not part of the gate.
 

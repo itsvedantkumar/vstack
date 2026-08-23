@@ -18,7 +18,46 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44"
+CHECKS_ALL="$CHECKS"
+# Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
+# exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
+# above is left untouched for check 16's `^CHECKS="[^"]*"` parser, which greps only its first
+# match, so a scoped run cannot silently narrow what check 16 believes is declared. $CHECKS_ALL
+# is that same master list, captured before any override, so a scoped run can validate its own
+# ids against it below.
+#
+# Space-separated, matching the form documented two paragraphs up -- not comma-separated, which
+# is rejected rather than accepted. `VSTACK_FALSIFY_ROWS=23,27,40` used to become one word,
+# "23,27,40", that matched no case arm anywhere below, mutated nothing, and printed "did NOT fail
+# when broken" -- the same words this suite prints for an actual defect. Reject the format
+# outright rather than silently mistaking an unparsed value for a falsifiability failure.
+if [ -n "${VSTACK_FALSIFY_ROWS:-}" ]; then
+  case "$VSTACK_FALSIFY_ROWS" in
+    *,*)
+      printf 'ERROR VSTACK_FALSIFY_ROWS takes ids separated by spaces, not commas: %s\n' \
+        "$VSTACK_FALSIFY_ROWS"
+      printf '      example: VSTACK_FALSIFY_ROWS="23 27 40"\n'
+      exit 1 ;;
+  esac
+  CHECKS="$VSTACK_FALSIFY_ROWS"
+  # An id with no break_it/label_for arm, or one simply absent from the declared master list, is
+  # not a check this run found unfalsifiable -- it is a check this run never looked at. The two
+  # read identically as "did NOT fail when broken" unless this says otherwise up front: fail
+  # before anything is mutated, name every bad id in one message, and never enter the loop below.
+  _unknown=""
+  for _id in $CHECKS; do
+    _found=0
+    for _k in $CHECKS_ALL; do [ "$_k" = "$_id" ] && { _found=1; break; }; done
+    [ "$_found" -eq 1 ] || _unknown="$_unknown $_id"
+  done
+  if [ -n "$_unknown" ]; then
+    printf 'ERROR unknown check id(s):%s -- not declared in CHECKS, no break_it/label_for arm\n' \
+      "$_unknown"
+    printf '      nothing was mutated; this is not a falsifiability failure\n'
+    exit 1
+  fi
+fi
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -157,6 +196,7 @@ files_for(){ case "$1" in
   34)  printf 'overlay.sh' ;;
   39)  printf 'CHANGELOG.md' ;;
   40)  printf 'claude/hooks/skill-mandate.sh' ;;
+  44)  printf 'install.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -206,6 +246,7 @@ label_for(){ case "$1" in
   38)  printf 'every repository path named in prose exists' ;;
   39)  printf 'CHANGELOG.md structure' ;;
   40)  printf 'latched session still logs a delegation-drift row' ;;
+  44)  printf 'dispatch counter join, both directions' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -301,7 +342,18 @@ exit 0
       printf '\n```bash\nnode scripts/not-vendored-probe.mjs --run\n```\n' >> claude/skills/swarm/SKILL.md ;;
   23) # the failure that matters: a guard that stops denying. Make the deny tier unreachable
       # and the ask/allow tiers keep working, so only a test of the decisions notices.
-      sed -i.t 's/^if \[ "\$SIMPLE" = 1 \]; then/if false; then/' claude/hooks/guard-destructive.sh \
+      #
+      # Anchored on the decision itself -- every `emit deny` call site, function and inline
+      # duplicate alike -- rather than on a `$SIMPLE` gate variable that the file no longer has.
+      # d1b96bd split the old single simple/compound branch into `_check_deny_segment()` plus a
+      # second, duplicated inline block for non-compound commands, and the old `$SIMPLE` pattern
+      # stopped matching either one: the mutation landed nowhere and the row reported "did NOT
+      # fail when broken" while proving nothing. `: emit deny ...` is the colon builtin no-opping
+      # the call (ignores its args, returns 0), so every deny case arm falls through to the
+      # ask/allow tiers below it exactly as if the deny tier were absent, in both the function and
+      # its inline duplicate, in one edit. Anchored on leading whitespace so the prose comment
+      # above line 81 ("If so, emit deny immediately.") is not also mangled.
+      sed -i.t 's/^\( *\)emit deny /\1: emit deny /' claude/hooks/guard-destructive.sh \
         && rm -f claude/hooks/guard-destructive.sh.t ;;
   24) # claim an already-tagged version while the payload has moved on — the exact state that
       # ships three lanes three different trees under one label
@@ -384,8 +436,18 @@ exit 0
       perl -ni -e 'print unless m{\]\(docs/provenance/README\.md\)}' README.md ;;
   27) # Make the mandate unconditional. A gate that always blocks passes any test that only ever
       # checks that it blocks, which is why check 27 exercises both directions.
-      perl -0pi -e 's/\[ -n "\$unmet" \] \|\| \{ rm -f "\$cnt_file"; exit 0; \}/unmet="\$unmet\\n  always"/' \
-        claude/hooks/skill-mandate.sh ;;
+      #
+      # Anchored on the actual block/no-block decision gate, `[ -n "$unmet" ] || exit 0`, rather
+      # than on the old combined `[ -n "$unmet" ] || { rm -f "$cnt_file"; exit 0; }` line. Splitting
+      # the mandate latch into independent skill/delegation families moved the cnt_file cleanup to
+      # its own per-family bookkeeping block above this line, so the old regex stopped matching
+      # anything and the row reported "did NOT fail when broken" while proving nothing. `true ||
+      # exit 0` always falls through past the early-exit, so the hook reaches the block/reason
+      # path regardless of whether anything is actually unmet -- unconditional, in the direction
+      # the check exists to catch, surviving the exact rewrite that broke the old anchor because
+      # this line is the decision itself, not bookkeeping beside it.
+      sed -i.t 's/^\[ -n "\$unmet" \] || exit 0$/true || exit 0/' claude/hooks/skill-mandate.sh \
+        && rm -f claude/hooks/skill-mandate.sh.t ;;
   26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
       # passages describing a Windows lane, with the Windows job red.
       perl -0pi -e 's/CI runs `ubuntu-latest`/CI runs `windows-latest`, `ubuntu-latest`/' README.md ;;
@@ -402,11 +464,40 @@ exit 0
       # latch's old shape, which returned before the delegation-drift logger ever got to write a
       # row for it. cnt>=2 still exits 0 and stays silent -- blocking is untouched -- only the
       # row is lost, which is what isolates this from check 27's blocking assertions.
-      sed -i.bak 's/^if \[ "\$cnt" -ge 2 \]; then$/[ "$cnt" -ge 2 ] \&\& exit 0; if false; then/' \
-        claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.bak ;;
+      #
+      # The old anchor, `^if \[ "\$cnt" -ge 2 \]; then$`, was the latch's condition line before
+      # the delegation family split it into a combined guard: `if [ "$cnt" -ge 2 ] && { [ "$dcnt"
+      # -ge 2 ] || [ "$dscan_recent" = 1 ]; }; then`. That line no longer starts and ends exactly
+      # where the old regex anchored, so the mutation landed nowhere -- the same stale-anchor
+      # defect as rows 23 and 27, on the same rewrite. Target the row-write instead of the outer
+      # condition: two lines below the latch sit an inner `if [ "${VSTACK_NO_DELEGATION_LOG:-0}"
+      # != "1" ]; then` (2-space indented, distinct from the top-level logger's own copy of that
+      # same test further down the file) guarding the subshell that writes the latched row, and
+      # the `exit 0` that keeps the latch silent sits after its `fi`, outside it. Disabling only
+      # the inner if reproduces exactly the regression this check exists to catch: silence and
+      # non-blocking preserved, only the row lost. sed's BSD/macOS build treats the literal `{`
+      # and `}` in `${VSTACK_NO_DELEGATION_LOG:-0}` as an interval expression and errors with
+      # "invalid repetition count(s)", so this uses perl, not sed, to apply it.
+      perl -pi -e 's/^  if \[ "\$\{VSTACK_NO_DELEGATION_LOG:-0\}" != "1" \]; then$/  if false; then/' \
+        claude/hooks/skill-mandate.sh ;;
+  44) # Drop "Agent" from the matcher on dispatch-counter.sh's install.sh entry, leaving "Task"
+      # wired and every other event untouched. This is the shape check 11's own coverage cannot
+      # see: the hook is still referenced, still under PostToolUse, so the referrer/coverage
+      # loops in check 11 stay green while every session that dispatches via Agent (not Task)
+      # goes uncounted. Only a check that reads the matcher value itself notices.
+      sed -i.t 's/matcher:"Agent|Task"/matcher:"Task"/' install.sh && rm -f install.sh.t ;;
 esac }
 
-echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"
+# Two rows outside this count also report a result every run: the green-at-baseline probe below
+# and the tree-unchanged comparison at the end. They are not optional even in a scoped run, so
+# the declared total is the mutation rows plus those two, not the mutation rows alone. This used
+# to print the mutation-row count here and the mutation-row-plus-two count in the footer for the
+# same run -- "falsifying 1 checks" above "3 declared" below -- which reads as two runs
+# disagreeing about their own size rather than one run reporting two different things.
+N_MUTATION=0
+for _ in $CHECKS; do N_MUTATION=$((N_MUTATION+1)); done
+DECLARED=$((N_MUTATION+2))
+echo "falsifying $N_MUTATION checks ($DECLARED declared rows this run: $N_MUTATION mutation + 2 fixed)"
 echo
 
 # A green baseline, taken before anything is mutated.
@@ -539,13 +630,12 @@ echo
 # failed / FALSIFIABLE" with no declared count and no skip line, so rows 19 and 24 could
 # `continue` out and the summary read exactly like a run that proved every row. verify.sh's own
 # founding lesson, unapplied to the suite that proves verify.sh.
-DECLARED=0
-for _ in $CHECKS; do DECLARED=$((DECLARED+1)); done
-# Two rows report a result without being in CHECKS: the green-at-baseline probe before the loop
-# and the tree-unchanged comparison after it. The first version of this counted one of them and
-# reported "-1 declared row(s) reported nothing", which is an accounting bug announcing itself
-# in the negative -- the right behaviour for a counter nobody had checked against a known total.
-DECLARED=$((DECLARED+2))
+#
+# $DECLARED is computed once, up top alongside $N_MUTATION, specifically so the header and this
+# footer report the same run the same way. The first version of this counted only one of the two
+# always-on pseudo-rows (baseline-green, tree-unchanged) and reported "-1 declared row(s) reported
+# nothing" -- an accounting bug announcing itself in the negative, the right failure mode for a
+# counter nobody had checked against a known total.
 printf '%d declared, %d passed, %d failed, %d skipped\n' "$DECLARED" "$PASSED" "$FAILED" "$SKIPPED"
 if [ "$((PASSED + FAILED + SKIPPED))" -ne "$DECLARED" ]; then
   printf 'FAIL  row accounting: %d declared row(s) reported nothing\n' \

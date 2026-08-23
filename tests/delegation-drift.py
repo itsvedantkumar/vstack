@@ -343,12 +343,44 @@ def positioned_checkpoints(merged):
     return out
 
 
+def measured(row):
+    """True iff the hook actually computed breadth for this checkpoint.
+
+    A latched row -- MEESEEKS's 2-strike-latch bypass, shipped v1.40.0, split out and made
+    independently observable by MORTY's follow-up -- carries a real session_id and a real
+    checkpoint_index (the Stop genuinely happened) but explicit JSON null for dir_count,
+    ext_count, task_count, and named, because computing them there was measured as too
+    expensive to pay unconditionally (1438ms mean / 1536ms p95 on a 17.5MB transcript) and
+    MEESEEKS chose not to. A latched Stop is therefore KNOWN-UNMEASURED: it is neither
+    zero-breadth (eligible() returning False on a null row would silently claim "measured and
+    small") nor not-delegated (delegated() would silently claim "measured and no dispatch").
+    Both readings would misrepresent a missing measurement as a negative one, which is exactly
+    the shape of the corpus-filter-that-looks-like-a-decision bug this repo keeps re-finding.
+    Every caller that pools eligible()/delegated() results MUST check measured() first and
+    exclude -- not zero-fill -- an unmeasured row; see pool_tertiles() and
+    detect_broken_extraction() for the two call sites that do."""
+    return row.get("dir_count") is not None
+
+
 def eligible(row):
-    return row.get("dir_count", 0) >= 3 and row.get("ext_count", 0) >= 2
+    # Defensive null-guard only -- the real exclusion decision for a latched (unmeasured) row
+    # is made by callers checking measured() BEFORE calling this, so its result is counted
+    # separately rather than folded into "not eligible". This still returns a safe False rather
+    # than raising if a future caller forgets that check, matching this file's own crash
+    # discipline: an analyser must degrade, never traceback, on a schema it already knows about.
+    dir_count = row.get("dir_count")
+    ext_count = row.get("ext_count")
+    if dir_count is None or ext_count is None:
+        return False
+    return dir_count >= 3 and ext_count >= 2
 
 
 def delegated(row):
-    return row.get("task_count", 0) >= 1
+    # Same defensive null-guard as eligible() -- see its comment.
+    task_count = row.get("task_count")
+    if task_count is None:
+        return False
+    return task_count >= 1
 
 
 def pool_tertiles(all_checkpoints):
@@ -358,12 +390,19 @@ def pool_tertiles(all_checkpoints):
     first_named_n = last_named_n = first_named_hits = last_named_hits = 0
     contributing = set()
     contributing_named = set()
+    latched_in_tertiles = 0
     for sid, pos, row in all_checkpoints:
         if pos is None:
             continue
         is_first = pos <= 1.0 / 3.0
         is_last = pos >= 2.0 / 3.0
         if not (is_first or is_last):
+            continue
+        if not measured(row):
+            # KNOWN-UNMEASURED, not zero-breadth and not "no delegation" -- excluded from both
+            # the primary and secondary pools, counted here rather than silently dropped. See
+            # measured()'s docstring for why folding it into either pool would be wrong.
+            latched_in_tertiles += 1
             continue
         if eligible(row):
             contributing.add(sid)
@@ -392,6 +431,7 @@ def pool_tertiles(all_checkpoints):
         "last_named_n": last_named_n,
         "last_named_hits": last_named_hits,
         "contributing_sessions_secondary": len(contributing_named),
+        "latched_in_tertiles": latched_in_tertiles,
     }
 
 
@@ -433,17 +473,23 @@ def primary_verdict(p):
 
 
 def detect_broken_extraction(merged):
-    """>=2 sessions where EVERY checkpoint across the whole pool shares one identical
+    """>=2 sessions where EVERY MEASURED checkpoint across the whole pool shares one identical
     (dir_count, ext_count, task_count, named) tuple is not genuine invariance -- it is what a
     silently-broken extractor (e.g. every file_path read as empty) looks like. Sessions with
-    zero checkpoints cannot participate either way."""
+    zero checkpoints cannot participate either way.
+
+    Latched (known-unmeasured, see measured()) rows are excluded from this check entirely, not
+    just from the tuple set -- a pool that happens to be 100% latched right now is not evidence
+    of a broken extractor, it is evidence of nothing measured yet, and conflating the two would
+    print INVALID over what is really an (uncommon but legitimate) all-latched NOT EVALUATED."""
     tuples = set()
     sessions_with_data = 0
     for sid, rows in merged.items():
-        if not rows:
+        measured_rows = [row for row in rows.values() if measured(row)]
+        if not measured_rows:
             continue
         sessions_with_data += 1
-        for row in rows.values():
+        for row in measured_rows:
             tuples.add(
                 (
                     row.get("dir_count"),
@@ -528,12 +574,24 @@ def main():
 
     all_checkpoints = positioned_checkpoints(merged)
     single_checkpoint_sessions = sum(1 for sid, rows in merged.items() if len(rows) < 2)
+    total_checkpoints = len(all_checkpoints)
+    latched_checkpoints = sum(1 for _sid, _pos, row in all_checkpoints if not measured(row))
     pooled = pool_tertiles(all_checkpoints)
 
     print()
     print(
         f"sessions excluded from tertile pooling (only 1 checkpoint, no position to place): "
         f"{single_checkpoint_sessions}"
+    )
+    # Printed unconditionally, including when zero -- a latched (known-unmeasured) checkpoint
+    # is neither zero-breadth nor "not delegated" (see measured()'s docstring) and pool_tertiles
+    # already excludes it from every pooled rate below. This line is the only place that count
+    # is visible; a silent drop here is exactly the corpus-filter-that-looks-like-a-decision
+    # shape this repo has shipped before.
+    print(
+        f"checkpoints latched (known-unmeasured Stop, excluded from every pool below): "
+        f"{latched_checkpoints} of {total_checkpoints} total checkpoints "
+        f"({pooled['latched_in_tertiles']} of those were inside a first/last-tertile window)"
     )
     print()
     print(
