@@ -1165,7 +1165,12 @@ if command -v jq >/dev/null; then
   g_decide(){ printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c "$1" '$c')" \
                 | bash claude/hooks/guard-destructive.sh 2>/dev/null \
                 | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null; }
+  # G_N counts the table rather than restating it. The label used to carry a literal, which went
+  # from 16 to 22 to 24 while SECURITY.md still said sixteen -- a number in prose that nothing
+  # re-derives is a number that rots, and this file exists to catch exactly that.
+  G_N=0
   g_want(){ # <command> <expected>
+    G_N=$((G_N+1))
     got=$(g_decide "$1")
     [ "$got" = "$2" ] || errs="$errs\n'$1' -> $got, expected $2"
   }
@@ -1180,6 +1185,24 @@ if command -v jq >/dev/null; then
   g_want 'git push -f origin HEAD:refs/heads/main' deny
   g_want 'echo hi; rm -rf /'             deny
   g_want 'git push --force origin refs/heads/main:refs/heads/main' deny
+  # Wildcard staging is tier-dependent on WHERE it runs, so it needs its own probe: the decision
+  # turns on CONDUCTOR_WORKSPACE_PATH and $PWD, not on the command alone. Both directions are
+  # asserted. A rule that only ever asks would pass a test that only checks that it asks, and the
+  # allow rows are the ones that keep this guard installed -- `git add -A` inside your own
+  # workspace is the normal case and must stay silent.
+  g_ws(){ # <command> <workspace_path> <expected>
+    G_N=$((G_N+1))
+    got=$(printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c "$1" '$c')" \
+            | env CONDUCTOR_WORKSPACE_PATH="$2" bash claude/hooks/guard-destructive.sh 2>/dev/null \
+            | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
+    [ "$got" = "$3" ] || errs="$errs\n'$1' in workspace '$2' -> $got, expected $3"
+  }
+  g_ws 'git add -A'            /nonexistent/other-workspace ask
+  g_ws 'git add .'             /nonexistent/other-workspace ask
+  g_ws 'git commit -am "wip"'  /nonexistent/other-workspace ask
+  g_ws 'git add bin/doctor'    /nonexistent/other-workspace allow
+  g_ws 'git commit -m "add a thing"' /nonexistent/other-workspace allow
+  g_ws 'git add -A'            "$PWD"                       allow
   g_want 'rm -rf /etc/nginx'             ask
   g_want 'git reset --hard HEAD~3'       ask
   g_want 'psql -c "DROP TABLE users"'    ask
@@ -1211,7 +1234,7 @@ if command -v jq >/dev/null; then
     d=$(printf '%s' "$bad" | bash claude/hooks/guard-destructive.sh 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
     [ "$d" = ask ] || errs="$errs\nmalformed payload -> $d, expected ask"
   done
-  [ -z "$errs" ] && ok "destructive guard decides correctly (24 commands, 3 tiers)" \
+  [ -z "$errs" ] && ok "destructive guard decides correctly ($G_N commands, 3 tiers)" \
     || bad "destructive guard decides correctly" "$(printf '%b' "$errs")"
 else
   skip "destructive guard decides correctly" "jq not installed"

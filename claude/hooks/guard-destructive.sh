@@ -164,6 +164,26 @@ _check_ask_segment() {
       emit ask "[guard] this drops or truncates a database table. Confirm the target is not production." ;;
   esac
 
+  # Wildcard staging in a tree this session does not own. Two sessions writing one worktree is
+  # not hypothetical: on 2026-08-23 a `git add -A` here swept another session's uncommitted
+  # security fixes into a commit whose message described only a documentation change, and it
+  # reached origin before either session noticed. Explicit paths cannot do that.
+  #
+  # This asks only when CONDUCTOR_WORKSPACE_PATH is set and the working directory sits outside
+  # it, which is exactly the case where another session may be mid-edit. Inside your own
+  # workspace it stays silent, because that is the normal case and a guard that fires on every
+  # commit is a guard that gets uninstalled.
+  case "$seg" in
+    git\ add\ -A|git\ add\ -A\ *|git\ add\ --all*|git\ add\ .|git\ add\ .\ *|\
+    git\ commit\ -a|git\ commit\ -a\ *|git\ commit\ -am*|git\ commit\ *--all*)
+      if [ -n "${CONDUCTOR_WORKSPACE_PATH:-}" ]; then
+        case "$PWD/" in
+          "${CONDUCTOR_WORKSPACE_PATH%/}"/*) : ;;
+          *) emit ask "[guard] wildcard staging in $PWD, outside this session's workspace (${CONDUCTOR_WORKSPACE_PATH}). Another session may have uncommitted work here, and -A would commit it under your message. Stage explicit paths." ;;
+        esac
+      fi ;;
+  esac
+
   # SCM operations
   case "$seg" in
     git\ reset\ *--hard*)

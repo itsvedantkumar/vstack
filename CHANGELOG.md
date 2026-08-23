@@ -6,6 +6,36 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## Unreleased
+
+**`git add -A` in a tree you do not own now asks first.** On 2026-08-23 two sessions were writing
+`~/Projects/vstack` at once. One of them ran `git add -A`, swept the other's uncommitted security
+fixes into a commit whose message described only a documentation change, and pushed it. The code
+was correct and the release notes were not: three security fixes reached origin unversioned and
+unchangelogged, and the catch-up release had to say so in its own tag. Nothing prevented it and
+nothing detected it. `git status` was clean when the committing session last looked.
+
+The guard now asks on `git add -A`, `git add .`, `git add --all`, `git commit -a`, `git commit -am`
+and `git commit --all`, but only when `CONDUCTOR_WORKSPACE_PATH` is set and the working directory
+sits outside it. That is exactly the case where another session may be mid-edit. Inside your own
+workspace it stays silent, because that is the normal case and a guard that fires on every commit
+is a guard that gets uninstalled. Explicit paths are never touched: `git add bin/doctor` passes.
+
+Both directions are asserted in check 30, including two rows that must NOT fire. One of them is
+`git commit -m "add a thing"`, which exists because the obvious glob for the `-a` flag also matches
+the letter sequence in a commit message and would have made the guard fire on ordinary commits.
+
+**The guard's own row count stopped being written down.** Check 23's label carried a literal that
+had gone 16, then 22, then 24, while `SECURITY.md` still said sixteen. Both were prose about a
+table that nothing re-derived. The label now counts the table as it runs and prints what it
+actually tested, 30 rows, and `SECURITY.md` no longer names a number at all. Same defect this repo
+keeps finding in its own documentation, this time in the file whose job is finding it.
+
+Worth stating plainly, since the fix is narrower than the lesson: the guard reduces the blast
+radius, it does not make a shared worktree safe. Two agents editing one checkout will still
+interleave. The durable rule is to stage explicit paths whenever another session might be in the
+tree, and the guard only enforces it where the environment says which tree is yours.
+
 ## 1.30.0 — 2026-08-23
 
 security-auditor closed the three findings raised against 1.28.0. What follows is what was

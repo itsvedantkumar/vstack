@@ -40,5 +40,6 @@ unredacted.
 
 Skills and commands are prose that instructs a model. They are not a sandbox and give no security
 guarantee about what the model does. The destructive-command guard denies a documented list of
-commands; check 23 tests all sixteen across three tiers, in both directions. Treat it as a
+commands; check 23 tests every row of that list across three tiers, in both directions, and
+prints the live count it tested rather than one written down here. Treat it as a
 seatbelt, not a cage.
