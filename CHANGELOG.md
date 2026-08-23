@@ -6,6 +6,16 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.22.0 — 2026-08-23
+
+**Register rule tightened after it failed once.** v1.21.0 banned commentary on the facts and did
+not stop discourse openers, narrated process, or empty hedging. The correction arrived a second
+time, which is the trigger for encoding a rule as a specific list rather than restating an
+intent. Five banned classes now, each with its own examples: openers and acknowledgement tokens,
+commentary, narrated process, information-free hedging, and restating the question. Plus the
+deletion test — if a sentence survives removal without changing what the reader does next, it
+goes.
+
 **Six ui-gate rules came back from the dead.** They were unconditional skips carrying "playwright
 is not vendored here", and nothing in that file ever checked for a browser. vstack ships
 `agent-browser`, a Rust binary driving Chrome over CDP, already installed and already the
