@@ -348,48 +348,118 @@ if [ -n "$R" ]; then
   [ "${a:-0}" -gt 0 ] && WANT_AGENTS="$a"
 fi
 
-echo "── hooks ──"
-# inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
-for f in $HOOKS; do
-  [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
-[ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
-# bin/claude-task.sh ships in the same sweep (install.sh copies bin/* wholesale) and nothing in
-# the repository named it, so nothing checked it either -- it was installed on every machine and
-# findable from none. It is the scheduled-task runner cron drives.
-[ -x "$HOME/.config/agents/bin/claude-task.sh" ] && ok "claude-task.sh (scheduled runs)" || bad "claude-task.sh" "missing"
-n=$(ls "$CDIR/agents"/*.md 2>/dev/null | wc -l | tr -d ' ')
-[ "$n" -ge "$WANT_AGENTS" ] && ok "subagents ($n)" || bad "subagents" "$n<$WANT_AGENTS"
-echo "── secrets ──"
-[ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
-# Asserts the opposite of what it used to. Sourcing secrets.env from a shell rc exports every
-# credential to every child process of every shell; the wrappers in bin/ load what they need
-# themselves. An install that puts it back is a regression, so this fails on finding it.
-# Two different things can put this line in an rc file, and they deserve different answers.
-# The `set -a` form is the one install.sh used to write: if it is back, that is a regression in
-# this repo and it fails. Any other spelling is a line the user wrote themselves — still a real
-# exposure worth naming, but not this tool's to fail over or to delete.
-_amb_ours=""; _amb_theirs=""
-for _rc in .zshenv .zshrc .bashrc .profile; do
-  [ -f "$HOME/$_rc" ] || continue
-  if grep -q 'set -a && \. "$HOME/.config/agents/secrets.env" && set +a' "$HOME/$_rc" 2>/dev/null; then
-    _amb_ours="$_amb_ours $_rc"
-  elif grep -q 'agents/secrets.env' "$HOME/$_rc" 2>/dev/null; then
-    _amb_theirs="$_amb_theirs $_rc"
+# Two install lanes put the payload in two different places, and everything below this point
+# used to assume only one of them: the full ~/.claude layout install.sh writes. A plugin-only
+# install (`claude plugin install vstack@vstack`) never runs install.sh, so $CDIR/hooks,
+# $CDIR/agents and $CDIR/skills stay empty on a perfectly healthy install -- every check below
+# reported that as failure, telling a stranger their working install was broken. Detect which
+# lane actually landed before asserting anything is missing.
+PLUGIN_ROOT=""
+if [ ! -d "$CDIR/skills" ] || [ -z "$(ls -A "$CDIR/skills" 2>/dev/null)" ]; then
+  # installed_plugins.json names the exact path Claude Code installed to; prefer it over
+  # globbing, since it can't be confused by a stale directory an old version left behind.
+  IPJ="$CDIR/plugins/installed_plugins.json"
+  if command -v jq >/dev/null 2>&1 && [ -f "$IPJ" ]; then
+    PLUGIN_ROOT=$(jq -r '.plugins["vstack@vstack"][0].installPath // empty' "$IPJ" 2>/dev/null)
+    [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT" ] || PLUGIN_ROOT=""
   fi
-done
-if [ -n "$_amb_ours" ]; then
-  bad "credentials exported to shells" "vstack's own export is back in:$_amb_ours — re-run ./install.sh, which removes it"
-else
-  ok "vstack exports no credentials to shells"
+  if [ -z "$PLUGIN_ROOT" ]; then
+    # Fall back to the newest cache directory by mtime rather than a hardcoded version -- the
+    # version in this path changes every release. Not sorted by version number either: BSD
+    # sort has no -V, and a plain string sort puts 1.9.0 above 1.10.0 (see tests/README.md).
+    PLUGIN_ROOT=$(ls -dt "$CDIR"/plugins/cache/vstack/vstack/*/ 2>/dev/null | head -1)
+    PLUGIN_ROOT="${PLUGIN_ROOT%/}"
+  fi
+  [ -n "$PLUGIN_ROOT" ] && [ -d "$PLUGIN_ROOT/skills" ] || PLUGIN_ROOT=""
 fi
-[ -n "$_amb_theirs" ] && p "your own secrets sourcing" "note:$_amb_theirs sources secrets.env, so every child process of those shells sees your tokens. The wrappers in ~/.config/agents/bin load what they need on their own, so this line is probably not needed."
-[ -x "$HOME/.config/agents/bin/cloudflare-mcp" ] && ok "wrapper cloudflare-mcp" || bad "wrapper cloudflare-mcp" "missing"
+FULL_LIVE=0
+[ -d "$CDIR/skills" ] && [ -n "$(ls -A "$CDIR/skills" 2>/dev/null)" ] && FULL_LIVE=1
+
+echo "── install ──"
+if [ "$FULL_LIVE" -eq 1 ]; then
+  p "lane" "full ($CDIR)"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  p "lane" "plugin ($PLUGIN_ROOT)"
+else
+  bad "lane" "no vstack install found -- neither $CDIR/skills nor $CDIR/plugins/cache/vstack/vstack/*/skills exists (claude plugin marketplace add itsvedantkumar/vstack && claude plugin install vstack@vstack, or git clone + ./install.sh)"
+fi
+
+echo "── skills / agents / commands ──"
+if [ "$FULL_LIVE" -eq 1 ]; then
+  SK_DIR="$CDIR/skills"; AG_DIR="$CDIR/agents"; CM_DIR="$CDIR/commands"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  SK_DIR="$PLUGIN_ROOT/skills"; AG_DIR="$PLUGIN_ROOT/agents"; CM_DIR="$PLUGIN_ROOT/commands"
+else
+  SK_DIR=""; AG_DIR=""; CM_DIR=""
+fi
+if [ -n "$SK_DIR" ]; then
+  nsk=$(ls -d "$SK_DIR"/*/ 2>/dev/null | wc -l | tr -d ' ')
+  nag=$(ls "$AG_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
+  ncm=$(ls "$CM_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
+  [ "${nsk:-0}" -gt 0 ] && ok "skills ($nsk)" || bad "skills" "none found in $SK_DIR"
+  [ "${nag:-0}" -ge "$WANT_AGENTS" ] && ok "subagents ($nag)" || bad "subagents" "$nag<$WANT_AGENTS"
+  [ "${ncm:-0}" -gt 0 ] && ok "commands ($ncm)" || bad "commands" "none found in $CM_DIR"
+else
+  note "skills / agents / commands" "no install found, nothing to count"
+fi
+
+echo "── hooks ──"
+if [ "$FULL_LIVE" -eq 1 ]; then
+  # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
+  for f in $HOOKS; do
+    [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
+  [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
+  # bin/claude-task.sh ships in the same sweep (install.sh copies bin/* wholesale) and nothing in
+  # the repository named it, so nothing checked it either -- it was installed on every machine and
+  # findable from none. It is the scheduled-task runner cron drives.
+  [ -x "$HOME/.config/agents/bin/claude-task.sh" ] && ok "claude-task.sh (scheduled runs)" || bad "claude-task.sh" "missing"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "hooks" "not part of the plugin lane by design -- take the full install (git clone + ./install.sh) for hooks, the shell lane, and the CLI wrappers"
+else
+  note "hooks" "no install found, nothing to check"
+fi
+echo "── secrets ──"
+if [ "$FULL_LIVE" -eq 1 ]; then
+  [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
+  # Asserts the opposite of what it used to. Sourcing secrets.env from a shell rc exports every
+  # credential to every child process of every shell; the wrappers in bin/ load what they need
+  # themselves. An install that puts it back is a regression, so this fails on finding it.
+  # Two different things can put this line in an rc file, and they deserve different answers.
+  # The `set -a` form is the one install.sh used to write: if it is back, that is a regression in
+  # this repo and it fails. Any other spelling is a line the user wrote themselves — still a real
+  # exposure worth naming, but not this tool's to fail over or to delete.
+  _amb_ours=""; _amb_theirs=""
+  for _rc in .zshenv .zshrc .bashrc .profile; do
+    [ -f "$HOME/$_rc" ] || continue
+    if grep -q 'set -a && \. "$HOME/.config/agents/secrets.env" && set +a' "$HOME/$_rc" 2>/dev/null; then
+      _amb_ours="$_amb_ours $_rc"
+    elif grep -q 'agents/secrets.env' "$HOME/$_rc" 2>/dev/null; then
+      _amb_theirs="$_amb_theirs $_rc"
+    fi
+  done
+  if [ -n "$_amb_ours" ]; then
+    bad "credentials exported to shells" "vstack's own export is back in:$_amb_ours — re-run ./install.sh, which removes it"
+  else
+    ok "vstack exports no credentials to shells"
+  fi
+  [ -n "$_amb_theirs" ] && p "your own secrets sourcing" "note:$_amb_theirs sources secrets.env, so every child process of those shells sees your tokens. The wrappers in ~/.config/agents/bin load what they need on their own, so this line is probably not needed."
+  [ -x "$HOME/.config/agents/bin/cloudflare-mcp" ] && ok "wrapper cloudflare-mcp" || bad "wrapper cloudflare-mcp" "missing"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "secrets / wrappers" "not part of the plugin lane by design -- take the full install for secrets.env and the CLI wrappers"
+else
+  note "secrets / wrappers" "no install found, nothing to check"
+fi
 echo "── mcp servers ──"
 # CJSON was computed at the top of this file and never read by anything. install.sh merges
 # vstack's MCP servers into it on every run and nothing checked the result, so the one lane that
 # writes to a file outside ~/.claude had no health check at all. A server that silently stopped
 # being registered would show up as a tool that quietly does not exist.
-if [ -n "$R" ] && [ -f "$R/mcp/servers.json" ] && [ -f "$CJSON" ]; then
+#
+# The plugin lane merges none: claude/.claude-plugin/plugin.json declares no mcpServers key, so
+# a plugin-only install has zero registered by design -- not drift, and not this file's to fail.
+if [ "$FULL_LIVE" -eq 0 ] && [ -n "$PLUGIN_ROOT" ]; then
+  note "MCP servers" "0 via the plugin lane (claude/.claude-plugin/plugin.json declares no mcpServers) -- take the full install to get them merged into $CJSON"
+elif [ -n "$R" ] && [ -f "$R/mcp/servers.json" ] && [ -f "$CJSON" ]; then
   missing=""
   for m in $(jq -r 'keys[]' "$R/mcp/servers.json" 2>/dev/null); do
     jq -e --arg m "$m" '.mcpServers | has($m)' "$CJSON" >/dev/null 2>&1 || missing="$missing $m"
@@ -402,7 +472,14 @@ elif [ ! -f "$CJSON" ]; then
 else
   note "MCP servers" "no vstack repo found, so there is nothing to compare against"
 fi
-echo "── deploy ──"; [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
+echo "── deploy ──"
+if [ "$FULL_LIVE" -eq 1 ]; then
+  [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "deploy-auto.sh" "not part of the plugin lane by design -- take the full install for the CLI wrappers"
+else
+  note "deploy-auto.sh" "no install found, nothing to check"
+fi
 echo "── memory ──"
 # claude-mem is a third-party plugin vstack configures if present, not something it installs.
 if [ -d "$HOME/.claude-mem" ]; then ok "claude-mem store"
@@ -440,24 +517,36 @@ fi
 # is checkable on any machine. Whether the CLI is *enforcing* it can only be read from a signed-in
 # session, so on CI and on any fresh install this asked a question with no answer available and
 # read the silence as a failure.
-jq -e '.forceLoginMethod=="claudeai"' "$S" >/dev/null 2>&1 \
-  && ok "forceLoginMethod configured" || bad "forceLoginMethod" "not set in $S"
-if [ -z "$AS" ] || printf '%s' "$AS" | jq -e '.loggedIn == false' >/dev/null 2>&1; then
-  note "forceLoginMethod in effect" "unknown until you sign in"
-elif printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1; then
-  ok "forceLoginMethod in effect"
+#
+# forceLoginMethod, the parity keys, context caps and the claude-parity.zsh wrapper are all
+# written by install.sh's settings merge -- the plugin lane never runs it, so $S never carries
+# them there. That is the install.sh-only lane doing exactly what it is documented to do, not
+# drift, so these stay scoped to FULL_LIVE the same way hooks/wrappers/MCP are above.
+if [ "$FULL_LIVE" -eq 1 ]; then
+  jq -e '.forceLoginMethod=="claudeai"' "$S" >/dev/null 2>&1 \
+    && ok "forceLoginMethod configured" || bad "forceLoginMethod" "not set in $S"
+  if [ -z "$AS" ] || printf '%s' "$AS" | jq -e '.loggedIn == false' >/dev/null 2>&1; then
+    note "forceLoginMethod in effect" "unknown until you sign in"
+  elif printf '%s' "$AS" | jq -e '.forcedLoginMethod=="claudeai"' >/dev/null 2>&1; then
+    ok "forceLoginMethod in effect"
+  else
+    bad "forceLoginMethod in effect" "the CLI is not honouring it"
+  fi
+  [ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
+  jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true' "$S" >/dev/null 2>&1 \
+    && ok "Conductor parity keys" || bad "Conductor parity keys" "drifted"
+  jq -e '.skillListingMaxDescChars and .skillListingBudgetFraction and (.skillOverrides|length>0)' "$S" >/dev/null 2>&1 \
+    && ok "context caps (skill listing)" || bad "context caps" "drifted"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "forceLoginMethod / parity keys / context caps / claude wrapper" "not part of the plugin lane by design -- install.sh's settings merge is what writes these; take the full install"
 else
-  bad "forceLoginMethod in effect" "the CLI is not honouring it"
+  note "forceLoginMethod / parity keys / context caps / claude wrapper" "no install found, nothing to check"
 fi
-[ -f "$HOME/.config/agents/shell/claude-parity.zsh" ] && ok "claude wrapper" || bad "claude wrapper" "missing"
-jq -e '.model=="claude-opus-5[1m]" and .effortLevel=="high" and .fastMode==true' "$S" >/dev/null 2>&1 \
-  && ok "Conductor parity keys" || bad "Conductor parity keys" "drifted"
 # A second global CLAUDE.md in $HOME shadows nothing but loads alongside ~/.claude/CLAUDE.md
 # in every session — two always-on rule files drift into contradiction. One home: the vendored
-# claude/CLAUDE.md in vstack.
+# claude/CLAUDE.md in vstack. Independent of which lane is live: a stray ~/CLAUDE.md is wrong
+# regardless of how vstack itself got installed.
 [ ! -f "$HOME/CLAUDE.md" ] && ok "single global CLAUDE.md" || bad "stray ~/CLAUDE.md" "merge into vstack claude/CLAUDE.md, then delete"
-jq -e '.skillListingMaxDescChars and .skillListingBudgetFraction and (.skillOverrides|length>0)' "$S" >/dev/null 2>&1 \
-  && ok "context caps (skill listing)" || bad "context caps" "drifted"
 # claude-mem auto-updates and will silently revert this async flag.
 CM=$(ls -d "$CDIR"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json 2>/dev/null | tail -1)
 if [ -n "$CM" ]; then
@@ -622,41 +711,72 @@ echo "── context ──"
 # 300K here means a real trigger near 230K. A window set too low thrashes: 100K produced three
 # compactions in an eight turn session.
 # Asserted against the LIVE file, not the repo's: a value this repo ships and the merge failed to
-# apply is the failure that matters, and it is invisible from the repo side.
+# apply is the failure that matters, and it is invisible from the repo side. The "shipped"
+# branch is a repo-integrity assertion and fires regardless of lane; the live-value comparison
+# below it only means anything once install.sh has actually merged into $CDIR/settings.json,
+# which the plugin lane never does -- so that half is scoped to FULL_LIVE.
 _acw_want=$(jq -r '.autoCompactWindow // empty' "${R:-/nonexistent}/claude/settings.json" 2>/dev/null)
 _acw_have=$(jq -r '.autoCompactWindow // empty' "$S" 2>/dev/null)
 if [ -z "$_acw_want" ] && [ -n "$R" ]; then
   bad "autoCompactWindow shipped" "claude/settings.json no longer sets it -- the pin was dropped from the repo, not merely from the install"
-elif [ -n "$_acw_have" ] && { [ -z "$R" ] || [ "$_acw_have" = "$_acw_want" ]; }; then
-  ok "autoCompactWindow (${_acw_have})"
+elif [ "$FULL_LIVE" -eq 1 ]; then
+  if [ -n "$_acw_have" ] && { [ -z "$R" ] || [ "$_acw_have" = "$_acw_want" ]; }; then
+    ok "autoCompactWindow (${_acw_have})"
+  else
+    bad "autoCompactWindow" "live settings has '${_acw_have:-unset}', repo ships '${_acw_want:-?}' -- unset means compaction waits for the model's context limit (./install.sh)"
+  fi
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "autoCompactWindow" "not merged by the plugin lane by design -- take the full install"
 else
-  bad "autoCompactWindow" "live settings has '${_acw_have:-unset}', repo ships '${_acw_want:-?}' -- unset means compaction waits for the model's context limit (./install.sh)"
+  note "autoCompactWindow" "no install found, nothing to check"
 fi
 
 # The statusline duplicates that threshold so it can render without a second jq spawn per turn.
 # A statusline that turns red at a number the runtime does not compact at is the same defect this
 # repo spent a day removing: a green that measures nothing. Assert the copy against the source.
-_sl="$CDIR/statusline.sh"
-_slw=$(sed -n 's/^CTX_COMPACT_WINDOW=\([0-9]*\).*/\1/p' "$_sl" 2>/dev/null | head -1)
-if [ -z "$_slw" ]; then
-  bad "statusline shows context" "$_sl sets no CTX_COMPACT_WINDOW -- context occupancy is not rendered, so the window cannot be tuned by observation"
-elif [ -n "$_acw_have" ] && [ "$_slw" != "$_acw_have" ]; then
-  bad "statusline threshold" "statusline warns at $_slw but Claude Code compacts at $_acw_have"
+# Only meaningful once install.sh has put a statusline at $CDIR/statusline.sh -- the plugin
+# lane leaves its own copy inert inside the cache directory, never wired via settings.json.
+if [ "$FULL_LIVE" -eq 1 ]; then
+  _sl="$CDIR/statusline.sh"
+  _slw=$(sed -n 's/^CTX_COMPACT_WINDOW=\([0-9]*\).*/\1/p' "$_sl" 2>/dev/null | head -1)
+  if [ -z "$_slw" ]; then
+    bad "statusline shows context" "$_sl sets no CTX_COMPACT_WINDOW -- context occupancy is not rendered, so the window cannot be tuned by observation"
+  elif [ -n "$_acw_have" ] && [ "$_slw" != "$_acw_have" ]; then
+    bad "statusline threshold" "statusline warns at $_slw but Claude Code compacts at $_acw_have"
+  else
+    ok "statusline context threshold ($_slw)"
+  fi
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "statusline shows context" "not wired by the plugin lane by design -- take the full install"
 else
-  ok "statusline context threshold ($_slw)"
+  note "statusline shows context" "no install found, nothing to check"
 fi
 
 # Compaction replaces the conversation layer, and the session baseline is injected into it at
 # SessionStart. Without compact instructions the routing table does not survive the first
-# compaction -- silently, which is the whole problem.
-if grep -q '^# Compact instructions' "$CDIR/CLAUDE.md" 2>/dev/null; then
-  ok "compact instructions in CLAUDE.md"
+# compaction -- silently, which is the whole problem. $CDIR/CLAUDE.md is install.sh's merged
+# copy; the plugin lane never writes one there.
+if [ "$FULL_LIVE" -eq 1 ]; then
+  if grep -q '^# Compact instructions' "$CDIR/CLAUDE.md" 2>/dev/null; then
+    ok "compact instructions in CLAUDE.md"
+  else
+    bad "compact instructions" "$CDIR/CLAUDE.md has no '# Compact instructions' section -- the routing table will not survive a compaction"
+  fi
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "compact instructions" "not merged by the plugin lane by design -- take the full install"
 else
-  bad "compact instructions" "$CDIR/CLAUDE.md has no '# Compact instructions' section -- the routing table will not survive a compaction"
+  note "compact instructions" "no install found, nothing to check"
 fi
 echo "── remote/dispatch ──"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
-jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
+# remoteControlAtStartup is another install.sh settings-merge key; the plugin lane never sets it.
+if [ "$FULL_LIVE" -eq 1 ]; then
+  jq -e '.remoteControlAtStartup==true' "$S" >/dev/null 2>&1 && ok "remoteControlAtStartup" || bad "remoteControlAtStartup" "off"
+elif [ -n "$PLUGIN_ROOT" ]; then
+  note "remoteControlAtStartup" "not merged by the plugin lane by design -- take the full install"
+else
+  note "remoteControlAtStartup" "no install found, nothing to check"
+fi
 B="$HOME/Library/Application Support/Claude/bridge-state.json"
 if [ -f "$B" ]; then
   want=$(jq -r '.remote.defaultEnvironmentId // ""' "$S")
