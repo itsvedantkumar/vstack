@@ -253,9 +253,10 @@ fi
 # would sit in the live file forever. A merge that cannot delete is an accumulator.
 #
 # It is EMPTY, and that is the correct value today. This list may only ever name a key that
-# claude/settings.json itself once shipped and no longer does. Across all 11 revisions of that
-# file the union of its top-level keys is 27, and 27 are shipped today: this repo has never
-# retired one.
+# claude/settings.json itself once shipped and no longer does. Across every revision of that
+# file the union of its top-level keys equals the count shipped today: this repo has never
+# retired one. Check the two numbers against each other rather than against a number written
+# here — the previous wording hardcoded 27, and was stale at 28 before anyone noticed.
 #
 # Read that before adding anything here. The first draft of this list was invented from
 # plausible-sounding names — "sandbox", "enabledMcpjsonServers", "autoCompactEnabled" — none
@@ -372,6 +373,7 @@ elif [ "$DRY" = 0 ]; then
           | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
       | .skillOverrides = ($userso + ($portable.skillOverrides // {}))
+      | del(.enabledPlugins["claude-mem@thedotmack"]?)
       | delpaths([$retired[] | [.]])
       | .hooks = (reduce ($ours | to_entries[]) as $e
                    ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))

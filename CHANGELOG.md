@@ -4,7 +4,7 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
-## Unreleased
+## 1.29.0 — 2026-08-23
 
 **Compaction ran at the model's context limit, and nothing said so.** `autoCompactWindow` was
 never set, so Claude Code compacted only when a session reached the window — about 967K of Opus
@@ -38,6 +38,36 @@ warning at a number the runtime does not use is a green that measures nothing.
 mode's own workflow forces the builtin Explore and Plan agents and bars writes — so MORTY and
 ZEEP were unreachable and `/team` could not run, with nothing reporting the substitution. The
 baseline states it now.
+
+**vstack claimed to enable claude-mem, and the toolchain never installs it.** `enabledPlugins`
+in `claude/settings.json` carried `"claude-mem@thedotmack": true`, which is false on any install
+that has not separately run `claude plugin install claude-mem@thedotmack`. This is strictly
+worse than commit eb22605's removed *disabled* entry: a disabled line is inert, but an enabled
+one for a plugin the toolchain never installs misrepresents a fresh install's state until the
+user acts on their own. Flagged from the product side by `product-owner` (enabling it
+conditionally from `install.sh` was considered and rejected — that puts vstack in the business
+of maintaining a third-party plugin's install path it does not own) and independently from the
+supply-chain side by `security-auditor`: an unpinned third-party plugin identity trusted by bare
+name, no `extraKnownMarketplaces` entry declaring its origin, under `autoUpdatesChannel:
+"latest"`. Existing users are migrated rather than left half-done — `install.sh`'s settings-merge
+jq program gained `del(.enabledPlugins["claude-mem@thedotmack"]?)`. `worker` found this could not
+use the `RETIRED` mechanism: `RETIRED` deletes top-level keys and check 21 validates only
+top-level key history, so a nested plugin name would fail that gate against no history to check
+— hence the targeted `del` instead. Verified empirically: before
+`{"claude-mem@thedotmack":true,"typescript-lsp@claude-plugins-official":true}`, after
+`{"typescript-lsp@claude-plugins-official":true}`, an unrelated user key survives the merge, and
+a fresh install carries zero references. Kept deliberately, because "remove every reference"
+would have been the wrong read: `bin/doctor`'s filesystem-based `[ -d "$HOME/.claude-mem" ]`
+note, its async-flag guard (the plugin's `UserPromptSubmit` hook must stay async or it blocks
+every prompt, and the plugin self-updates and reverts the flag), the conditional statusline
+indicator, and every historical mention in this file, `docs/provenance/` and
+`docs/how-skills-fire.md` — vstack removed a claim it was making, not support for a tool a user
+chooses.
+
+**A comment counted to 27 while the file held 28.** The retired-keys note in `install.sh`
+hardcoded the number of top-level settings keys, and had already drifted stale by one. It now
+says to compare the two counts against each other rather than against a number written in the
+comment — the only form of that claim that cannot rot.
 
 
 ## 1.28.0 — 2026-08-23

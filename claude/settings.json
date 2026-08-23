@@ -7,7 +7,6 @@
   "effortLevel": "high",
   "enableWorkflows": true,
   "enabledPlugins": {
-    "claude-mem@thedotmack": true,
     "typescript-lsp@claude-plugins-official": true
   },
   "env": {
