@@ -40,9 +40,22 @@ silently once (0 of 4 test prompts fired a skill) with nothing to catch the
 regression.
 
 `auto-trigger.sh` is a black-box regression test for that property. It runs
-`claude -p "<prompt>"` headlessly for 12 prompts that should each cause a
+`claude -p "<prompt>"` headlessly for 28 prompts that should each cause a
 specific skill to auto-fire, inspects the `stream-json` transcript for
 `Skill` tool_use blocks, and reports PASS/FAIL per case.
+
+## dispatch-static.sh
+
+`dispatch-static.sh` runs in CI on every push and makes zero model calls. It proves the fixtures
+`auto-trigger.sh` depends on are internally consistent: every skill name a case expects resolves to
+a real `claude/skills/*/SKILL.md`, every `setup_*` function a case references is actually defined,
+every fixture those functions write parses under its own language's parser, and the case count this
+file claims matches the number of cases in the suite.
+
+It does not prove a skill fires. It would stay green the day dispatch broke entirely, because an
+intact fixture list and a live `Skill` tool call are two different facts. Only `auto-trigger.sh`
+measures the second one, and that cannot run in CI here by deliberate decision: it needs an
+`ANTHROPIC_API_KEY` secret and spends model allowance per run. See the section below.
 
 ## test-breadth-mandate.sh
 
@@ -75,6 +88,27 @@ can score, whether the lead stopped when told the work was broken is a fact.
 
 Costs model allowance. It opens with a control that refuses the run if the fixture passes its own
 tests, because a fixture with nothing wrong in it makes every assertion below vacuous.
+
+## bin-scripts.sh
+
+`bin/claude-bg.sh`, `bin/claude-task.sh` and `bin/deploy-auto.sh` install to every user's
+`~/.config/agents/bin/` via `install.sh`'s wholesale copy of `bin/*`, whether or not anyone has
+ever run them. Checks 1 and 29 of the gate already run `bash -n` and `shellcheck -S warning` over
+all three, so their syntax was covered; nothing exercised their behaviour. `bin-scripts.sh` does,
+entirely offline: every `claude`/`vercel`/`wrangler`/`curl` it invokes is a local stub, so it costs
+zero model calls and never reaches the network.
+
+It covers, for each script: `bash -n` and `shellcheck` (at default severity, stricter than the
+gate's `-S warning`, which is how it catches an info-level finding the gate does not), argument
+handling (no args, `--help`, a bogus flag, too many args), running from an unrelated cwd, and
+running under a `cron`/`launchd`-shaped environment (`env -i`, a bare `PATH`, stdin from
+`/dev/null`). `bin/claude-task.sh` gets three more cases specific to it: a missing task
+directory, a task directory with no `SKILL.md`, and an unwritable log directory — the unattended
+path the README markets safety around, and the one nobody had run and looked at. A positive
+control (two synthetically broken scripts) proves the `bash -n`/`shellcheck` checks above can
+actually go red before trusting either to report clean.
+
+Usage: `tests/bin-scripts.sh [case-name ...]` (default: all).
 
 ## evals/
 
