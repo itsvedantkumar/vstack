@@ -97,6 +97,26 @@ can score, whether the lead stopped when told the work was broken is a fact.
 Costs model allowance. It opens with a control that refuses the run if the fixture passes its own
 tests, because a fixture with nothing wrong in it makes every assertion below vacuous.
 
+## container-matrix.sh
+
+`container-matrix.sh` runs `install.sh`, `bin/doctor`, `.claude/verify.sh`, the mandate and
+destructive-command hooks, `vstack trust`, `vstack update` and `uninstall.sh` inside real
+`debian:stable-slim`, `alpine:latest` and `ubuntu:latest` containers. It clones from published
+GitHub with no worktree mounted and no credentials, so it tests the artifact a stranger gets
+rather than the tree it was written in.
+
+That is the difference between this and `install-matrix.sh`. The matrix has a `bash-only` lane
+because "only .zshrc/.zshenv were written" once shipped and broke every Debian, Ubuntu and Alpine
+box, but its lanes simulate those environments on macOS. Real BusyBox coreutils, a real `ash` as
+`/bin/sh`, a real GNU userland and a genuinely absent `jq` are what this suite adds. Its first run
+found `bin/doctor` exiting 1 on a clean Alpine install, because the `date` fallback chain covers
+BSD and GNU and BusyBox supports neither.
+
+One assertion cannot be met here and the suite says so rather than lowering the bar: the gate
+reports `1 skipped` in every lane, because `plugin manifests valid` needs an authenticated
+`claude` CLI and no credentials are mounted. That is a structural limit of running without
+credentials, not a passing result.
+
 ## bin-scripts.sh
 
 `bin/claude-bg.sh`, `bin/claude-task.sh` and `bin/deploy-auto.sh` install to every user's
