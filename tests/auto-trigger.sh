@@ -86,8 +86,22 @@ extract_fired_skills() {
 # run_case NAME PROMPT EXPECTED_REGEX SETUP_FN
 # SETUP_FN is a function name invoked with the temp dir as $1, or "" for none.
 # ---------------------------------------------------------------------------
+# Case selection. Without it, proving one fix means re-running all 28 cases and spending the
+# whole allowance to learn about eight of them. Matches install-matrix.sh's convention:
+# no arguments runs everything, arguments name the cases to run.
+#   tests/auto-trigger.sh                       # all cases
+#   tests/auto-trigger.sh prove-it-works-declare-done encode-lessons-lint
+SELECTED=("$@")
+selected_() {
+  [ ${#SELECTED[@]} -eq 0 ] && return 0
+  local want
+  for want in "${SELECTED[@]}"; do [ "$want" = "$1" ] && return 0; done
+  return 1
+}
+
 run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
+  selected_ "$name" || return 0
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
 
   # Skill dispatch is a model decision, not a deterministic branch, so one sample is a coin
@@ -162,6 +176,7 @@ run_case() {
 # its situation.
 run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
+  selected_ "$name" || return 0
   local workdir out_jsonl err_log runner_pid waited fired fired_csv
 
   workdir="$(mktemp -d "/tmp/auto-trigger-neg.XXXXXX")"
@@ -586,6 +601,16 @@ run_negative_case \
   "ui-iterate|impeccable|blast-radius|brainstorming|writing-plans"
 
 echo "---"
+
+# A selector that matches no case would otherwise print "0 passed, 0 failed" and exit 0,
+# which is the same shape as a clean run. A typo'd case name must not read as a pass.
+# This sits above the hit-rate loop because HIT_LINES is unset when nothing ran, and
+# `set -u` turns that into a stack trace rather than an answer.
+if (( PASS_COUNT + FAIL_COUNT == 0 )); then
+  echo "no case ran. ${#SELECTED[@]} selector(s) given, none matched a case name."
+  exit 2
+fi
+
 echo "Hit rates (which attempt each case landed on):"
 for l in "${HIT_LINES[@]}"; do echo "  $l"; done
 echo
