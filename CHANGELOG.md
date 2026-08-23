@@ -4,6 +4,52 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.37.0 — 2026-08-23
+
+**The delegation and agent-naming mandates counted a tool name that does not exist in this
+build.**
+
+`skill-mandate.sh`'s `task_count` matched only `tool_use` blocks named `Task`, the classic Claude
+Code CLI's dispatch-tool name. This build's SDK calls the same tool `Agent`. Measured against a
+real 15MB transcript: 70 `Agent` dispatches, 0 `Task` matches. Two mandates read that count: the
+breadth/delegation mandate reported "zero subagents" over a session that ran 70 of them, and the
+agent-naming mandate -- gated on that same count being >= 1 -- was structurally unable to ever
+fire and had never fired in any install since it shipped, despite call-sign naming being a
+specific, standing request from the repo owner. The enforcement was inert and silent, and silence
+reads like compliance. Fixed by counting `Task` or `Agent`. `TaskCreate` was checked and
+deliberately excluded: its `.input` shape is `{subject, description, activeForm}`, a checklist
+item, not a dispatch call.
+
+Second defect in the same hook: the Bash-write path extractor added in v1.36.0 was reading
+write-shaped lines out of heredoc *bodies* as if this session had performed them, and treating
+any `$VAR`-containing redirect target as a real file. A `cat > /tmp/check35.sh <<'CHK' ... CHK`
+block whose fixture body happened to contain `$g_empty/app/src/C.tsx` was reported as TypeScript
+someone had written. On the same transcript: dir_count 53 -> 34, ext_count 83 -> 60, extracted
+paths 345 -> 241, and the breadth mandate goes from firing on phantom writes to completely silent
+on a session that made one real edit. `emit()` now drops any candidate containing an unexpanded
+`$`, and a heredoc body is suppressed only once its opening line already matched a write rule --
+so `cat >file <<EOF` (body is inert file content) is suppressed but `python3 - <<PY` (body is
+executed and its real `open(..., 'w')` call is a genuine write) still counts. Latency cost: +74ms
+(+13%) on the same transcript.
+
+Also added: `prove-it-works`, a Stop-hook check on the assistant's own closing claim.
+`principle-prove-it-works` scored 0/10 on its own fixture prompt because its trigger -- "apply
+before declaring any task or fix done" -- is a condition on the assistant's forthcoming speech
+act, not on anything in the user's prompt a skill matcher can score against. The equivalent check
+now runs directly in the Stop hook, at the moment that condition is actually about: a turn that
+edits a file and closes with a completion claim ("done", "it works now", "all tests pass", and
+similar bounded phrasings), with zero Bash/Read/Task/Agent tool_use anywhere in the turn to back
+it up, blocks naming `prove-it-works`. Deliberately generous in the silent direction -- any Bash
+or Read call counts as evidence regardless of what it did or when in the turn it ran, relative to
+the edit -- because a mandate that produces a false block teaches users to disable the whole gate.
+
+Falsification: `tests/test-breadth-mandate.sh` PROOFs 7-9 cover prove-it-works (blocks on zero
+evidence; silent after a real Bash call; silent on a purely conversational claim with no edit).
+PROOFs 10-12 cover the two dispatch-hook fixes (Agent dispatch suppresses the breadth mandate the
+same as Task; zero Task AND zero Agent still trips it; a `$VAR`-containing Bash write target is
+not counted). All 12 proofs pass; the pre-fix hook was falsified by hand against the same
+fixtures and restored byte-identical.
+
 ## 1.36.0 — 2026-08-23
 
 **The breadth mandate counted Write, Edit and NotebookEdit tool calls and nothing else, so every
