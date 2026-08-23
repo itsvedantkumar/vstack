@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# test-breadth-mandate.sh — the hand-runnable reproduction of the breadth mandate inside
-# claude/hooks/skill-mandate.sh (multi-directory, multi-type work with zero subagents).
+# test-breadth-mandate.sh — the hand-runnable reproduction of two mandates inside
+# claude/hooks/skill-mandate.sh: the breadth mandate (multi-directory, multi-type work with
+# zero subagents, PROOFs 1-6) and the prove-it-works mandate (a completion claim closing a
+# turn that edited a file and produced zero verifying evidence, PROOFs 7-9). The name is now
+# narrower than the file's scope; it stayed rather than churn every call site over a rename.
 #
 # The hook's contract (Claude Code Stop-hook protocol, not exit code): a met mandate prints
 # nothing to stdout and exits 0; an unmet one prints one JSON object on stdout --
@@ -11,12 +14,12 @@
 # The hook can report several unmet mandates in one .reason string (one line each, prefixed
 # "<mandate name> -- "). A fixture that writes a .md file alongside a multi-directory sweep
 # will legitimately trip both `unslop` and `multi-directory work` at once. This suite's
-# subject is the breadth mandate specifically, so every assertion below matches the literal
-# "multi-directory work --" line inside .reason rather than treating any block as proof --
-# a block from an unrelated mandate in the same fixture is not evidence about this one.
-# Where that confound is unavoidable (PROOF 2's doc/HOOK.md also triggers `unslop`, PROOF 4's
-# six .md files do too) the comment beside the fixture says so and the assertion is scoped to
-# ignore it.
+# subject is the breadth and prove-it-works mandates specifically, so every assertion below
+# matches the literal "multi-directory work --" or "prove-it-works --" line inside .reason
+# rather than treating any block as proof -- a block from an unrelated mandate in the same
+# fixture is not evidence about the one under test. Where that confound is unavoidable
+# (PROOF 2's doc/HOOK.md also triggers `unslop`, PROOF 4's six .md files do too) the comment
+# beside the fixture says so and the assertion is scoped to ignore it.
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,6 +42,9 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 4: six dirs, one extension, zero Task -> breadth mandate silent" "jq not installed"
   skip "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks" "jq not installed"
   skip "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent" "jq not installed"
+  skip "PROOF 7: edit + closing completion claim, zero evidence -> prove-it-works blocks" "jq not installed"
+  skip "PROOF 8: edit + real Bash command + closing completion claim -> prove-it-works silent" "jq not installed"
+  skip "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -56,15 +62,15 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/vstack-mandate-breadth.XXXXXX")"
 # skill-mandate.sh's 2-strike latch (a session that hits 2 blocks stops blocking, so the
 # gate cannot trap someone it cannot get through to) persists in a file keyed by session_id
 # under $TMPDIR, not under $WORK -- it has to survive across the hook's own separate
-# invocations within one real session. This suite reuses fixed session ids (proof1..proof4)
+# invocations within one real session. This suite reuses fixed session ids (proof1..proof9)
 # on every run, so without cleanup a 3rd consecutive run (exactly the "run it by hand while
 # iterating on the mandate" workflow tests/README.md documents) would find PROOF 2's counter
 # already at 2 and see the hook abstain on a genuinely unmet mandate -- a false FAIL with the
 # code untouched. Sweep any stale counters before running and after, so every run starts and
 # ends from the same state the hook sees on a session it has never met.
 sweep_latch_(){
-  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-6] 2>/dev/null
-  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-6].lock 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-9] 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-proof[1-9].lock 2>/dev/null
 }
 sweep_latch_
 trap 'sweep_latch_; rm -rf "$WORK"' EXIT
@@ -88,6 +94,7 @@ run_hook_(){
 }
 
 names_breadth_(){ printf '%s' "$HOOK_REASON" | grep -qF 'multi-directory work --'; }
+names_piw_(){ printf '%s' "$HOOK_REASON" | grep -qF 'prove-it-works --'; }
 
 # --- PROOF 1: 5 fixture writes, 1 directory, 1 extension, 0 Task calls ------------------------
 # Negative direction. Mechanical repetition (fixtures/case1.json .. case5.json) must not read
@@ -184,6 +191,53 @@ if [ -z "$HOOK_OUT" ]; then
   ok "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent"
 else
   bad "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 7: one Edit, closing text claims completion, zero Bash/Read/Task in the turn --------
+# Positive direction for the prove-it-works mandate: the turn edited src/parser.py and the last
+# assistant text block in it is a completion claim ("it works now" matches the mandate's
+# "\bworks now\b" alternative) with nothing in the turn that could have produced the evidence for
+# that claim. Single file, single directory, single extension, zero Task calls -- none of the
+# other mandates in this hook have anything to say about this fixture, so a block here can only
+# be prove-it-works, but the assertion still names the specific line rather than trusting that.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Edit","input":{"file_path":"src/parser.py"}},{"type":"text","text":"Done. It works now."}]}}'
+run_hook_ proof7
+if [ "$HOOK_DECISION" = "block" ] && names_piw_; then
+  ok "PROOF 7: edit + closing completion claim, zero evidence -> prove-it-works blocks"
+else
+  bad "PROOF 7: edit + closing completion claim, zero evidence -> prove-it-works blocks" \
+      "expected decision=block naming 'prove-it-works --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 8: same edit, a real Bash call in between, then the same closing claim --------------
+# Negative direction, the case the mandate exists not to block: the turn still edits
+# src/parser.py and still closes with a completion claim ("all tests pass"), but a Bash tool_use
+# now sits between the edit and the claim. The mandate treats any Bash call in the turn as
+# evidence regardless of what it ran (see the comment above turn_json in skill-mandate.sh for
+# why), so this must stay completely silent -- not merely lacking the prove-it-works line, since
+# nothing else in this fixture (one .py file, no Task, no breadth) has grounds to block either.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Edit","input":{"file_path":"src/parser.py"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"python3 -m pytest tests/test_parser.py -q"}},{"type":"text","text":"Done. All tests pass."}]}}'
+run_hook_ proof8
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 8: edit + real Bash command + closing completion claim -> prove-it-works silent"
+else
+  bad "PROOF 8: edit + real Bash command + closing completion claim -> prove-it-works silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 9: a completion claim with no tool_use at all in the turn ----------------------------
+# Negative direction, the false-positive shape the mandate exists to avoid: ordinary
+# conversational closure ("we're all done for today" matches the mandate's "\ball done\b"
+# alternative) with no file edit anywhere in the turn. The mandate requires an edit AND a claim
+# AND zero evidence, all three -- a claim alone, however completion-shaped the wording, must
+# never be enough on its own, or every ordinary end-of-turn "done" in every install would block.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Sounds good — we are all done for today, thanks!"}]}}'
+run_hook_ proof9
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent"
+else
+  bad "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent" \
       "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 

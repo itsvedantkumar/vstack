@@ -268,6 +268,120 @@ if [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; 
   multi-directory work -- touched $dir_count directories with $ext_count file types, zero subagents (try /team, or TaskCreate: code-reviewer, qa, worker, planner, test-writer)"
 fi
 
+# Prove it works: a completion claim closing this turn with zero evidence produced in it.
+#
+# Every mandate above asks "did a skill run against a file this session touched", which the
+# matcher above can answer because both halves -- the file, the skill invocation -- are things
+# that already happened. This one is different in kind. principle-prove-it-works's trigger is
+# "before declaring any task or fix done": a condition on the assistant's own next speech act,
+# not on anything in the user's prompt. Skill dispatch scores the user's text against skill
+# descriptions, so no description can reach a condition that names the assistant's own
+# forthcoming output -- measured at 0/10 on its fixture prompt, the worst score of any principle
+# skill, and not for lack of vocabulary overlap (its description contains both of the prompt's
+# literal tokens). The thing that needs catching is not in the text being matched.
+#
+# This hook already runs on Stop, which is exactly the moment the condition is about: the turn
+# is over, and whatever the assistant said last is what it is about to leave standing. So instead
+# of asking a skill matcher to catch a property of unwritten text, this reads the transcript for
+# it directly, the same way the mandates above read it for file writes.
+#
+# "This turn" is bounded by the transcript itself, not guessed: a real human turn starts at a
+# "type":"user" entry whose content is a plain string, or an array with a "text" block and no
+# "tool_result" block (a tool result is also logged as type "user" -- that is Claude Code's
+# transcript format, not a human reply, and must not reset the boundary). Everything after the
+# LAST such entry is this turn. A transcript with no such entry at all (every fixture in this
+# repo's own test suites, which build a transcript as one bare assistant block with no user
+# line) falls back to treating the whole file as the turn, which is what the two-line file this
+# hook actually sees in a real session with a fresh session_id effectively already reduces to.
+#
+# Within that turn: did the closing remark claim completion, and did the turn edit a file while
+# producing zero evidence? Both conditions gate the trigger, not either alone.
+#
+#   claim   -- the LAST assistant "text" block in the turn (i.e. the words actually left standing
+#              when the turn ends, not something said and then acted past) matches a bounded list
+#              of completion phrasings below.
+#   edit    -- at least one Write/Edit/NotebookEdit tool_use happened in the turn. Without this,
+#              a completion claim is conversational, not a claim about code, and the false-block
+#              cost of guessing otherwise is worse than the miss (see the false-positive note by
+#              the pattern list below).
+#   silent  -- ANY Bash, Read, or Task tool_use anywhere in the turn, in any order relative to
+#              the edit. This is deliberately generous in both directions: a Bash call is treated
+#              as evidence whether or not it happens to be a test invocation, and a Read is
+#              treated as evidence even if it came before the edit (i.e. was investigation of the
+#              bug, not verification of the fix) rather than after it. Both loosen the trigger
+#              past what "prove it works" strictly asks for. That is the intended trade: this
+#              fires on every Stop of every install, so the cost of a rule this hook cannot
+#              satisfy is not "the model tries again", it is "the mandate gets disabled" -- and
+#              a disabled mandate catches nothing, including the 9 times it would have been
+#              right. Ordering the Bash/Read calls against the edit to tighten this further was
+#              considered and dropped: the added jq is not free, and the case it would catch (an
+#              investigative Read with no verification after) is already the rarer shape.
+#
+# Known false-positive shape, disclosed rather than chased: a turn that Writes a genuinely
+# unverifiable artifact -- a poem, a note, a scratch file with no "works" to check -- and closes
+# with a plain "Done." trips this exactly like an unverified code fix would, because file-write
+# plus closing "done" plus no Bash/Read/Task in the same turn is indistinguishable from here.
+# Scoping the edit check to code-like extensions was considered and rejected: it would have
+# meant maintaining an extension allowlist this hook has no way to keep current, trading one
+# false-positive shape for a false-negative one (a `.sh` fix that never runs is exactly the case
+# this exists to catch). Left as a known, bounded miss in the direction this file always prefers.
+# A two-pass version of this was tried first: stream the file once in jq's default per-line
+# mode to find which line the turn starts on (matching how every other mandate above reads the
+# transcript), then hand only the tail after that line to a second, small jq call, on the theory
+# that avoiding a whole-file `-s` slurp would be the cheaper path. Measured on a 37MB real
+# session transcript it was slower, not faster -- +520ms over the streaming mandates alone in
+# this hook, roughly triple this one-pass version's cost. The reason: shelling out to `tail -n
+# +N` to extract that tail is not free on this platform. BSD `tail`'s from-line mode measured at
+# ~400ms on this repo's own darwin box to extract an 11-line, 33KB tail from that same 1782-line
+# file -- line-oriented access apparently is not the fast path GNU tail's implementation makes
+# it look like elsewhere. jq's own `-s` slurp-then-slice of the same whole file measured ~170ms,
+# faster than just the `tail` step of the "optimization" meant to beat it. Reverted to the
+# simpler single-pass slurp below in favor of the version that is both less code and faster.
+turn_json=$(
+  "$JQ" -sc '
+    . as $all
+    | ( $all
+        | to_entries
+        | map(select(.value.type == "user"
+                     and (
+                       (.value.message.content | type) == "string"
+                       or ((.value.message.content // []) | map(.type) | index("tool_result")) == null
+                     )))
+        | last | .key
+      ) as $ts
+    | ($all[(($ts // -1) + 1):] | map(select(.type == "assistant"))) as $turn
+    | {
+        final_text: ( [ $turn[] | .message.content[]? | select(.type == "text") | .text ] | last // "" ),
+        bash_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and .name == "Bash") ] | length ),
+        read_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and .name == "Read") ] | length ),
+        task_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and .name == "Task") ] | length ),
+        edit_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and (.name == "Write" or .name == "Edit" or .name == "NotebookEdit")) ] | length )
+      }
+  ' "$tr_" 2>/dev/null
+)
+[ -n "$turn_json" ] || turn_json='{}'
+piw_final_text=$(printf '%s' "$turn_json" | "$JQ" -r '.final_text // ""' 2>/dev/null)
+piw_bash_n=$(printf '%s' "$turn_json" | "$JQ" -r '.bash_n // 0' 2>/dev/null)
+piw_read_n=$(printf '%s' "$turn_json" | "$JQ" -r '.read_n // 0' 2>/dev/null)
+piw_task_n=$(printf '%s' "$turn_json" | "$JQ" -r '.task_n // 0' 2>/dev/null)
+piw_edit_n=$(printf '%s' "$turn_json" | "$JQ" -r '.edit_n // 0' 2>/dev/null)
+: "${piw_bash_n:=0}"; : "${piw_read_n:=0}"; : "${piw_task_n:=0}"; : "${piw_edit_n:=0}"
+
+# Bounded, not exhaustive -- the examples the mandate names ("done", "fixed", "works now", "all
+# tests pass", "that should do it") plus their closest paraphrases. The unescaped `.` inside
+# "that.s done" is a one-char wildcard standing in for whatever apostrophe got typed (straight
+# ', curly ', or none at all -- "thats done"), so the pattern needs no quote-escaping at all.
+piw_pattern='\bit works( now)?\b|\bthat works( now)?\b|\bworks now\b|\ball tests? (pass(ing|es)?|passed)\b|\bthat should do it\b|\bshould (work|be fixed) now\b|\bthe (fix|bug) is (fixed|done|complete|resolved)\b|\bthis (is|should be) (fixed|done|complete|resolved)\b|\b(task|issue|problem) is (fixed|done|complete|resolved)\b|\ball (set|good|done)\b|\bfixed\b|\bthat.s done\b|^done[.!]*$'
+
+piw_claims=0
+if [ -n "$piw_final_text" ] && printf '%s' "$piw_final_text" | grep -qiE "$piw_pattern"; then piw_claims=1; fi
+
+if [ "$piw_edit_n" -ge 1 ] && [ "$piw_claims" -eq 1 ] \
+   && [ "$piw_bash_n" -eq 0 ] && [ "$piw_read_n" -eq 0 ] && [ "$piw_task_n" -eq 0 ]; then
+  unmet="$unmet
+  prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task call in the turn to back it up"
+fi
+
 [ -n "$unmet" ] || { rm -f "$cnt_file"; exit 0; }
 
 echo $((cnt+1)) > "$cnt_file"
@@ -275,6 +389,8 @@ reason="A vstack skill mandate went unmet (attempt $((cnt+1))/2). These fire eve
 $unmet
 
 Run each named skill with the Skill tool against the files listed, apply what it says, then finish.
+For prove-it-works: run the command that proves the change, read its actual output, then restate
+the claim with that evidence -- or state the real status if the output disagrees with it.
 Set VSTACK_NO_MANDATE=1 to disable this gate."
 "$JQ" -cn --arg r "$reason" '{decision:"block",reason:$r}'
 exit 0
