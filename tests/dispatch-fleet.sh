@@ -55,6 +55,26 @@
 #   VSTACK_DISPATCH_YES=1 pre-confirms a non-interactive run above CONFIRM_THRESHOLD
 #   RUNLOG                path to the durable JSONL result log (default: a fresh mktemp path --
 #                          pass the SAME path back in to resume a crashed run or top up N)
+#   KEEP_WORKDIRS=1       skip the rm -rf on each sample's /tmp/dispatch-fleet.XXXXXX workdir and
+#                          print where it was kept, instead of deleting the transcript the moment
+#                          the sample finishes. Default is still delete: this is for diagnosing a
+#                          specific finding (a 0/5 that needs its transcripts read), not for every
+#                          run. Observed out.jsonl size on this machine ranges ~200B (no_output /
+#                          error_max_turns samples) to ~14KB (a normal few-turn dispatch decision,
+#                          MAX_TURNS=3, Write/Edit/Bash denied so nothing artifact-heavy gets
+#                          written into the transcript); err.log is normally empty;
+#                          .delegation-log.jsonl is one short JSON line, well under 1KB. A full
+#                          default arm (54 fixtures x N=10 = 540 samples) kept end to end is
+#                          therefore on the order of a few MB to worst case ~10MB on this
+#                          evidence, NOT the tens-of-MB-per-transcript pathological case a
+#                          Task-heavy or ToolSearch-loop-heavy session can produce elsewhere in
+#                          this repo's own measurements (auto-trigger.sh's fence comment cites a
+#                          single 15MB transcript from a different, unfenced probe) -- that upper
+#                          bound is real but has not been observed against THIS fence, and running
+#                          a full 540-sample arm under KEEP_WORKDIRS=1 to find out costs real
+#                          model spend, not just disk, so do not do that speculatively. Prefer
+#                          narrowing with CLASS/positional ids + KEEP_WORKDIRS=1 to the specific
+#                          fixtures under diagnosis.
 #   VSTACK_ALLOW_HOOK_DRIFT=1  overrides the hook-drift preflight (see check_hook_drift below)
 #   positional args        fixture ids to run (e.g. pos-01 col-11); empty = every id in CLASS
 #   --score-only            skip the run loop; just re-score an existing RUNLOG (no claude, no
@@ -84,6 +104,7 @@ MODEL="${MODEL:-sonnet}"
 MAX_TURNS="${MAX_TURNS:-3}"
 PER_CASE_TIMEOUT="${PER_CASE_TIMEOUT:-120}"
 CONFIRM_THRESHOLD="${CONFIRM_THRESHOLD:-20}"
+KEEP_WORKDIRS="${KEEP_WORKDIRS:-0}"
 
 SCORE_ONLY=0
 ARGS=()
@@ -455,17 +476,38 @@ top_level_subtype() {
   jq -rn '[inputs | select(.type=="result" and (.origin==null))] | last | .subtype // "unknown"' "$jsonl" 2>/dev/null
 }
 
-# fence_violations WORKDIR BASELINE OUT_JSONL ERR_LOG -- ported from auto-trigger.sh verbatim
-# (see that file's comment for why this exists behind --disallowedTools rather than instead of
-# it: a subagent launched via Agent is not guaranteed to inherit the parent's disallowed-tools
-# list on every code path, and can run detached past this process's own kill -9).
+# fence_violations WORKDIR BASELINE -- ported from auto-trigger.sh in spirit (see that file's
+# comment for why this exists behind --disallowedTools rather than instead of it: a subagent
+# launched via Agent is not guaranteed to inherit the parent's disallowed-tools list on every
+# code path, and can run detached past this process's own kill -9), but NOT a literal-path
+# exclusion list against BASELINE the way auto-trigger.sh's is.
+#
+# E-46, 2026-08-23: this used to take OUT_JSONL and ERR_LOG and grep -v -F -x them out of the
+# diff by literal path. That went stale the moment run_sample() started isolating the Stop
+# hook's delegation-drift write into a THIRD harness-owned file
+# ($workdir/.delegation-log.jsonl, see run_sample() below and its header comment) without a
+# matching third exclusion here -- 25/25 samples in a real arm (S-5, this file @ 7e8d521) came
+# back FENCE BREACH on that one file alone, all false positives; see the handback this fix
+# answers for the full account. A second hardcoded literal would fix today's breach and go
+# stale again the next time run_sample() starts writing a fourth file, the same way it went
+# stale this time.
+#
+# Fixed by construction instead: run_sample() now creates every file THIS HARNESS owns (out,
+# err, delegation log) and captures BASELINE only after they all exist, so they are already
+# present in BASELINE and never show up as a diff line here at all -- there is no path string
+# to keep in sync in this function anymore, because this function no longer knows any of their
+# names. Anything that shows up in the diff below is, by construction, something the harness
+# did NOT create itself: a real fence breach. This does not weaken the fence -- it still catches
+# any new path a sample writes, and unlike the literal-exclusion list it cannot silently widen
+# the exclusion by drifting; adding a fourth harness-owned file now requires creating it before
+# BASELINE is captured, which is also what makes it excluded, not a second edit in two places
+# that can fall out of step.
 fence_violations() {
-  local workdir="$1" baseline="$2" out_jsonl="$3" err_log="$4"
+  local workdir="$1" baseline="$2"
   local now
   now="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
   diff <(printf '%s\n' "$baseline") <(printf '%s\n' "$now") 2>/dev/null \
     | sed -n 's/^> //p' \
-    | grep -v -F -x -e "$out_jsonl" -e "$err_log" \
     | grep -v '^$'
 }
 
@@ -478,19 +520,29 @@ FENCE_BREACH=0
 # ---------------------------------------------------------------------------
 run_sample() {
   local id="$1" prompt="$2"
-  local workdir out_jsonl err_log runner_pid waited baseline violations
+  local workdir out_jsonl err_log delegation_log runner_pid waited baseline violations
   local fired subtype ts row toolsearch
 
   workdir="$(mktemp -d "/tmp/dispatch-fleet.XXXXXX")"
-  baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
   out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
+  delegation_log="$workdir/.delegation-log.jsonl"
+
+  # Pre-create every file THIS HARNESS owns, then capture BASELINE only after they all exist.
+  # This is what makes fence_violations()'s exclusion "by construction" instead of a literal
+  # list of path strings ported around by hand (see that function's header comment for why the
+  # old list went stale). If a fourth harness-owned file is ever added, create it here, above
+  # the baseline snapshot, and it is excluded the same way -- no second place to edit.
+  : > "$out_jsonl"
+  : > "$err_log"
+  : > "$delegation_log"
+  baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
 
   # exec is load-bearing: without it the timeout's kill -9 hits an empty subshell wrapper
   # instead of the claude process, leaking a live billed run past this function's own timeout.
   (
     cd "$workdir" || exit 1
     exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-      VSTACK_DELEGATION_LOG="$workdir/.delegation-log.jsonl" \
+      VSTACK_DELEGATION_LOG="$delegation_log" \
       claude -p "$prompt" \
         --output-format stream-json --verbose \
         --disallowedTools "$DISALLOWED_TOOLS" \
@@ -518,8 +570,13 @@ run_sample() {
     [[ -z "$toolsearch" ]] && toolsearch=0
   fi
 
-  violations="$(fence_violations "$workdir" "$baseline" "$out_jsonl" "$err_log")"
-  rm -rf "$workdir"
+  violations="$(fence_violations "$workdir" "$baseline")"
+
+  if [[ "$KEEP_WORKDIRS" == "1" ]]; then
+    echo "  $id: KEEP_WORKDIRS=1 -- workdir kept at $workdir"
+  else
+    rm -rf "$workdir"
+  fi
 
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -n "$violations" ]]; then
