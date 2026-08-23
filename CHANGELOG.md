@@ -4,6 +4,42 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## Unreleased
+
+**The compaction numbers in 1.29.0 were reasoned, and now they are measured.** Two things that
+release asserted turn out to be wrong, and one turns out to be right. Method: a headless session
+driven past the window on Claude Code v2.1.241, once with `--autocompact 100k` and once with
+`autoCompactWindow` pinned in settings and no flag, reading the transcript's `compact_boundary`
+records rather than inferring from token counts.
+
+Right: the knob is honored, by both paths. Four `trigger: auto` compactions fired where the
+configuration said they should. The open issues alleging `autoCompactWindow` is ignored do not
+reproduce on this version, so vstack's pin is real rather than decorative.
+
+Wrong, first: compaction does not fire at the window, it fires at 68 to 81 percent of it. Measured
+triggers were 68,251, 75,625, 78,089 and 81,083 tokens against a 100K window. The headroom is not
+a constant and not a clean fraction, since it moves with the size of the request waiting to be
+sent. The 300K pin therefore compacts near 230K in practice. That is close enough to the intent to
+leave alone, but the setting is not the trigger and this file should not have implied it was.
+
+Wrong, second: the release said an uncompacted session takes a "roughly 200:1 squeeze", which
+assumed the summary is a fixed ~5K no matter the input. It is not. Measured `postTokens` were
+5,958, 17,199, 20,900 and 22,852, so the summary scales with what it summarizes and the real
+ratios were 3.5:1 to 11.5:1. Extrapolating 200:1 to a 967K session was arithmetic on an assumption
+that does not hold. The compression ratio argument for a middling window still stands directionally
+because Governance Decay's loss term grows with ratio, but the magnitude quoted was invented.
+
+Unpriced until now: each compaction cost 33 to 81 seconds of wall time. A window set too low
+thrashes, and 100K produced three compactions inside an eight turn session, which is the cycle
+count term of the same paper working against the ratio term. That tension is the real argument for
+a value in the middle, and it is a better one than the ratio figure that shipped.
+
+Also worth recording, because it confounded the first attempt at this measurement: vstack's own
+digest tells the model to batch independent tool calls into one message. That makes context grow in
+large jumps rather than gradually. A single batched step took a session from 40K to 321K, clearing
+any window in one bound with no turn boundary in between for compaction to fire at. The batching
+instruction and the compaction threshold are in tension, and nothing in the config says so.
+
 ## 1.29.0 — 2026-08-23
 
 **Compaction ran at the model's context limit, and nothing said so.** `autoCompactWindow` was

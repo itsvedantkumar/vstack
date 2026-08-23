@@ -9,13 +9,15 @@ usage() {
 usage: vstack <command> [args...]
 
 commands:
-  update [--yes]      fetch, show what changes the scripts the gate executes, confirm, install
+  update [--yes]      fetch, show the full diff of everything about to be merged, confirm, install
   install [args...]   run the repo's install.sh (args passed through, e.g. --dry-run)
   doctor [args...]    run ~/.config/agents/bin/doctor (args passed through, e.g. --drift)
   overlay <repo>       run the repo's overlay.sh against <repo>
   verify               run the repo's .claude/verify.sh
   test                 run tests/auto-trigger.sh (live skill-firing regression; needs claude auth, ~15 min)
-  trust [repo-dir]     trust a repo's .claude/verify.sh so the Stop-hook gate runs it
+  trust [repo-dir] [--yes]
+                        trust a repo's .claude/verify.sh so the Stop-hook gate runs it unattended;
+                        refuses without a terminal to confirm on unless --yes is given
   uninstall [args...]  run the repo's uninstall.sh (args passed through)
   help                 show this message
 
@@ -81,14 +83,34 @@ case "$CMD" in
     fi
     echo "incoming from $upstream:"
     git -C "$REPO" log --oneline "HEAD..$upstream"
-    TRUSTED="install.sh overlay.sh uninstall.sh bootstrap.sh .claude/verify.sh"
-    if git -C "$REPO" diff --quiet "HEAD..$upstream" -- $TRUSTED; then
-      echo "(no changes to the scripts the gate executes)"
-    else
+    # install.sh deploys nearly this whole repo -- claude/hooks/*.sh, claude/agents, commands,
+    # skills, bin/*, settings.json, CLAUDE.md -- so a diff scoped to "the scripts the gate
+    # executes" was a narrower promise than this command actually carries out. It could (and
+    # did, in the v1.28.0 audit) print "no changes to the scripts the gate executes" while
+    # about to install a rewritten claude/hooks/guard-destructive.sh, because that file was
+    # never in the reviewed set.
+    #
+    # Fixed by reviewing everything that is about to be merged, not a hand-maintained subset of
+    # it. A list of "trusted" paths would need a new entry every time install.sh grows another
+    # `cp` target, and forgetting one silently reopens this exact hole -- a full diff cannot
+    # drift out of sync with what gets installed, because it does not try to describe that
+    # surface at all. The gate-executing scripts are still called out separately below, with a
+    # warning, because those are the ones an attacker would target first: change one of them
+    # and the next `vstack trust` or `install.sh` run re-signs the tampered version.
+    GATE_SCRIPTS="install.sh overlay.sh uninstall.sh bootstrap.sh .claude/verify.sh"
+    gate_changed=""
+    for g in $GATE_SCRIPTS; do
+      git -C "$REPO" diff --quiet "HEAD..$upstream" -- "$g" 2>/dev/null || gate_changed="$gate_changed $g"
+    done
+    if [ -n "$gate_changed" ]; then
       echo
-      echo "changes to scripts the gate executes and will re-trust:"
-      git -C "$REPO" diff "HEAD..$upstream" -- $TRUSTED
+      echo "WARNING: this changes scripts the gate itself executes, and will re-trust them on merge:$gate_changed"
     fi
+    changed=$(git -C "$REPO" diff --name-only "HEAD..$upstream")
+    nfiles=$(printf '%s\n' "$changed" | grep -c .)
+    echo
+    echo "full diff, $upstream vs HEAD ($nfiles file(s) changed -- install.sh deploys nearly all of this repo, so this is everything that is about to land, not a reviewed subset of it):"
+    git -C "$REPO" diff "HEAD..$upstream"
     if [ "$YES" -ne 1 ]; then
       if [ -t 0 ]; then
         printf 'apply and re-record trust hashes? [y/N] '
@@ -149,9 +171,39 @@ case "$CMD" in
     ;;
 
   trust)
-    d="${1:-$PWD}"
+    # `trust` means only "a matching sha256 line exists in ~/.config/agents/verify-trust", and
+    # verify-gate.sh's Stop hook runs whatever hashes to that line unattended forever after.
+    # A plain CLI command with no confirmation made this command itself the delivery mechanism
+    # for the thing it exists to stop: a hostile CONTRIBUTING.md saying "run `vstack trust .`
+    # to enable the pre-commit gate" gets an agent to arm unattended execution of a script
+    # nobody human read. `update` already solved this shape at the block above -- refuse
+    # without a TTY, require --yes for automation -- so the same pattern is ported here rather
+    # than invented twice.
+    YES=0
+    d=""
+    for a in "$@"; do
+      case "$a" in
+        --yes|-y) YES=1 ;;
+        *) [ -z "$d" ] && d="$a" ;;
+      esac
+    done
+    d="${d:-$PWD}"
     [ -f "$d/.claude/verify.sh" ] || { echo "vstack trust: no .claude/verify.sh in $d" >&2; exit 2; }
     v="$(cd "$d/.claude" && pwd)/verify.sh"
+    if [ "$YES" -ne 1 ]; then
+      if [ -t 0 ]; then
+        echo "this arms the Stop-hook gate to execute $v (and whatever install.sh-shaped"
+        echo "scripts it references at the repo root) unattended, on every commit, from now on."
+        echo "the boundary this command exists to protect is anchored on a human having read"
+        echo "the script first -- nothing after this point checks that you actually did."
+        printf 'have you read %s yourself, just now? [y/N] ' "$v"
+        read -r ans
+        case "$ans" in y|Y|yes|YES) ;; *) echo "vstack trust: aborted, nothing trusted"; exit 1 ;; esac
+      else
+        echo "vstack trust: no terminal to confirm on; re-run with --yes to accept unseen" >&2
+        exit 1
+      fi
+    fi
     if command -v shasum >/dev/null 2>&1; then h=$(shasum -a 256 "$v" | cut -d' ' -f1)
     else h=$(sha256sum "$v" | cut -d' ' -f1); fi
     ts="$HOME/.config/agents/verify-trust"

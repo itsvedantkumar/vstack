@@ -1191,6 +1191,8 @@ if command -v jq >/dev/null; then
   g_want 'npm test'                      allow
   g_want 'git push origin feature-x'     allow
   g_want 'git commit -m "wip"'           allow
+  g_want 'vstack trust .'                ask
+  g_want 'echo x >> ~/.config/agents/verify-trust' ask
   # The same decisions with a hostile environment. This is the case that would have caught the
   # guard shipping broken on every Linux host: it used "$TMPDIR" in a case pattern, TMPDIR is
   # routinely unset there, set -u made that fatal, and the hook emitted nothing at all. macOS
@@ -1209,7 +1211,7 @@ if command -v jq >/dev/null; then
     d=$(printf '%s' "$bad" | bash claude/hooks/guard-destructive.sh 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
     [ "$d" = ask ] || errs="$errs\nmalformed payload -> $d, expected ask"
   done
-  [ -z "$errs" ] && ok "destructive guard decides correctly (22 commands, 3 tiers)" \
+  [ -z "$errs" ] && ok "destructive guard decides correctly (24 commands, 3 tiers)" \
     || bad "destructive guard decides correctly" "$(printf '%b' "$errs")"
 else
   skip "destructive guard decides correctly" "jq not installed"

@@ -603,8 +603,12 @@ else
 fi
 echo "── context ──"
 # With autoCompactWindow unset, Claude Code compacts at the model's context limit -- ~967K of
-# Opus 5's 1M -- so a session takes one ~200:1 squeeze instead of several small ones, and
-# compaction loss scales with both the compression ratio and the cycle count (arXiv 2606.22528).
+# Opus 5's 1M -- so a session takes one late squeeze instead of several small ones, and compaction
+# loss scales with both the compression ratio and the cycle count (arXiv 2606.22528). Measured on
+# v2.1.241 with the window pinned to 100K: compaction fires between 68K and 81K, i.e. at 68 to 81
+# percent of the window rather than at it, and each event costs 33 to 81 seconds of wall time. So
+# 300K here means a real trigger near 230K. A window set too low thrashes: 100K produced three
+# compactions in an eight turn session.
 # Asserted against the LIVE file, not the repo's: a value this repo ships and the merge failed to
 # apply is the failure that matters, and it is invisible from the repo side.
 _acw_want=$(jq -r '.autoCompactWindow // empty' "${R:-/nonexistent}/claude/settings.json" 2>/dev/null)

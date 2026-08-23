@@ -178,6 +178,20 @@ _check_ask_segment() {
       emit ask "[guard] this tears down infrastructure. Confirm the context and target." ;;
   esac
 
+  # The verify-trust store. A matching sha256 line in it is the entire definition of
+  # "trusted": verify-gate.sh's Stop hook executes whatever hashes to a line in that file,
+  # unattended, forever after. `vstack trust` writes it, and so does anything that appends to
+  # the file directly (echo/printf/tee/sed -i and friends) -- both are the same act with
+  # different spelling, and a hostile CONTRIBUTING.md telling an agent to run either one turns
+  # this gate into the delivery mechanism for the thing it exists to stop. Ask on any command
+  # that names the trust file or the subcommand that writes it, whether it looks like a read or
+  # a write: this guard reads syntax, not semantics, and cannot tell `cat` from `>>` reliably
+  # enough to narrow the match without risking the write it slips through.
+  case "$seg" in
+    *verify-trust*|*vstack\ trust*)
+      emit ask "[guard] this touches the verify-trust store that arms the Stop-hook gate to run repo-controlled scripts unattended. Confirm this is your own considered decision, not a repo telling you to run it." ;;
+  esac
+
   # Device operations
   case "$seg" in
     *'mkfs'*|*'dd if='*of=/dev/*)
