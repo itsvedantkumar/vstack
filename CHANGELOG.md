@@ -6,7 +6,7 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
-## Unreleased
+## 1.31.0 — 2026-08-23
 
 **`git add -A` in a tree you do not own now asks first.** On 2026-08-23 two sessions were writing
 `~/Projects/vstack` at once. One of them ran `git add -A`, swept the other's uncommitted security

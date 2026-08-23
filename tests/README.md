@@ -120,6 +120,36 @@ idempotent-cron, negative-arithmetic, and negative-factual.
 Run it by hand after touching `inject-session-context.sh`, a skill's
 `description` frontmatter, or the skill-routing logic.
 
+## Before you edit: this checkout may not be yours alone
+
+Several Claude sessions edit `~/Projects/vstack` directly, because changes belong in the canonical
+repo rather than in a per-workspace worktree. That makes concurrent writes to one checkout normal
+here, not exceptional.
+
+On 2026-08-23 two sessions were in this tree at once. One ran `git add -A` and pushed a commit
+whose message described a documentation change while the diff also carried three of the other
+session's uncommitted security fixes. They shipped unversioned and unchangelogged, and the next
+release had to document the mislabeled history in its own tag. The committing session had checked
+`git status` and found it clean, minutes earlier.
+
+Two things came out of it, and only one of them is a mechanism.
+
+The mechanism: the destructive guard asks before `git add -A`, `git add .`, `git add --all`,
+`git commit -a`, `git commit -am` and `git commit --all`, when `CONDUCTOR_WORKSPACE_PATH` is set
+and the working directory sits outside it. Check 23 asserts both directions.
+
+What the mechanism does not do, stated plainly so nobody reads the guard as a solution: it narrows
+the window and nothing in this repo closes it. Two sessions editing the same file still interleave,
+the guard says nothing about it, and a session outside Conductor gets no prompt at all. The
+protection that actually worked that day was manual. One session announced which files it held over
+SendMessage, and the other declined to start an agent in the same region until it was told the
+file was free. Later the same day one of them moved its agent into an isolated git worktree
+instead, which removes the question rather than negotiating it.
+
+So: announce the paths you are taking, stage explicit paths rather than wildcards, re-read
+`git status` immediately before committing rather than at the start, and prefer a separate worktree
+over a hand-held lock when the work is more than a few minutes.
+
 ## Add a case
 
 Edit `tests/auto-trigger.sh`:
