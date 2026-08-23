@@ -56,18 +56,33 @@ skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 # Three ways to be a shell script here, because the repo genuinely has all three: the suffix,
 # the shebang, or a `# shellcheck shell=` directive for a fragment that has neither. .zsh is
 # deliberately out -- shellcheck does not lint zsh and `bash -n` would misread it.
+#
+# Four callers, one tree walk. This used to re-run `git ls-files` and shebang-test every
+# tracked file on every call -- four full sweeps of the repo for the same answer. Memoized:
+# the first call pays for the walk, the rest read the cached list. `${_SH_FILES_CACHE+x}`
+# distinguishes "never computed" from "computed and the repo genuinely has zero matches",
+# which a plain `-z` check on the cache variable would conflate.
 sh_files(){
-  git ls-files 2>/dev/null | while IFS= read -r f; do
-    [ -f "$f" ] || continue
-    case "$f" in
-      *.zsh) continue ;;
-      *.sh|*.bash) printf '%s\n' "$f"; continue ;;
-    esac
-    if grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" \
-    || grep -q '^#[[:space:]]*shellcheck[[:space:]]\+shell=' <<<"$(head -5 "$f" 2>/dev/null)"; then
-      printf '%s\n' "$f"
-    fi
-  done
+  # bash 3.2 (macOS /bin/bash) fails to parse a `case` statement nested inside a `while` that
+  # is itself inside `$(...)` -- confirmed by hand with a four-line reproduction -- so this
+  # walk uses `[[ ... ]]` glob tests instead of `case`/`esac` here, unlike checks elsewhere in
+  # this file that call `case` at top level, where the same bash parses it without complaint.
+  if [ -z "${_SH_FILES_CACHE+x}" ]; then
+    _SH_FILES_CACHE=$(git ls-files 2>/dev/null | while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      if [[ "$f" == *.zsh ]]; then
+        continue
+      elif [[ "$f" == *.sh || "$f" == *.bash ]]; then
+        printf '%s\n' "$f"
+        continue
+      fi
+      if grep -q '^#!.*sh' <<<"$(head -1 "$f" 2>/dev/null)" \
+      || grep -q '^#[[:space:]]*shellcheck[[:space:]]\+shell=' <<<"$(head -5 "$f" 2>/dev/null)"; then
+        printf '%s\n' "$f"
+      fi
+    done)
+  fi
+  printf '%s\n' "$_SH_FILES_CACHE"
 }
 
 # --- 0. the toolchain this gate depends on is present -------------------------------------
@@ -1547,16 +1562,40 @@ if command -v shellcheck >/dev/null 2>&1; then
   # Exit-status contract: 0 clean, 1 findings, 2 bad input, 3 bad syntax, 4 bad usage. Only
   # the first two are answers; the rest mean the question was never asked.
   sc_out=""; sc_err=""
+  # One shellcheck process for every file in the set, not one process per file: shellcheck
+  # keeps scanning past a file it cannot open and reports the rest (verified by hand: two
+  # missing files in one invocation each print their own "openBinaryFile" line with their own
+  # path), and the batch's exit code is 2 whenever any file could not be opened, same as that
+  # file alone would report -- a file with unparseable shell syntax still exits 1 (SC1xxx is a
+  # finding, not an IO failure), so a batch rc of 0 or 1 answers for every file in it exactly as
+  # the old per-file loop did. Only when the batch itself could not answer (rc>=2) does this fall
+  # back to the original one-process-per-file loop, so the failure line still names the specific
+  # file and its own rc instead of trusting shellcheck's freeform IO-error text to embed the path.
+  sc_arr=()
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    _o=$(shellcheck -S warning -f gcc "$f" 2>/tmp/sc_err.$$); _rc=$?
-    case "$_rc" in
-      0|1) [ -n "$_o" ] && sc_out="$sc_out$_o
-" ;;
-      *)   sc_err="$sc_err\n  $f: shellcheck exited $_rc: $(head -1 /tmp/sc_err.$$)" ;;
-    esac
+    sc_arr+=("$f")
   done <<<"$sc_files"
-  rm -f /tmp/sc_err.$$
+  if [ "${#sc_arr[@]}" -gt 0 ]; then
+    _bout=$(shellcheck -S warning -f gcc "${sc_arr[@]}" 2>/dev/null); _brc=$?
+  else
+    _bout=""; _brc=0
+  fi
+  case "$_brc" in
+    0|1) sc_out="$_bout" ;;
+    *)
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        _o=$(shellcheck -S warning -f gcc "$f" 2>/tmp/sc_err.$$); _rc=$?
+        case "$_rc" in
+          0|1) [ -n "$_o" ] && sc_out="$sc_out$_o
+" ;;
+          *)   sc_err="$sc_err\n  $f: shellcheck exited $_rc: $(head -1 /tmp/sc_err.$$)" ;;
+        esac
+      done <<<"$sc_files"
+      rm -f /tmp/sc_err.$$
+      ;;
+  esac
   # Positive control, the same two-way shape check 19 uses: a linter that reports nothing is
   # only good news if it can still report something. Without this, disabling the tool and
   # deleting every defect are indistinguishable from here.
