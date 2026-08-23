@@ -1402,9 +1402,16 @@ if command -v jq >/dev/null; then
     say_ "$W"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ f)" ] || errs="$errs\nignored VSTACK_NO_MANDATE=1"
     say_ "$W"; hit_ g >/dev/null; hit_ g >/dev/null
     [ -z "$(hit_ g)" ] || errs="$errs\ndid not latch open after 2 blocks in one session"
+    # multi-directory, multi-type work: breadth mandate
+    F1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"fix/test1.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test2.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test3.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test4.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test5.sh","content":""}}]}}'
+    say_ "$F1"; [ -z "$(hit_ h)" ] || errs="$errs\nfive fixtures in one dir falsely blocked multi-dir mandate"
+    F2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"a.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"lib/b.json","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"src/c.py","content":""}}]}}'
+    say_ "$F2"; hit_ i | grep -q '"decision":"block"' || errs="$errs\nthree dirs with two extensions did not block multi-dir mandate"
+    F3='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".editorconfig","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"home/.gitignore","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"proj/.npmrc","content":""}}]}}'
+    say_ "$F3"; [ -z "$(hit_ j)" ] || errs="$errs\nthree dotfiles across three dirs falsely blocked multi-dir mandate"
 
     rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-vfy-* 2>/dev/null
-    [ -z "$errs" ] && ok "skill mandate decides correctly (7 cases, both directions)" \
+    [ -z "$errs" ] && ok "skill mandate decides correctly (10 cases, both directions)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
   fi
 else

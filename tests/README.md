@@ -44,6 +44,27 @@ regression.
 specific skill to auto-fire, inspects the `stream-json` transcript for
 `Skill` tool_use blocks, and reports PASS/FAIL per case.
 
+## test-breadth-mandate.sh
+
+A standalone reproduction script for the delegation mandate in `skill-mandate.sh`: it feeds four
+hand-built transcripts straight into the hook and prints what the hook decided, with no gate
+scaffolding in between. Run it by hand when touching the breadth-counting logic and you want to
+see the hook's raw stdout/exit code for a case, not just pass/fail:
+
+```bash
+tests/test-breadth-mandate.sh
+```
+
+The four cases it drives -- one directory of same-extension fixtures, a real multi-directory
+multi-extension change, the same change after a `Task` call, and a wide same-extension sweep --
+are also codified as cases h/i/j inside check 27 of `.claude/verify.sh` (`skill mandate decides
+correctly`), which is what the gate actually enforces on every run. This script is the harness
+that found the two shapes check 27 was missing before it had cases for them: five fixture writes
+to one directory that the first version of the mandate counted as five distinct things instead of
+one, and three dotfiles (`.editorconfig`, `.gitignore`, `.npmrc`) across three directories that
+the second version read as three different file extensions. Kept here as the fast, no-gate way to
+reproduce a mandate decision by hand; the gate is the source of truth.
+
 ## team-gating.sh
 
 Asks whether `/team` holds the bar or only says it does. `team-gating.sh` runs the command against

@@ -75,6 +75,46 @@ if [ -n "$ts" ] && ! fired typescript-best-practices; then
   typescript-best-practices -- you wrote TypeScript and it never ran: $(printf '%s' "$ts" | tr '\n' ' ')"
 fi
 
+# Multi-directory, multi-type work without delegation. Detects work that spans parts by
+# measuring breadth: distinct parent directories AND distinct file extensions. Both must be
+# present to trigger, avoiding false blocks on mechanical repetition.
+#
+# Why not count files? Because 5 test fixtures (fixtures/case1.json through case5.json) is
+# 1 directory and 1 extension — mechanical repetition, not multi-part work. But a real change
+# (hook.sh, test/hook.test.sh, doc/HOOK.md, manifest.json) spans 4 directories and 3 types —
+# that is work with parts, and is what subagents exist for.
+#
+# Edge cases that stay silent by design:
+# - 6 .md files across 6 directories: 6 dirs, 1 extension → no block (single type is focused).
+# - 10 .js files in src/: 1 directory, 1 extension → no block (single directory is cohesive).
+# - 3 dotfiles (.editorconfig, .gitignore, .npmrc) across 3 dirs: 3 dirs, 0 extensions → no block.
+#
+# Dotfile handling: a file starting with . and containing no further . has no extension
+# (it is pure name, not name + type). .eslintrc.json yields json; .eslintrc yields nothing.
+task_count=$( "$JQ" -s '[.[] | select(.type=="assistant") | .message.content[]?
+            | select(.type=="tool_use" and .name=="Task")] | length' "$tr_" 2>/dev/null )
+parent_dirs=$( printf '%s\n' "$paths" | sed -E '
+  s#/[^/]*$##
+  t end
+  s#^.*$#.#
+  :end
+' | sort -u )
+dir_count=$( [ -z "$parent_dirs" ] && echo 0 || printf '%s\n' "$parent_dirs" | grep -c . )
+extensions=$( printf '%s\n' "$paths" | sed -E '
+  s#^.*/##
+  /^\.[^.]*$/d
+  s/^.*\.([^.]*)$/\1/
+  t success
+  d
+  :success
+  /^$/d
+' | sort -u )
+ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | grep -c . )
+if [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; then
+  unmet="$unmet
+  multi-directory work -- touched $dir_count directories with $ext_count file types, zero subagents (try /team, or TaskCreate: code-reviewer, qa, worker, planner, test-writer)"
+fi
+
 [ -n "$unmet" ] || { rm -f "$cnt_file"; exit 0; }
 
 echo $((cnt+1)) > "$cnt_file"

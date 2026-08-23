@@ -6,6 +6,39 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.27.0 — 2026-08-23
+
+**`skill-mandate.sh` gained a delegation mandate.** A session that touches 3 or more distinct
+parent directories with 2 or more distinct file extensions and dispatches zero `Task` calls now
+blocks at `Stop`, naming the directory and extension counts and suggesting `/team` or a specific
+subagent. Five fixtures written to one directory does not trigger it — one directory, one
+extension, mechanical repetition. A hook.sh plus test/hook.test.sh plus doc/HOOK.md plus
+manifest.json does — four directories, three extensions, actual multi-part work with nobody
+delegated to. `VSTACK_NO_MANDATE=1` disables it, same as every other mandate this hook already ran.
+
+It took three attempts to hold. The first version counted distinct *files*, not directories, and
+false-blocked five fixture writes to a single `fixtures/` directory as if five files were five
+kinds of work. The second version split on the first `.` in a filename to find an extension, so
+three dotfiles in three different directories — `.editorconfig`, `home/.gitignore`,
+`proj/.npmrc` — read as three distinct file types and blocked a session that had touched nothing
+but config. Both were caught by `qa`, not by the gate: check 27, `skill mandate decides
+correctly`, stayed green through both rejections, because its case table had no dotfile case and
+no multi-directory case to catch either bug. That is this repository's founding defect —
+a check that passes while the thing it names is broken — landing in the same feature that was
+supposed to make delegation harder to skip. Check 27's case table grew from seven rows to ten: the
+shipped version counts breadth (distinct parent directories, distinct extensions with dotfiles
+read as having none unless a second `.` follows), and cases h, i and j hold the fixture-directory shape,
+the real multi-directory shape, and the dotfile shape as permanent regressions. `test-breadth-mandate.sh`
+under `tests/` is the scratch harness that found both bugs, kept as a fast no-gate way to
+reproduce a mandate decision by hand.
+
+**All 14 agents in `claude/agents/` were renamed** from occupational call signs (`MULE`, `PROOF`,
+`REDLINE`, `SCOUT`, ...) to Rick and Morty characters (`BIRDPERSON`, `BETH`, `MEESEEKS`,
+`EVIL-MORTY`, ...), and the instance-handle format changed from an adjective+animal
+(`SwiftFalcon`) to a dimension code (`C-137`). The lead invoked by `/team` is now `RICK`, signing
+as `RICK C-137`. `design-reviewer.md` briefly carried two call signs mid-edit; the stale one was
+removed before this landed.
+
 ## 1.26.0 — 2026-08-23
 
 **The README was 345 lines and never said what this is.** The category noun — a Claude Code
