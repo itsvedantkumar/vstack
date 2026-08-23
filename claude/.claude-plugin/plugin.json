@@ -1,6 +1,6 @@
 {
   "name": "vstack",
-  "version": "1.19.0",
+  "version": "1.20.0",
   "description": "Skills that fire on the situation instead of a slash command, plus the subagents, commands, and session hook that make them fire. Verification gates, parallel fan-out, code review, and writing discipline.",
   "author": {
     "name": "Vedant Kumar"

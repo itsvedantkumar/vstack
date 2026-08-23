@@ -6,6 +6,28 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.20.0 — 2026-08-23
+
+**Every skill now has a case asserting it fires.** `tests/auto-trigger.sh` covered half of them. The
+uncovered half included `unslop` and `principle-prove-it-works`, which the shipped policy leans on
+hardest — one claims to apply to every text you write, the other gates every claim of done — and
+neither had ever been shown to fire. Twenty-eight cases now.
+
+Prompts are written the way a developer would type them rather than naming the skill, because a
+prompt that says "use the unslop skill" tests nothing about whether the description matches a real
+situation. Eleven of the fourteen are unverified by execution and the commit says so; three were
+run end to end, chosen as the pairs this repo had just disambiguated, and each fired correctly.
+
+**The configuration is now developed with itself, as a rule.** Added to the shipped `CLAUDE.md`:
+an error you hit while working in this repo is an error a stranger will hit, so it gets fixed here
+and pushed rather than worked around locally. A workaround in your session is a bug report you
+decided not to file. The rule earned itself inside the same run — check 12 caught this release's
+own documentation still quoting the old case count against a tree of 28.
+
+Carried forward, unfixed: `principle-prove-it-works` overlaps `create-verification-skill`,
+`maintain-verification-skill` and `principle-sequence-verifiable-units`, separated only by scope.
+That is a fragile axis for a model to route on and it is written down rather than quietly left.
+
 ## 1.19.0 — 2026-08-23
 
 **`/team` writes its handoff trail, and something checks it held the bar.** The command has always
