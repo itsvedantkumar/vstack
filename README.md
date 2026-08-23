@@ -193,6 +193,7 @@ true.
 
 - [How skills fire](docs/how-skills-fire.md) — the routing mechanism and what was measured
 - [Checks that inherit their answer](docs/checks-that-inherit-their-answer.md) — the failure shape behind every fake green found here
+- [What this actually does](docs/what-this-actually-does.md) — every claim sorted into measured, mechanism-only, and unproven, each dated and sourced
 - [Do harnesses help?](docs/research/do-harnesses-help.md) — the null result, in full
 - [Harness value: literature](docs/research/harness-value-literature-2026-08.md) — what anyone has actually measured
 - [What we changed, and what we declined](docs/research/what-we-changed-2026-08-22.md)
