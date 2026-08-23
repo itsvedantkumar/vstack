@@ -237,6 +237,7 @@ if command -v jq >/dev/null; then
     md=$(mktemp -d)
     out=$(printf '{}\n' > "$md/a.json"; cp claude/settings.json "$md/b.json";
           jq -s --arg h "/tmp/hooks" --argjson retired '["probe_retired_key"]' \
+             --argjson cm_present false --argjson tsl_present false \
              "$prog" "$md/a.json" "$md/b.json" 2>&1)
     if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
       ok "settings merge program"

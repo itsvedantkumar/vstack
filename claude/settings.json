@@ -6,9 +6,7 @@
   "cleanupPeriodDays": 14,
   "effortLevel": "high",
   "enableWorkflows": true,
-  "enabledPlugins": {
-    "typescript-lsp@claude-plugins-official": true
-  },
+  "enabledPlugins": {},
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "300000",
     "BASH_MAX_TIMEOUT_MS": "900000",

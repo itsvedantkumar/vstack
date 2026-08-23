@@ -4,6 +4,74 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.39.0 — 2026-08-23
+
+**The headline curl-pipe installed three Claude Code plugins and edited another vendor's config
+file, with no disclosure and no opt-out.** `bootstrap.sh`'s one-liner ran `setup-machine.sh`,
+which installed `claude-mem` (`thedotmack/claude-mem`, third-party), `frontend-design`
+(Anthropic's own, but not vstack's to enable) and `typescript-lsp`
+(`anthropics/claude-plugins-official`) unconditionally, and — whenever `claude-mem` was found on
+disk — flipped `claude-mem`'s own `UserPromptSubmit` hook from sync to async directly inside
+`claude-mem`'s `hooks.json`, a file this repo does not ship. Found by SCARY-TERRY's
+stranger-README audit of v1.38.0. All three plugins now require `--with-plugins` or
+`VSTACK_PLUGINS=1`; the default path names what it is skipping instead of silently doing it. The
+`hooks.json` edit stays, because `claude-mem` ships that hook synchronous and it blocks every
+prompt otherwise, but it is now gated on the plugin actually being present (idempotent
+maintenance of something already opted into, not an install triggered by this run) and reversible:
+the first edit leaves a `hooks.json.vstack-orig` sidecar that `./uninstall.sh --yes` restores. A
+real bug surfaced while testing this: the maintenance loop ran even under `--dry-run`/`--check`,
+which both promise to touch nothing — fixed in the same commit. `uninstall.sh` also stopped
+leaving `mcpServers.cloudflare-mcp` and `.context7` dangling in `~/.claude.json` after removing
+the `cloudflare-mcp` wrapper (Claude Code then tried to spawn a command that no longer existed);
+ownership of each entry is now decided from the install-time backup, so an entry the operator
+edited since, or added themselves — like their own `context7` — survives removal. (`e7fd56c`,
+GLOOTIE G-4; README hunks in the same commit carry POOPYBUTTHOLE P-3's per-lane "what lands
+where" and "confirm it worked" sections.)
+
+**`/doctor` reported a healthy plugin-marketplace install as broken.** Both `bin/doctor` and
+`claude/commands/doctor.md` assumed the full `git clone` + `./install.sh` layout —
+`~/.claude/{hooks,agents,skills}` — so a `claude plugin marketplace add itsvedantkumar/vstack &&
+claude plugin install vstack@vstack` install, whose payload lives under
+`~/.claude/plugins/cache/vstack/vstack/<version>/`, failed every check that assumes hooks, CLI
+wrappers or a shell lane exist, which that lane never installs by design. Both now detect which
+lane actually landed — preferring `plugins/installed_plugins.json`'s recorded install path, and
+falling back to the newest cache directory by mtime rather than a hardcoded version — and check
+the right location, or say plainly that no install was found at all. Verified against a real
+plugin-marketplace install, a real full install, and no install, in throwaway
+`HOME`/`CLAUDE_CONFIG_DIR` directories. (`d129d3d`, POOPYBUTTHOLE P-3.)
+
+**`enabledPlugins` claimed `typescript-lsp` was on for every install, and the default install no
+longer installs it.** This is the same defect class `CHANGELOG.md`'s v1.29.0 entry fixed for
+`claude-mem`: `claude/settings.json` carried `"typescript-lsp@claude-plugins-official": true`
+unconditionally, and that was true when `setup-machine.sh` installed the plugin by default, but
+`e7fd56c` (above) made it opt-in, so a default install now ships a settings file asserting a
+plugin is enabled that the toolchain never installs. `typescript-lsp` is official
+(`anthropics/claude-plugins-official`), not third-party like `claude-mem`, but that difference is
+immaterial to this defect — the failure mode is "settings claims enablement, install path does
+not deliver it" either way, not a supply-chain question. `claude/settings.json`'s `enabledPlugins`
+is now `{}`, asserting no plugin is enabled by default, matching what the default install
+actually does for all three plugins. No hard dependency on the key's prior value was found —
+`bin/doctor`'s `enabledPlugins` reference checks the key exists at all (for the overlay's
+project-key gate), not what it names; `tests/install-matrix.sh`'s `overlay-preserves` case uses a
+fictitious `theirs@x` plugin name, not `typescript-lsp`; `claude/settings.project-keys` lists
+`enabledPlugins` among the keys deliberately never overlaid into another repo, unaffected by its
+value.
+
+Fixing this exposed a second, related defect in `install.sh`'s settings merge, present since the
+`claude-mem` fix and reproduced for `typescript-lsp` the moment its key was added there too:
+`del(.enabledPlugins["claude-mem@thedotmack"]?)` ran unconditionally on every `./install.sh`, so a
+user who opted in with `--with-plugins`/`VSTACK_PLUGINS=1` — and therefore has the plugin for
+real — had their own explicit choice silently undone on the next reinstall, because `install.sh`
+cannot see a flag passed to `setup-machine.sh` in an earlier, separate run. `e7fd56c`'s commit
+body named this and left it for `install.sh` to decide. Fixed here rather than left standing:
+`install.sh` now runs `claude plugin list` — the same presence check `setup-machine.sh` already
+uses — before the merge, and only strips a plugin's `enabledPlugins` entry when it is not actually
+installed; an entry backed by a real install survives every future reinstall. Verified in a
+throwaway `HOME` both ways: a live install with the plugin present keeps its entry across a
+reinstall, and a stale claim with nothing backing it (no plugin cache, as on any fresh
+`--with-plugins`-less machine) is stripped, in both cases leaving an unrelated foreign
+`enabledPlugins` key untouched.
+
 ## 1.38.0 — 2026-08-23
 
 **`principle-type-system-discipline` almost never fired. Rewriting its description around the

@@ -314,15 +314,19 @@ fi
 
 note ""
 note "== claude plugins"
-# Plugins carry the memory layer and the language tooling. settings.json enables typescript-lsp
-# by name, but a name means nothing until the marketplace is added and the plugin installed, and
-# claude-mem and frontend-design are not vstack's to enable at all -- install.sh's settings merge
-# deliberately strips any claude-mem entry from enabledPlugins rather than claiming it (see the
-# del(.enabledPlugins[...]) there and CHANGELOG.md's "vstack claimed to enable claude-mem, and
-# the toolchain never installs it"). Installing claude-mem and frontend-design here by default
-# without the same restraint would put this script back in the business install.sh already
-# opted out of, from a headline curl-pipe command that never asked. --with-plugins (or
-# VSTACK_PLUGINS=1) is the opt-in; the default path names what it is skipping.
+# Plugins carry the memory layer and the language tooling. None of the three is claimed by
+# name in settings.json's enabledPlugins any more -- a name there means nothing until the
+# marketplace is added and the plugin actually installed, and typescript-lsp reproduced the
+# same defect claude-mem was fixed for once already (CHANGELOG.md's "vstack claimed to enable
+# claude-mem, and the toolchain never installs it") the moment this script stopped installing
+# it by default. claude-mem and frontend-design were never vstack's to enable at all --
+# install.sh's settings merge strips any of the three enabledPlugins entries that is not
+# actually present on disk (see the del(.enabledPlugins[...]) calls there), so a claim only
+# survives a reinstall when the plugin really is installed. Installing claude-mem and
+# frontend-design here by default without the same restraint would put this script back in
+# the business install.sh already opted out of, from a headline curl-pipe command that never
+# asked. --with-plugins (or VSTACK_PLUGINS=1) is the opt-in; the default path names what it is
+# skipping.
 if ! command -v claude >/dev/null 2>&1; then
   note "-- plugins: skipped (claude not installed)"
 elif [ "$WITH_PLUGINS" != 1 ]; then

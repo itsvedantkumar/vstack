@@ -317,6 +317,23 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   fi
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
+  # Which of the third-party/opt-in plugin enabledPlugins entries are real. Both claude-mem and
+  # typescript-lsp are stripped from enabledPlugins below when the plugin is not actually
+  # installed (see the del() calls), because an entry claiming enablement for a plugin the
+  # toolchain never installed is the defect CHANGELOG.md's claude-mem entry describes and
+  # typescript-lsp reproduced once setup-machine.sh made it opt-in too. Stripping it
+  # unconditionally on every run was itself a bug: a user who opted in with
+  # --with-plugins/VSTACK_PLUGINS=1 had their own explicit choice undone on the next
+  # `./install.sh`, because install.sh cannot see a flag passed to a different script in an
+  # earlier run. `claude plugin list` is the same detection setup-machine.sh already uses to
+  # decide presence, so a plugin actually on disk keeps its entry and only a stale claim (no
+  # matching install) gets deleted.
+  CM_PRESENT=false; TSL_PRESENT=false
+  if command -v claude >/dev/null 2>&1; then
+    PL_LIST=$(claude plugin list 2>/dev/null)
+    echo "$PL_LIST" | grep -qi claude-mem && CM_PRESENT=true
+    echo "$PL_LIST" | grep -qi typescript-lsp && TSL_PRESENT=true
+  fi
   # Hooks and skillOverrides are merged by ownership, not replaced wholesale.
   #
   # Replacing them was silent destruction. A user with a Notification hook, a PreToolUse policy
@@ -331,7 +348,7 @@ elif [ "$DRY" = 0 ]; then
   #
   # skillOverrides merge with ours winning on collision. A stale entry naming a skill nobody
   # ships is inert — Claude Code ignores it — and losing a user's override is not.
-  jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" '
+  jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" --argjson cm_present "$CM_PRESENT" --argjson tsl_present "$TSL_PRESENT" '
     ((.[1] | del(.hooks)) as $portable
       | (.[0].hooks // {}) as $userhooks
       | (.[0].skillOverrides // {}) as $userso
@@ -379,7 +396,8 @@ elif [ "$DRY" = 0 ]; then
           | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
       | .skillOverrides = ($userso + ($portable.skillOverrides // {}))
-      | del(.enabledPlugins["claude-mem@thedotmack"]?)
+      | (if $cm_present then . else del(.enabledPlugins["claude-mem@thedotmack"]?) end)
+      | (if $tsl_present then . else del(.enabledPlugins["typescript-lsp@claude-plugins-official"]?) end)
       | delpaths([$retired[] | [.]])
       | .hooks = (reduce ($ours | to_entries[]) as $e
                    ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
