@@ -34,9 +34,12 @@ MODEL="sonnet"
 # delegate-or-not decision is even reachable, and a run cut off by error_max_turns before that
 # point would misreport as "chose not to delegate" when it was actually turn-starved -- the
 # exact confound auto-trigger.sh's case_max_turns() table documents for encode-lessons-lint.
-# 6 is a judgment call, not a measurement; a run that hits error_max_turns is reported as
-# starved below, not folded into the miss count.
-MAX_TURNS=6
+# 6 was a judgment call, not a measurement, and the first real run proved it insufficient for
+# delegation-a specifically: 5/5 samples hit error_max_turns at 6, the same shape
+# encode-lessons-lint showed at 3 and 6 before passing cleanly at 10 -- precedent that the
+# budget, not the fixture, was the variable. Override via MAX_TURNS=N; a run that still hits
+# error_max_turns is reported as starved below, never folded into the miss count.
+MAX_TURNS="${MAX_TURNS:-6}"
 SAMPLES="${SAMPLES:-5}"   # n per fixture; override for a cheaper smoke run, e.g. SAMPLES=1
 
 # ---------------------------------------------------------------------------
