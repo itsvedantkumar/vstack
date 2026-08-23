@@ -2656,8 +2656,20 @@ if command -v jq >/dev/null; then
     '{theme:"dark",statusLine:{type:"command",command:$s},
       hooks:{Notification:[{hooks:[{type:"command",command:$h}]}]}}' \
     > "$c45_home/.claude/settings.json"
-  if HOME="$c45_home" ./install.sh >/dev/null 2>&1 \
-     && HOME="$c45_home" ./uninstall.sh --yes >/dev/null 2>&1; then
+  if HOME="$c45_home" ./install.sh >/dev/null 2>&1; then
+    # Free ride on an install that is already running: the agent reference files are pointed at
+    # from nine agent prompts by absolute installed path, and until 1.45.0 the user-scope lane
+    # copied none of them -- the pointer resolved only on plugin installs. A plan is not the act,
+    # so this reads the installed tree rather than install.sh --dry-run's intentions.
+    for c45_r in claude/agents/reference/*.ref; do
+      [ -e "$c45_r" ] || continue
+      [ -f "$c45_home/.claude/agents/reference/$(basename "$c45_r")" ] \
+        || c45_errs="$c45_errs\ninstall.sh did not place agents/reference/$(basename "$c45_r"); nine agent prompts name a path that is not there"
+    done
+  else
+    c45_errs="$c45_errs\ninstall.sh failed under a throwaway HOME"
+  fi
+  if HOME="$c45_home" ./uninstall.sh --yes >/dev/null 2>&1; then
     jq -e --arg h "$c45_hook" '[.hooks.Notification[]?.hooks[]?.command] | index($h) != null' \
       "$c45_home/.claude/settings.json" >/dev/null 2>&1 \
       || c45_errs="$c45_errs\nthe user's own Notification hook is gone: uninstall removed an entry it does not own"
@@ -2673,7 +2685,7 @@ if command -v jq >/dev/null; then
       fi
     done
   else
-    c45_errs="$c45_errs\ninstall.sh or uninstall.sh failed under a throwaway HOME"
+    c45_errs="$c45_errs\nuninstall.sh failed under a throwaway HOME"
   fi
   rm -rf "$c45_home"
   [ -z "$c45_errs" ] \
@@ -2682,6 +2694,49 @@ if command -v jq >/dev/null; then
 else
   skip "uninstall keeps foreign settings, drops its own" "jq not installed"
 fi
+
+# --- 46. nothing under claude/agents/ loads as an agent by accident ----------------------------
+# Claude Code walks an agent directory recursively and loads every *.md at any depth. Confirmed
+# against the shipped binary, not inferred:
+#   if(d.isDirectory())return a(p,[...c,d.name]);if(d.isFile()&&d.name.toLowerCase().endsWith(".md")
+# marketplace.json sets "source": "./claude", so a reference file written as
+# claude/agents/reference/ENVIRONMENT.md would install as a plugin agent named
+# vstack:reference:ENVIRONMENT with the description auto-filled "Agent from vstack plugin" --
+# a nameless entry sitting in the dispatcher's list next to the fourteen real ones. This repo has
+# measured that two entries claiming the same ground suppress each other; an entry claiming
+# nothing at all has never been measured and is not worth finding out by accident.
+#
+# So the extension is load-bearing. It is the kind of decision that is obvious to whoever made it
+# and invisible to whoever renames the file six months later, which is what this check is for.
+# Both directions: the tree must be clean now, and the detector must catch a planted one.
+c46_errs=""
+c46_stray=$(find claude/agents -mindepth 2 -name '*.md' 2>/dev/null | sort)
+[ -z "$c46_stray" ] || c46_errs="$c46_errs\n$(printf '%s' "$c46_stray" | sed 's/^/  loads as a nameless plugin agent: /')"
+c46_probe=$(mktemp -d)
+mkdir -p "$c46_probe/agents/reference"
+: > "$c46_probe/agents/reference/planted.md"
+[ -n "$(find "$c46_probe/agents" -mindepth 2 -name '*.md' 2>/dev/null)" ] \
+  || c46_errs="$c46_errs\n  the detector did not find a planted nested .md -- it measures nothing"
+rm -rf "$c46_probe"
+# The reference files have to actually reach a repo through the overlay lane, or the pointer in
+# nine agent prompts names a path that is not there.
+if command -v git >/dev/null && [ -d claude/agents/reference ]; then
+  c46_dest=$(mktemp -d)
+  git -C "$c46_dest" init -q 2>/dev/null
+  if ./overlay.sh "$c46_dest" >/dev/null 2>&1; then
+    for c46_f in claude/agents/reference/*.ref; do
+      [ -e "$c46_f" ] || continue
+      [ -f "$c46_dest/.claude/agents/reference/$(basename "$c46_f")" ] \
+        || c46_errs="$c46_errs\n  overlay.sh did not place $(basename "$c46_f"); the pointer in the agent prompts resolves to nothing"
+    done
+  else
+    c46_errs="$c46_errs\n  overlay.sh failed against a scratch repo"
+  fi
+  rm -rf "$c46_dest"
+fi
+[ -z "$c46_errs" ] \
+  && ok "no accidental agents under claude/agents (references ship as .ref)" \
+  || bad "no accidental agents under claude/agents (references ship as .ref)" "$(printf '%b' "$c46_errs")"
 
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check

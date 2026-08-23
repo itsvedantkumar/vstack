@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -273,6 +273,7 @@ files_for(){ case "$1" in
   44b|44c|44d|44e|44f) printf 'claude/hooks/dispatch-counter.sh' ;;
   44g) printf 'claude/settings.json' ;;
   45)  printf 'uninstall.sh' ;;
+  46)  printf 'overlay.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -331,6 +332,7 @@ label_for(){ case "$1" in
   44f) printf 'dispatch counter join, both directions' ;;
   44g) printf 'dispatch counter join, both directions' ;;
   45)  printf 'uninstall keeps foreign settings, drops its own' ;;
+  46)  printf 'no accidental agents under claude/agents' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -625,6 +627,12 @@ exit 0
       # runs clean and deletes more than it says.
       perl -pi -e 's/^ +\| map\(\. as \$c \| \$ourbase \| any\(\. as \$b \| \$c \| endswith\("\/hooks\/" \+ \$b\)\)\)\n$/              | map(startswith(\$h))\n/' \
         uninstall.sh ;;
+  46) # Send the overlay's reference copy to a directory that does not exist. The line already
+      # ends in `2>/dev/null || true`, so the failure is silent by construction and overlay.sh
+      # still exits 0 -- nine agent prompts go on naming a path with nothing behind it and the
+      # only way to notice is to read the destination rather than the installer's exit code.
+      sed -i.t 's#"$DEST/.claude/agents/reference/" 2>/dev/null#"$DEST/.claude/agents/reference-decoy/" 2>/dev/null#' \
+        overlay.sh && rm -f overlay.sh.t ;;
 esac }
 
 # Three rows outside this count also report a result every run: the green-at-baseline probe

@@ -18,7 +18,7 @@ DEST="${1:-$PWD}"
 [ -e "$DEST/.git" ] || { echo "error: $DEST is not a git repo or worktree" >&2; exit 1; }
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run from the vstack repo" >&2; exit 1; }
 
-mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/commands" "$DEST/.claude/skills"
+mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/agents/reference" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
 # settings.json: ship the project-safe subset, merge it, don't clobber the repo's own keys.
 #
@@ -68,6 +68,8 @@ fi
 
 cp "$SRC"/claude/hooks/*.sh    "$DEST/.claude/hooks/"    && chmod 755 "$DEST"/.claude/hooks/*.sh
 cp "$SRC"/claude/agents/*.md   "$DEST/.claude/agents/"
+# *.ref, not *.md -- see install.sh: the agent walker recurses and loads every .md it finds.
+cp "$SRC"/claude/agents/reference/*.ref "$DEST/.claude/agents/reference/" 2>/dev/null || true
 cp "$SRC"/claude/commands/*.md "$DEST/.claude/commands/"
 
 # The policy document. It is NOT written as .claude/CLAUDE.md any more: that is a project-memory

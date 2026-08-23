@@ -121,7 +121,7 @@ if [ "$DRY" = 0 ]; then
     [ "$bn" -gt 500 ] && { echo "error: cannot create a backup dir under $(dirname "$BK_BASE")" >&2; exit 1; }
   done
   BK_CREATED=1
-  mkdir -p "$CDIR/hooks" "$CDIR/agents" "$CDIR/commands" \
+  mkdir -p "$CDIR/hooks" "$CDIR/agents" "$CDIR/agents/reference" "$CDIR/commands" \
            "$CDIR/skills" \
            "$HOME/.config/agents/bin" "$HOME/.config/agents/shell"
   chmod 700 "$HOME/.config/agents/backups"
@@ -161,6 +161,10 @@ fi
 # --- hooks / agents / commands ------------------------------------------------------------
 for f in "$SRC"/claude/hooks/*.sh;    do back "$CDIR/hooks/$(basename "$f")"; run cp "$f" "$CDIR/hooks/"; done
 for f in "$SRC"/claude/agents/*.md;   do back "$CDIR/agents/$(basename "$f")";   run cp "$f" "$CDIR/agents/";   done
+# Reference material the agents are pointed at. Deliberately *.ref, not *.md: Claude Code walks
+# an agent directory recursively and loads every .md at any depth, so a reference written as
+# markdown would install as a nameless agent competing for dispatch.
+for f in "$SRC"/claude/agents/reference/*.ref; do [ -e "$f" ] || continue; back "$CDIR/agents/reference/$(basename "$f")"; run cp "$f" "$CDIR/agents/reference/"; done
 for f in "$SRC"/claude/commands/*.md; do back "$CDIR/commands/$(basename "$f")"; run cp "$f" "$CDIR/commands/"; done
 [ "$DRY" = 0 ] && chmod 755 "$CDIR"/hooks/*.sh
 say "installed  hooks, agents, commands"

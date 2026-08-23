@@ -29,3 +29,10 @@ Red flags that you are rationalizing, not debugging: "just add a retry", "it pas
 run it again", "narrow the test so it hits the working path".
 
 Report: the root cause in one sentence, the fix, and the proof it works. If you couldn't reproduce, say what you'd need.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.

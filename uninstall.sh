@@ -203,6 +203,7 @@ plan_file_removal() { # <installed-path> <repo-source-or-empty>
 }
 for f in "$SRC"/claude/hooks/*.sh;    do [ -e "$f" ] && plan_file_removal "$CDIR/hooks/$(basename "$f")" "$f"; done
 for f in "$SRC"/claude/agents/*.md;   do [ -e "$f" ] && plan_file_removal "$CDIR/agents/$(basename "$f")" "$f"; done
+for f in "$SRC"/claude/agents/reference/*.ref; do [ -e "$f" ] && plan_file_removal "$CDIR/agents/reference/$(basename "$f")" "$f"; done
 for f in "$SRC"/claude/commands/*.md; do [ -e "$f" ] && plan_file_removal "$CDIR/commands/$(basename "$f")" "$f"; done
 for f in "$SRC"/bin/*;                do [ -e "$f" ] && plan_file_removal "$HOME/.config/agents/bin/$(basename "$f")" "$f"; done
 plan_file_removal "$CDIR/CLAUDE.md"                    "$SRC/claude/CLAUDE.md"

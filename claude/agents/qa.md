@@ -72,3 +72,10 @@ one people forget and the one that matters most, because it is the difference be
 and "nobody looked".
 
 Reproduce before reporting. A flake reported as a defect costs more than the flake.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.

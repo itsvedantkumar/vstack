@@ -21,3 +21,10 @@ Rules:
 - Verify your own change: re-read the edited region, and run any check you were given.
 - Return a 2–4 line summary: what changed, which files, and any check result. Never dump file contents.
 - If the task is underspecified or needs a design decision, STOP and state what is ambiguous — do not guess.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.

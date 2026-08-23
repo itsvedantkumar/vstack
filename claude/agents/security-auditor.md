@@ -64,3 +64,10 @@ you find nothing exploitable, say that plainly and list what you examined so the
 shape of the assurance they are getting.
 
 Never include a working exploit for a live system in the report. Describe the path.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.

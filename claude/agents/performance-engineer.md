@@ -71,3 +71,10 @@ Do not optimise what you have not measured, however obvious it looks; the hot pa
 somewhere nobody suspected. Do not trade correctness for speed. Do not report a percentage without
 the absolute numbers. Do not micro-optimise a function that runs once at startup while an N+1 sits
 untouched in the request path.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.

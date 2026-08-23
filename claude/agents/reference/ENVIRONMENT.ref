@@ -1,0 +1,134 @@
+# ENVIRONMENT.ref — facts this fleet has already paid to learn
+
+Read this before you run the command whose result becomes your verdict. Every line below was
+produced by running the command shown, on this machine, and reading its output. Where the folklore
+was wrong, the correction is here too.
+
+Not markdown-by-accident: the `.ref` extension keeps this file out of every agent loader, all of
+which glob `*.md` recursively. A reference named `.md` under an agents directory becomes a
+nameless agent in the dispatcher's list.
+
+---
+
+## 1. Reading a result
+
+**Exit code on its own line.** `cmd; echo "rc=$?"`. Not `cmd | tail`, not `cmd && echo ok`. A
+status read through a pipe is the status of the last stage.
+
+**`| grep -q` under `set -o pipefail` returns 141 — but only sometimes.** grep exits on the first
+match and the producer keeps writing into a closed pipe. Whether that costs you a SIGPIPE depends
+on whether the producer had more than a pipe buffer left to write:
+
+    bash -c 'set -o pipefail; printf "a\nb\nc\n" | grep -q a; echo $?'   -> 0
+    bash -c 'set -o pipefail; seq 1 2000000    | grep -q "^1$"; echo $?' -> 141
+    bash -c 'set -o pipefail; seq 1 2000000    | head -1 >/dev/null; echo $?' -> 141
+
+This is the shape that ships: green against the small fixture, 141 against the real corpus. Same
+for `head`, `sed q`, and any early-exiting consumer. If you need pipefail, capture first
+(`out=$(cmd)`) then match, or accept 141 explicitly.
+
+**CI status is a field, not an exit code.** `gh run list` exits 0 whether the run passed, failed,
+or has not finished. Read `conclusion`, and read `status` alongside it — an unfinished run reports
+an empty conclusion, observed live:
+
+    gh run list --limit 2 --json conclusion,status,databaseId
+    [{"conclusion":"","databaseId":32661127523,"status":"in_progress"}, ...]
+
+`conclusion == "success"` is only meaningful when `status == "completed"`. Treating empty as
+not-failed is how a red push reads green.
+
+**A repository gate is run unpiped or not run.** `./verify.sh | tail` has reported green over a
+red run in this repo. Run it, let it print, read the exit code on its own line.
+
+---
+
+## 2. macOS bash is 3.2.57
+
+    /bin/bash --version  ->  GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+
+Missing, verified by running each: `mapfile` (`mapfile: command not found`), `readarray`,
+associative arrays (`declare: -A: invalid option`), `${x^^}`/`${x,,}`, `&>>`, `**` globstar.
+
+**`case` inside `$( ... )` fails to parse.** The `)` closing a case pattern closes the command
+substitution first. This is a syntax error, not a runtime one, so the whole script dies before
+line 1:
+
+    x=$( printf 'a\n' | while read -r l; do case "$l" in a) echo hit ;; esac; done )
+    -> syntax error near unexpected token `;;'
+
+Fix by balancing the paren — a leading `(` on the pattern:
+
+    case "$l" in (a) echo hit ;; esac    -> out=hit
+
+**`sort -V` works. That one is folklore.** Apple's `/usr/bin/sort` is version 2.3-Apple (199) and
+accepts `-V`; verified `printf '1.10\n1.9\n' | /usr/bin/sort -V` -> rc=0. Do not route around a
+constraint that is not there.
+
+**Environment prefixes bind to one command, not to the pipeline.** This is the bug that leaked
+test fixtures into a live measurement corpus:
+
+    MYVAR=x printf 'in\n' | bash hook.sh   -> hook sees MYVAR unset
+    printf 'in\n' | MYVAR=x bash hook.sh   -> hook sees MYVAR=x
+
+The prefix decorates `printf`. The hook on the other side of the pipe inherits nothing. Put the
+assignment on the command that needs it, or `export` it first.
+
+---
+
+## 3. git on this machine
+
+`fetch.prune` and `fetch.pruneTags` are both `true` globally (`git config --get fetch.pruneTags`
+-> `true`). A bare `git fetch` therefore deletes every local tag the remote does not have. Five
+unpushed release tags were destroyed this way. Use `git fetch --no-tags` when you only want
+branches, and push a tag before you fetch anything.
+
+`git status --short` before and after any command that can touch the tree. A clean tree at the end
+is part of the result, not a courtesy.
+
+---
+
+## 4. The measurement corpora are live. Do not write to them.
+
+    $HOME/.claude/vstack-delegation-log.jsonl
+    $HOME/.claude/vstack-replay-log.jsonl
+
+These are the observational record this repo's claims rest on. Rows written by a test are
+indistinguishable from rows written by a run once they land. Tests point `VSTACK_DELEGATION_LOG`
+at a temp file; see section 2 on why that export has silently failed to take effect. If you are
+about to run a hook by hand, set the variable on the hook's own command and confirm the temp file
+grew before you believe the real one did not.
+
+---
+
+## 5. What counts as evidence
+
+**A guard anchored on a string that is merely unique today rots silently.** One refactor disarmed
+six guards in a day and every one stayed green, because each matched a phrase that had simply
+stopped existing. If you add a check that greps for a literal, also assert the literal is still
+present in its source — a guard that cannot distinguish "no violations" from "nothing to scan" is
+not a guard.
+
+**A reader verified against a hand-made fixture passes forever.** If the writer that should
+produce that fixture does not exist, or produces a different shape, the test proves only that the
+fixture parses. Assert the producer and the consumer against each other, in one run, or say
+plainly that you did not.
+
+**An interrupted mutating suite proves nothing about the rows it never reached.** The
+falsifiability suite (`tests/gate-falsifiability.sh`) breaks the working tree once per check,
+requires the gate to go red naming that check, then restores. Kill it midway and you have a dirty
+tree and a partial result that reads exactly like a pass. Scope it deliberately with
+`VSTACK_FALSIFY_ROWS="23 27 40"` (spaces, not commas — commas are rejected) and report which rows
+you actually ran, or run the whole sweep and let it finish.
+
+**Green because it did not run is the failure mode of every check here.** Before quoting a pass,
+answer: what would have made this print red? If you cannot name the mutation, you have a label,
+not a result.
+
+---
+
+## 6. What this file is not
+
+It is a list of traps, not a checklist to recite. Nothing enforces that you read it, and reading it
+does not make you right. Its only claim is that the eight facts above cost real work to discover
+and are cheaper to load than to rediscover. If you find one of them stale, correct it here — a
+reference that is wrong once is worth less than none, because it reads as covered.

@@ -4,6 +4,57 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.45.0 — 2026-08-24
+
+**Nine agents now carry a pointer to `claude/agents/reference/ENVIRONMENT.ref`, and the extension
+is load-bearing.** Claude Code walks an agent directory recursively and loads every `*.md` at any
+depth. Confirmed against the shipped binary rather than inferred:
+
+    if(d.isDirectory())return a(p,[...c,d.name]);if(d.isFile()&&d.name.toLowerCase().endsWith(".md")
+
+`marketplace.json` sets `"source": "./claude"`, so writing that reference as
+`claude/agents/reference/ENVIRONMENT.md` would have installed it as a plugin agent called
+`vstack:reference:ENVIRONMENT`, description auto-filled `"Agent from vstack plugin"`. A nameless
+entry in the dispatcher's list, manufactured by the audit that was looking for exactly that shape.
+**Check 46** holds the line in both directions: no `*.md` below the top level of `claude/agents/`,
+and a planted one must be found, so the detector cannot quietly stop detecting.
+
+The reference shipped free on the plugin lane and on no other, so `install.sh`, `overlay.sh` and
+`uninstall.sh` now carry it too. Check 45 gained the install-lane assertion and check 46 the
+overlay one, both reading the destination rather than the installer's exit code: the overlay copy
+ends in `2>/dev/null || true`, which is silent by construction, and row 46 points it at a decoy
+directory to prove the check notices.
+
+Contents are commands run on this machine, not recalled. Two facts this repo has been repeating in
+agent briefs were wrong, and both were caught by running them:
+
+- **`grep -q` under `pipefail` does not always return 141.** `printf 'a\nb\nc\n' | grep -q a`
+  exits 0; `seq 1 2000000 | grep -q '^1$'` exits 141. It fires only when the producer still has
+  more than a pipe buffer to write. That conditionality is the whole trap: green on a fixture,
+  141 on a corpus. The flat rule made the failure mode invisible.
+- **`sort -V` works here.** `/usr/bin/sort` is 2.3-Apple and orders `1.9` before `1.10`. It had
+  been listed with the genuine bash 3.2.57 gaps, which are `mapfile` and `declare -A`.
+
+Cost: about 90 tokens per dispatch for the pointer, about 1,750 more only if an agent reads the
+file. What it cannot do is make any agent read it, and this repo has already measured that
+instructions in context do not reliably change behaviour. The claim is that a rediscovery cost
+moved, not that a correctness floor rose. Falsifiable: sample the next 30 dispatches to the nine
+pointed agents; if `| tail`, unguarded `grep -q`, and exit-code-instead-of-`conclusion` do not
+fall against the same corpus's baseline, and reads of the reference stay under 20%, delete the
+pointers and keep the file as human documentation.
+
+**`design-reviewer` and `accessibility-auditor` both claimed a running UI before shipping.** Same
+trigger, same object, and design-reviewer's phase 4 audited WCAG 2.1 AA while accessibility-auditor
+audits 2.2 A+AA, so two agents reviewed the same screen to two different bars and a dispatcher had
+no way to choose. This is the shape that measured *both* skills failing to fire rather than one
+winning. WCAG conformance is now accessibility-auditor's alone; design-reviewer notes what it
+cannot miss and hands off. Its missing `tools:` field also got a comment saying why it is missing:
+omitting it is the only way the agent inherits ToolSearch and the browser tools, and a future
+tightening that adds the field would remove browser access while the agent kept filing reports.
+
+Audited by MEESEEKS M-7 (28 skills), NOOBNOOB N-2 (15 commands), JAGUAR J-1 (install lanes),
+ZEEP Z-4 (14 agents), MORTY M-8 (command rewrites).
+
 ## 1.44.0 — 2026-08-24
 
 **`uninstall.sh` deleted the user's own hook entries and reported that it had removed vstack's.**

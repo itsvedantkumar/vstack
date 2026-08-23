@@ -35,3 +35,10 @@ Rules:
   in between, and someone will check out that commit.
 - Never force-push a tag anyone could have fetched. Cut a new version instead.
 - Confirm the release exists after creating it. Read it back.
+
+## Before the command whose result becomes your verdict
+
+Read `claude/agents/reference/ENVIRONMENT.ref` (vstack checkout) or
+`$HOME/.claude/agents/reference/ENVIRONMENT.ref` (installed): pipefail/SIGPIPE 141, `gh`
+conclusion vs status, bash 3.2.57 limits, `fetch.pruneTags`, the live logs nothing may write to.
+Skip it if neither path exists.
