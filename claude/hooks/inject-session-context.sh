@@ -110,7 +110,8 @@ if [ "$event" = "UserPromptSubmit" ]; then
     if [ "$_n" -ge "${VSTACK_GRILL_CHARS:-320}" ] \
        || { [ -z "$_seen" ] && [ "$_n" -ge 120 ]; }; then
       grill='
-GRILL: run the grill-me skill on this request now, before any code or plan. Not optional.'
+GRILL: run the grill-me skill when no skill matches this situation more specifically. A
+situation-matched skill outranks it. grill-me is for a request whose shape is still undecided.'
     fi
   fi
   emit "$event" 'TOKENS: grep/ranges, not whole files; batch independent tool calls in ONE message.
