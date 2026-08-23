@@ -106,6 +106,18 @@ if [ "${1:-}" = "--drift" ]; then
     nfam=$((nfam + 1))
   done
   family_floor "claude/agents" "$nfam"; nfam=0
+  # Agent reference material. Its own family rather than folded into the loop above, because the
+  # glob differs: *.ref, not *.md, and deliberately so -- Claude Code loads every .md under an
+  # agent directory at any depth, so a reference named .md installs as a nameless agent. Shipped
+  # in 1.45.0 and compared by nothing until 1.45.1: doctor said "no drift" over 74 items while
+  # the file nine agent prompts point at could rot untouched.
+  for f in "$REPO"/claude/agents/reference/*.ref; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_item "claude/agents/reference/$b" "$f" "$CDIR/agents/reference/$b"
+    nfam=$((nfam + 1))
+  done
+  family_floor "claude/agents/reference" "$nfam"; nfam=0
   for f in "$REPO"/claude/commands/*.md; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
@@ -201,7 +213,7 @@ if [ "${1:-}" = "--drift" ]; then
     case " $RUNTIME_TOP " in *" $b "*) continue ;; esac
     stale="$stale $b"
   done
-  for kind in hooks:'*.sh' agents:'*.md' commands:'*.md'; do
+  for kind in hooks:'*.sh' agents:'*.md' commands:'*.md' agents/reference:'*.ref'; do
     d=${kind%%:*}; pat=${kind#*:}
     for p in "$CDIR"/"$d"/$pat; do
       [ -e "$p" ] || continue

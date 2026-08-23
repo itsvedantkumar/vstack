@@ -1987,8 +1987,12 @@ if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
     && g_errs="$g_errs\n  doctor --drift reports no drift after comparing zero items per family"
 
   # doctor --drift, positive: one member in every family, mirrored on both sides.
-  for _p in hooks/h.sh agents/a.md commands/c.md; do
-    printf 'x\n' > "$g_repo/claude/$_p"
+  # agents/reference/*.ref is its own drift family, so it needs its own member here. Leaving it
+  # out is how 1.45.1 first went red: doctor grew a family, the stub did not, and the positive
+  # control started failing for a tree that was in fact identical. The stub has to track the
+  # families or it stops being a control and becomes a second thing to keep in sync by hand.
+  for _p in hooks/h.sh agents/a.md commands/c.md agents/reference/r.ref; do
+    mkdir -p "$g_repo/claude/${_p%/*}" && printf 'x\n' > "$g_repo/claude/$_p"
     mkdir -p "$g_home/.claude/${_p%/*}" && printf 'x\n' > "$g_home/.claude/$_p"
   done
   mkdir -p "$g_repo/claude/skills/s" "$g_home/.claude/skills/s"

@@ -4,6 +4,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.45.1 — 2026-08-24
+
+**`doctor --drift` printed `no drift ✔ (74 item(s) compared)` over a tree containing a file it
+never compared.** 1.45.0 shipped `claude/agents/reference/ENVIRONMENT.ref` through all three
+install lanes and added checks for both of them, and then doctor's drift families still globbed
+`agents/*.md` only. The reference nine agent prompts point at could be edited, truncated or left
+behind by a downgrade and doctor would keep saying the installation matched the repo.
+
+Caught by reading the count rather than the verdict: 74 items before the file shipped, 74 after.
+A number that does not move when the tree grows is the whole tell, and it is only visible because
+1.14.0 made doctor print the count instead of a bare `no drift ✔`.
+
+It is its own family rather than another entry in the `*.md` loop, because the glob genuinely
+differs and the reason it differs is the point: a reference named `.md` installs as a nameless
+agent. The stale-file scan gained the same directory, so a `.ref` this repo stops shipping is now
+reported as a leftover instead of sitting there forever.
+
+Adding the family turned check 41 red on the way in, which is the check working. Its positive
+control builds a stub tree with one member in every drift family and requires doctor to green it;
+doctor grew a family, the stub did not, and the control failed over a tree that was in fact
+identical. The stub now derives its members from the same list, so a future family cannot pass by
+being absent from the fixture.
+
 ## 1.45.0 — 2026-08-24
 
 **Nine agents now carry a pointer to `claude/agents/reference/ENVIRONMENT.ref`, and the extension
