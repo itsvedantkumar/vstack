@@ -6,6 +6,50 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.26.0 — 2026-08-23
+
+**The README was 345 lines and never said what this is.** The category noun — a Claude Code
+configuration bundle — did not appear in the file, and the first plain statement of what you
+receive was 185 lines down. Section one was a 45-line teardown of a competitor, so a reader who
+had never heard of that project had to learn it before they could evaluate this one. Six negations
+arrived before one positive statement. The voice was first-person memoir.
+
+It is 188 lines now: name, one-line description, badges, requirements, install, and the
+differentiator stated concretely by line 20 rather than argued for over three sections. The
+competitor forensics and the null-result essays keep every word, in `docs/`, where a reader who
+wants them can find them and a reader deciding whether to install is not made to read them first.
+
+**The repository layout is documented, because two of its directory names are traps.** `claude/`
+is the shipped payload and `.claude/verify.sh` is this repository's own gate; `conductor/` and
+`.conductor/` collide the same way. That distinction was written down in exactly one place — a
+comment inside the check that depends on it. The rule is now a table on the front page: the dotted
+one is always this repository holding itself to something, the undotted one is what you receive.
+
+**Root went from 17 tracked files to 16**, and two of the survivors are new. Three `LICENSE*` files at root was the loudest
+disorder signal; `LICENSES/Apache-2.0.txt` and `LICENSES/MIT-upstream.txt` now sit together with
+`LICENSE` and `NOTICE` left at root where convention and Apache-2.0 §4(d) put them. `.gitkeep` was
+deleted — zero bytes, keeping no directory alive, and surviving check 31 only because a provenance
+document happened to contain the string as a substring. An accidental referrer is the same class
+of defect as an accidental green.
+
+`CODE_OF_CONDUCT.md` and `.editorconfig` added.
+
+**Check 38's document set is derived rather than listed.** It scanned 8 documents from a hardcoded
+pathspec; it scans 15 now. `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and
+`claude/CLAUDE.md` were all invisible to it. A hand-maintained list narrows silently, which is the
+failure this repository documents against itself, and check 12 already derived its set the right
+way three checks over.
+
+**Two rules in the shipped policy.** Work routes through the configuration rather than around it —
+multi-phase work through `/team`, reviews to `code-reviewer`, verification to `qa`. And delegated
+work is reported with the agent named and its call sign, in reasoning as well as in the final
+table, because a verdict with no author cannot be challenged and separate contexts are worth
+routing to only because they can disagree.
+
+Both rules had to be paid for. Adding them pushed the sandbox policy block 398 bytes over check
+34's 6144 cap, so the register ban list was compressed from 1757 bytes to 839 while keeping all
+five banned classes. Context is a budget and this file is inside it.
+
 ## 1.25.0 — 2026-08-23
 
 **Presentation is a phase with an owner.** `/team` gained phase 6b, run before ship for any change

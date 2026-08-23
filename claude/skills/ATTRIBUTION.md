@@ -110,7 +110,7 @@ Source: this repo, MIT.
 
 ## Which skills are active
 
-All 26. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
+All 28. `skillOverrides` in `claude/settings.json` exists only to quiet skills that Claude
 Code and its plugins install on their own. It never parks a skill from this repo.
 
 ## Also adapted: a hook, not a skill
@@ -121,7 +121,7 @@ failing toward asking, and carving out build artefacts so the guard is not so no
 turn it off.
 
 Source: [garrytan/gstack](https://github.com/garrytan/gstack), MIT, Copyright (c) 2026 Garry
-Tan. The notice is reproduced in `LICENSE.mit-upstream`.
+Tan. The notice is reproduced in `LICENSES/MIT-upstream.txt`.
 
 The implementation is this repo's own and differs in two deliberate ways. It is armed on every
 install rather than switched on per session, because this setup ships `bypassPermissions` and a

@@ -61,3 +61,13 @@ says "fix flaky check" is worth less than one that says which command returned 1
 Bump both manifests and write the changelog entry in the same commit as the change it describes,
 then tag. Check 24 fails if the payload has moved past the tag the manifests name, or if a version
 pinned in the docs is not a tag that exists.
+
+## Conduct and formatting
+
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to issues, pull requests and commit messages.
+Its standard is the same one this repository applies to its own checks: a claim about someone's
+work should carry the command or the `file:line` that supports it.
+
+Editor settings are in [.editorconfig](.editorconfig) — LF, UTF-8, two spaces, final newline,
+trailing whitespace stripped except in Markdown where it is a hard line break.
+

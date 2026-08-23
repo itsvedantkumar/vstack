@@ -58,6 +58,17 @@ phase 6 has not made it green, stop here and report. Shipping past a failed veri
 claim as an agent saying done while the tests are red, made by the one role whose whole job is
 catching it.
 
+## Naming
+
+Every agent gets a call sign and an instance handle, and both go in the report and the log. Write
+"qa (PROOF/EmberLynx) re-ran with a clean cache" rather than "verification passed". A verdict with
+no author cannot be questioned or re-run, and a report where every finding is passive reads as one
+person claiming consensus.
+
+Carry the names into your own reasoning too, not just the final table. The point of routing work
+through separate contexts is that they can disagree; a report that flattens them back into one
+voice throws away the only thing that made the routing worth doing.
+
 ## The handoff log
 
 Write `.audit/team-log.tsv` as you go, one row per phase handoff, appended before you start the

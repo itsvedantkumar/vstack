@@ -1963,11 +1963,15 @@ fi
 # people's repositories. CHANGELOG is excluded because its older entries name files that were
 # real when written and deleting them later is not an error.
 p_errs=""
-p_docs=$(git ls-files 'README.md' 'tests/README.md' 'ui-gate/README.md' 'docs/*.md' '.github/*.md' '.github/**/*.md' 2>/dev/null \
-         | grep -vE '^docs/(provenance|research)/')
+# Derived, not listed. The old form was a hardcoded pathspec that silently narrowed as files
+# were added or moved. Now it scans every .md file in the tree, then applies exclusions for
+# placeholder paths (claude/skills|agents|commands), third-party evidence (docs/provenance|research),
+# installed artifacts (.claude/), historical entries (CHANGELOG), and third-party test results
+# (tests/evals/RESULTS.md). This matches check 12's approach and keeps the two consistent.
+p_docs=$(git ls-files '*.md' 2>/dev/null | grep -vE '^(docs/(provenance|research)/|claude/(skills|agents|commands)/|\.claude/|CHANGELOG\.md$|tests/evals/RESULTS\.md$)')
 p_n=$(printf '%s' "$p_docs" | grep -c .)
-if [ "$p_n" -lt 3 ]; then
-  p_errs="$p_errs\n  internal: only $p_n document(s) in scope, so this scanned nothing worth scanning"
+if [ "$p_n" -lt 8 ]; then
+  p_errs="$p_errs\n  internal: only $p_n document(s) in scope, expected at least 8 (README.md, tests/README.md, ui-gate/README.md, docs/*.md, .github/*.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md)"
 else
   p_seen=0
   while IFS= read -r d; do
