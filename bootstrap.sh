@@ -99,7 +99,13 @@ for a in "$@"; do
 done
 
 if [ "$DEPS" = 1 ] && [ -x "$DIR/setup-machine.sh" ]; then
-  "$DIR/setup-machine.sh" || { echo "bootstrap: required tools are missing, stopping" >&2; exit 1; }
+  # VSTACK_CHAINED tells setup-machine.sh its own "done. Next: ./install.sh" is about to happen
+  # automatically one line below, not left for the operator to remember. VSTACK_PLUGINS is not
+  # set here -- setup-machine.sh's claude-mem/frontend-design/typescript-lsp installs stay
+  # opt-in through this one-liner exactly as they are run directly; set VSTACK_PLUGINS=1 before
+  # this command, or pass --with-plugins to setup-machine.sh yourself, to pull them in.
+  VSTACK_CHAINED=1 "$DIR/setup-machine.sh" \
+    || { echo "bootstrap: required tools are missing, stopping" >&2; exit 1; }
   echo
 fi
 

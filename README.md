@@ -46,8 +46,11 @@ claude plugin marketplace add itsvedantkumar/vstack
 claude plugin install vstack@vstack
 ```
 
-The plugin lane gives you the skills, subagents and commands. For the hooks, the CLI wrappers and
-the shell lane, take the full install:
+That is the whole plugin lane: skills, subagents and commands, nothing else touched on the
+machine. Remove it with `claude plugin uninstall vstack@vstack` — there is no `uninstall.sh` to
+run, because there is no checkout.
+
+For the hooks, the CLI wrappers and the shell lane, take the full install:
 
 ```bash
 git clone https://github.com/itsvedantkumar/vstack ~/Projects/vstack
@@ -62,10 +65,43 @@ curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.38.0/boots
 VSTACK_REF=v1.38.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
+The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
+repo's agents and gate expect — git, jq, ripgrep, fd, gh, node, bun, uv and the Claude Code CLI
+itself. Pass `--skip-deps` to the one-liner to go straight to the config install; `./install.sh`
+run directly never touches your tools unless you pass it `--with-deps`.
+
+`setup-machine.sh` can also install three Claude Code plugins, and does not by default. Two are
+third-party — `claude-mem` (persistent memory, `thedotmack/claude-mem`) and `frontend-design`
+(Anthropic's own UI-review plugin) — added from their own marketplaces and updated on their own
+schedule, not this repo's. The third, `typescript-lsp`, ships from the official
+`anthropics/claude-plugins-official` marketplace. None of the three installs from the headline
+command above. Opt in with `./setup-machine.sh --with-plugins`, or `VSTACK_PLUGINS=1` before the
+bootstrap one-liner (bootstrap.sh forwards its arguments to `install.sh`, not to
+`setup-machine.sh`, so the flag has no reach through it). If claude-mem is present — from this or
+an earlier install — `setup-machine.sh` also flips claude-mem's own `UserPromptSubmit` hook from
+sync to async in claude-mem's own `hooks.json`, so it stops blocking every prompt; that is the one
+edit this repo makes to a file it does not ship, and it is disclosed in `setup-machine.sh`'s own
+header. `./uninstall.sh --yes` undoes that specific edit. It never installs or removes claude-mem
+itself.
+
 Removing it restores what was there before: `./uninstall.sh --yes` puts every file it replaced
-back byte for byte and leaves anything you added alone.
+back byte for byte, unpicks the hook entries, MCP servers and policy keys it merged into
+`settings.json` and `~/.claude.json`, and leaves anything you added alone.
+
+**Confirm it worked:** inside Claude Code, run `/doctor`. It detects which of the two lanes
+above actually landed and checks that one — skill, subagent and command counts for the plugin
+lane; the full hook, wrapper and MCP breakdown for the full install — rather than printing a
+generic "installed" with nothing behind it. This is also the fastest way to see the payload is
+real: it names files on disk, not a slogan.
 
 ## What lands where
+
+The two install lanes above put the payload in two different places, and the counts below only
+mean what they say for the lane named above each table — mixing them up is exactly how `/doctor`
+used to report a healthy plugin install as broken (`/doctor` now detects which lane landed and
+checks the right one; see [Day to day](#day-to-day)).
+
+**Full install** (`git clone` + `./install.sh`):
 
 | Component | Count | Path |
 |---|---|---|
@@ -79,6 +115,24 @@ back byte for byte and leaves anything you added alone.
 `install.sh` merges rather than overwrites. It backs up every file it touches into
 `~/.config/agents/backups/`, adds only the hook entries it owns, and leaves keys it does not
 recognise alone. Check 21 fails if it deletes a key this repository never shipped.
+
+**Plugin-marketplace install** (`claude plugin marketplace add` + `claude plugin install`):
+
+| Component | Count | Path |
+|---|---|---|
+| Skills | 28 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
+| Subagents | 14 | `~/.claude/plugins/cache/vstack/vstack/<version>/agents/` |
+| Commands | 15 | `~/.claude/plugins/cache/vstack/vstack/<version>/commands/` |
+| Hooks | 0 (not this lane) | full install only |
+| CLI wrappers | 0 (not this lane) | full install only |
+| MCP servers | 0 — `claude/.claude-plugin/plugin.json` declares none | full install only |
+
+`<version>` is whatever `claude plugin install` resolved and changes every release, so glob it —
+`ls -dt ~/.claude/plugins/cache/vstack/vstack/*/ | head -1` — rather than pinning the number
+above. This lane never runs `install.sh`: the skills, subagents and commands are real and fire
+normally, but hooks, the CLI wrappers, the shell lane and MCP servers only land with the full
+install. Take that lane if you want the Stop-hook gate, the destructive-command guard, or the
+CLI wrappers under `~/.config/agents/bin/`.
 
 ## Day to day
 
