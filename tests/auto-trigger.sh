@@ -89,6 +89,49 @@ case_max_turns() {
   esac
 }
 
+# ---------------------------------------------------------------------------
+# A note on "how many times would it take to know" (2026-08-23), for whoever next wants a
+# cheaper dispatch-rate number than a full run of ATTEMPTS.
+#
+# A SAMPLE for rate purposes is one raw `claude -p` invocation of a fixed prompt. It is NOT
+# one ATTEMPTS-loop case-run through run_case: that loop stops at the first hit, so it
+# measures "did this succeed within 3 tries," not a firing rate, and reusing it as a cheap
+# substitute would reproduce the exact early-stopping bias that mislabeled
+# encode-lessons-lint as a dead skill when it was turn-starved. Getting n independent
+# samples means n full, non-retrying invocations -- there is no shortcut through the
+# existing retry machinery.
+#
+# What n actually buys, via two-sided 95% Wilson intervals: separating a case that fires
+# 90% of the time from one that fires 60% of the time needs n of roughly 32-35 per prompt.
+# n=5 and n=10 do NOT get there -- at n=10 the 90%-case interval is [0.60, 0.98] and the
+# 60%-case interval is [0.31, 0.83]; they overlap. What n=10 DOES support is the coarser,
+# cheaper question -- "never fired" vs "fires at least about half the time" -- which
+# already separates at n=10. Report raw k/n at that n, not a percentage or an interval: a
+# point estimate implies precision this sample size does not have.
+#
+# A 2026-08-23 probe used exactly this design on the 4 cases in dispute at the time --
+# 10 independent, non-retrying samples each, at their case_max_turns() budget -- and is not
+# reproduced here as code because it is not part of the suite: no neg-* precision arm, no
+# collision split, one phrasing per case. It answers only "broken vs stochastic" for cases
+# already in dispute, and must not be read as a fleet dispatch measurement. See
+# ~/vstack-dispatch/README.md for what a real one requires.
+#
+# That probe's raw results (k/10, no CI -- n=10 doesn't support one; see above):
+#   root-cause-guard              9/10 hit  (control -- matches its prior 1-attempt-pass
+#                                            record; the instrument reads as trustworthy,
+#                                            so the other three are readable as findings)
+#   prove-it-works-declare-done   0/10 hit  (at its assigned budget, max-turns=6)
+#   build-the-lever-headers       0/10 hit  (at the default, max-turns=3 -- not tested at
+#                                            a higher budget, so turn-starvation the way
+#                                            encode-lessons-lint had it is NOT ruled out)
+#   type-system-discipline-go     1/10 hit  (at the default, max-turns=3 -- same caveat)
+# All three disputed cases separate cleanly from the control (0/10 and 1/10 vs 9/10) --
+# clearly below "fires at least about half the time," clearly not turn-budget noise on the
+# order of the control's one miss. Whether that's dead dispatch or a starved default for
+# the two unset cases is not settled by this probe; only that they are not merely stochastic
+# in the way the control is.
+# ---------------------------------------------------------------------------
+
 # Attempts per case before calling it a failure. Skill dispatch is a model decision, so a
 # single sample is a coin flip; a skill that has actually stopped firing misses every attempt.
 # feature-chain is the measured-marginal case (~50% per attempt across runs: the model often
