@@ -4,6 +4,41 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.38.0 — 2026-08-23
+
+**`principle-type-system-discipline` almost never fired. Rewriting its description around the
+nouns a user actually types moved it from 1/10 to 9/10 at n=10 — matching the control's rate.
+The same rewrite method applied to `principle-build-the-lever` did not move it.**
+
+The shipped description read "Apply when designing types or a function signature in TypeScript,
+Rust, Go, or other statically-typed code" — mechanism vocabulary, not language a prompt actually
+contains. Rewritten to name the concrete shapes instead: "Apply when a struct, enum, or type can
+hold an invalid combination of fields that shouldn't compile," dispatched at 9/10, matching the
+control. `principle-build-the-lever` got the identical treatment — surfacing its own literal
+nouns in place of mechanism language — and it did not move: 2/10, sitting exactly on the
+pre-registered falsification floor, and the rewrite was reverted rather than shipped. A method
+that fixes one skill's dispatch rate and fails to fix another is a real finding about the limits
+of the description-rewrite lever, not a pattern to repeat blind — record both halves or the
+failure gets silently forgotten the next time someone reaches for the same trick.
+
+**`skill-mandate.sh` now logs delegation counts per Stop, for measuring the breadth mandate's
+effect on delegation behaviour going forward instead of only its blocks.**
+
+The Stop hook already computes `dir_count`/`ext_count`/`task_count`/`named` to decide whether to
+block; this appends one line per evaluated Stop to a JSONL log (`session_id`,
+`checkpoint_index`, the four counts, `ts`). Counts only — no paths, no file contents, matching
+the discipline the mandates already apply before anything reaches a block message. Logs
+unconditionally, blocks conditionally, so the log reflects the rate the mandate is trying to
+move rather than only the cases it already caught. Opt-out `VSTACK_NO_DELEGATION_LOG=1`, same
+shape as the existing `VSTACK_NO_MANDATE` escape hatch; `VSTACK_DELEGATION_LOG` overrides the
+destination. Capped at ~2MB with `tail`-and-atomic-`mv` rotation to the last 5000 lines, checked
+with one O(1) `stat` per Stop rather than a line count. Measured latency: 28.3ms with the logger
+active vs 28.6ms without, over 60 samples at σ≈1.9ms — indistinguishable from zero.
+`tests/delegation-drift.sh` (+ `delegation-drift.py`) is the accompanying analyser: pre-registered
+thresholds, states its own reverse-causality confound, and reports NOT EVALUATED rather than a
+rate below its eligible-window floor — the correct, expected result on day one, confirmed
+against this machine's own data.
+
 ## 1.37.0 — 2026-08-23
 
 **The delegation and agent-naming mandates counted a tool name that does not exist in this
