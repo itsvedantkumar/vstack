@@ -83,6 +83,50 @@ extract_fired_skills() {
 }
 
 # ---------------------------------------------------------------------------
+# top_level_subtype OUT_JSONL
+# Prints the CLI's own "subtype" for the RUN's terminal result event -- e.g.
+# "success" (ran to completion, whatever it did or didn't call) or
+# "error_max_turns" (cut off mid-task, never reached a decision).
+#
+# There can be more than one type=="result" event in the stream: a background
+# subagent launched via the Agent tool reports its OWN completion as a
+# type=="result" line too (verified against /tmp/auto-trigger-test.AJGn8t,
+# encode-lessons-lint @ MAX_TURNS=6 -- two result events, same session_id).
+# The subagent's carries an "origin":{"kind":"task-notification"} field the
+# top-level run's result does not, so that's the discriminator: select the
+# result event with no origin, not just the last result line in the file.
+# ---------------------------------------------------------------------------
+top_level_subtype() {
+  local jsonl="$1"
+  jq -r 'select(.type=="result" and (.origin==null)) | .subtype' "$jsonl" 2>/dev/null | tail -1
+}
+
+# ---------------------------------------------------------------------------
+# fence_violations WORKDIR BASELINE OUT_JSONL ERR_LOG
+# BASELINE is a newline-separated snapshot of WORKDIR taken right after
+# setup_fn ran and before claude launched. Prints one path per line for
+# anything in WORKDIR now that wasn't in BASELINE and isn't one of the
+# harness's own two artifacts. Empty output means the fence held.
+#
+# This exists as a second, independent layer behind --disallowedTools: a
+# subagent launched via the Agent tool is not guaranteed to inherit the
+# parent's disallowed-tools list on every code path, and it can run detached
+# in the background past this process's own kill -9 (see the "Agent" denial
+# added to --disallowedTools below, and its comment, for the full story).
+# Trusting the flag alone is trusting a single point of failure; this catches
+# whatever gets through it, by tool name or by mechanism, no matter which.
+# ---------------------------------------------------------------------------
+fence_violations() {
+  local workdir="$1" baseline="$2" out_jsonl="$3" err_log="$4"
+  local now
+  now="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
+  diff <(printf '%s\n' "$baseline") <(printf '%s\n' "$now") 2>/dev/null \
+    | sed -n 's/^> //p' \
+    | grep -v -F -x -e "$out_jsonl" -e "$err_log" \
+    | grep -v '^$'
+}
+
+# ---------------------------------------------------------------------------
 # run_case NAME PROMPT EXPECTED_REGEX SETUP_FN
 # SETUP_FN is a function name invoked with the temp dir as $1, or "" for none.
 # ---------------------------------------------------------------------------
@@ -103,6 +147,7 @@ run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
   selected_ "$name" || return 0
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
+  local baseline violations term_subtype last_fired_csv=""
 
   # Skill dispatch is a model decision, not a deterministic branch, so one sample is a coin
   # flip and a single-shot assertion makes this suite cry wolf. Retry a miss up to $ATTEMPTS
@@ -111,6 +156,7 @@ run_case() {
   for attempt in $(seq 1 "$ATTEMPTS"); do
     workdir="$(mktemp -d "/tmp/auto-trigger-test.XXXXXX")"
     [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
+    baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
     out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
 
     # exec is load-bearing: without it the subshell forks claude as a child, and the
@@ -120,11 +166,14 @@ run_case() {
       cd "$workdir" || exit 1
       # Mutation tools are denied: with bypassPermissions inherited from user settings, a
       # test prompt once wrote a real script into ~/.config/agents/bin. Detection only needs
-      # the Skill tool call, which still happens.
+      # the Skill tool call, which still happens. Agent is denied alongside them: --disallowedTools
+      # is not guaranteed to propagate to a subagent spawned via the Agent tool on every code path
+      # (see tests/README.md), and a subagent can run detached in the background past this
+      # process's own kill -9 -- the only reliable fence is not letting Agent be called at all.
       exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
         claude -p "$prompt" \
           --output-format stream-json --verbose \
-          --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash" \
+          --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
           --model "$MODEL" --max-turns "$MAX_TURNS" \
           < /dev/null > "$out_jsonl" 2> "$err_log"
     ) &
@@ -143,9 +192,34 @@ run_case() {
     else
       fired="$(extract_fired_skills "$out_jsonl")"
       fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"
-      [[ -z "$fired_csv" ]] && fired_csv="(none)"
+      if [[ -z "$fired_csv" ]]; then
+        # A miss is not one thing. "error_max_turns" means the run was cut off before it
+        # ever reached a decision point -- that's a starved case, not a routing failure.
+        # Anything else that still didn't fire actually ran to completion and chose not to
+        # call Skill, which IS a dispatch signal. Printing both as "(none)" makes the suite
+        # report a turn-budget problem as if it were a skill-routing problem.
+        term_subtype="$(top_level_subtype "$out_jsonl")"
+        if [[ "$term_subtype" == "error_max_turns" ]]; then
+          fired_csv="(none: cut off by error_max_turns, never reached a decision)"
+        else
+          fired_csv="(none: ran to completion, subtype=${term_subtype:-unknown})"
+        fi
+      fi
     fi
+
+    violations="$(fence_violations "$workdir" "$baseline" "$out_jsonl" "$err_log")"
     rm -rf "$workdir"
+
+    if [[ -n "$violations" ]]; then
+      echo "FAIL $name -> fence breach: run wrote outside its allowed tools:"
+      while IFS= read -r v; do printf '    %s\n' "$v"; done <<< "$violations"
+      RESULT_LINES+=("FAIL $name -> fence breach (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
+      HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> wrote %s' "$name" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      return
+    fi
+
+    last_fired_csv="$fired_csv"
 
     if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($expected_regex)$"; then
       matched="$(echo "$fired" | grep -E "^($expected_regex)$" | head -1)"
@@ -164,9 +238,9 @@ run_case() {
     (( attempt < ATTEMPTS )) && echo "  retry $name (attempt $attempt fired: [$fired_csv])"
   done
 
-  echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts (last: [$fired_csv])"
-  RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts")
-  HIT_LINES+=("$(printf '%-22s never in %s   -> (none)' "$name" "$ATTEMPTS")")
+  echo "FAIL $name -> expected $expected_regex, never fired in $ATTEMPTS attempts (last: [$last_fired_csv])"
+  RESULT_LINES+=("FAIL $name -> expected $expected_regex, $ATTEMPTS attempts (last: $last_fired_csv)")
+  HIT_LINES+=("$(printf '%-22s never in %s   -> %s' "$name" "$ATTEMPTS" "$last_fired_csv")")
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
@@ -177,16 +251,17 @@ run_case() {
 run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
   selected_ "$name" || return 0
-  local workdir out_jsonl err_log runner_pid waited fired fired_csv
+  local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline violations
 
   workdir="$(mktemp -d "/tmp/auto-trigger-neg.XXXXXX")"
+  baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
   out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
   (
     cd "$workdir" || exit 1
     exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
       claude -p "$prompt" \
         --output-format stream-json --verbose \
-        --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash" \
+        --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent" \
         --model "$MODEL" --max-turns "$MAX_TURNS" \
         < /dev/null > "$out_jsonl" 2> "$err_log"
   ) &
@@ -201,7 +276,17 @@ run_negative_case() {
   fired=""
   [[ -s "$out_jsonl" ]] && fired="$(extract_fired_skills "$out_jsonl")"
   fired_csv="$(echo "$fired" | tr '\n' ',' | sed 's/,$//')"; [[ -z "$fired_csv" ]] && fired_csv="(none)"
+  violations="$(fence_violations "$workdir" "$baseline" "$out_jsonl" "$err_log")"
   rm -rf "$workdir"
+
+  if [[ -n "$violations" ]]; then
+    echo "FAIL $name -> fence breach: run wrote outside its allowed tools:"
+    while IFS= read -r v; do printf '    %s\n' "$v"; done <<< "$violations"
+    RESULT_LINES+=("FAIL $name -> fence breach (wrote: $(echo "$violations" | tr '\n' ';' | sed 's/;$//'))")
+    HIT_LINES+=("$(printf '%-22s FENCE BREACH  -> wrote %s' "$name" "$(echo "$violations" | wc -l | tr -d ' ')file(s)")")
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    return
+  fi
 
   if [[ -n "$fired" ]] && echo "$fired" | grep -qE "^($forbidden_regex)$"; then
     echo "FAIL $name -> $forbidden_regex fired on a prompt that is not its situation [$fired_csv]"
