@@ -6,6 +6,82 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.30.0 — 2026-08-23
+
+security-auditor closed the three findings raised against 1.28.0. What follows is what was
+wrong and how it is known to be fixed, not a list of feature names.
+
+**`vstack update` diffed a hardcoded five-path list and called the rest of the merge invisible.**
+`TRUSTED="install.sh overlay.sh uninstall.sh bootstrap.sh .claude/verify.sh"` was the entire
+review surface, and the command printed "(no changes to the scripts the gate executes)" while
+`install.sh` deploys nearly the whole repository — `claude/hooks/*.sh`, `claude/settings.json`,
+`bin/vstack` itself — none of which that list named. A commit weakening
+`guard-destructive.sh` or neutering `verify-gate.sh`'s hash check could land under that
+reassurance at the exact moment the prompt exists to be trusted. Found by security-auditor
+EVIL-MORTY C-137 against a throwaway local remote: the old code printed the all-clear while
+`guard-destructive.sh` itself was the file being changed. Fixed by diffing the full
+`HEAD..upstream` range instead of expanding the list — a hand-maintained set has to track
+`install.sh`'s deploy surface exactly, and every missed entry silently reopens the hole, which is
+how this one happened; a full diff cannot drift out of sync with a surface it never tries to
+describe. The five gate-executing paths survive as a named warning banner on top of that full
+diff, not as a filter that hides the rest.
+
+**`vstack trust` armed unattended script execution with no confirmation of its own.** "Trusted"
+meant only that a line existed in `~/.config/agents/verify-trust`, and `verify-gate.sh`'s Stop
+hook runs whatever hashes to that line forever after, with nothing checking it again.
+`bin/vstack:172` stated the intent — "the boundary is anchored on a human reading the script
+before running this command" — and nothing enforced it, so a hostile `CONTRIBUTING.md` telling an
+agent to run `vstack trust .` turned the gate meant to stop unreviewed execution into the
+delivery mechanism for it. Found by security-auditor EVIL-MORTY C-137. `update` had already
+solved this exact shape one command above — refuse without a TTY, require `--yes` for automation
+— so that pattern is ported rather than invented twice, plus a prompt asking whether the human
+has actually read the script just now. `install.sh`'s self-trust path is unaffected: it writes
+the store directly and never calls the CLI. `guard-destructive.sh` also gained an ask-tier rule
+for any segment naming `vstack trust` or `verify-trust`, matched broadly rather than narrowed to
+writes, because the guard's own header disclaims semantic detection and a narrow match is exactly
+where a bypass would live.
+
+**`format.sh` executed repo-supplied JavaScript with no confirmation, on every edit.**
+`npx --no-install prettier` ran against any covered file whenever a prettier config was present,
+and prettier's own config loader treats `prettier.config.js`/`.prettierrc.js` (and the `.cjs`,
+`.mjs`, `.ts` variants) as ordinary JavaScript, `require()`-ing it the moment it resolves config.
+Hooks sit outside the permission system, so a hostile repo shipping one of those with `execSync`
+at module load got code execution the instant the agent edited any covered file — proven, not
+theoretical: security-auditor EVIL-MORTY C-137 demonstrated the pre-fix script running the
+payload. `--config` does not close it, because prettier still requires a JS config file even when
+told which one to load. Fixed by refusal: the hook now replicates prettier's own config search
+far enough to classify which file would win, and if that file ends `.js`/`.cjs`/`.mjs`/`.ts`,
+prettier is never invoked at all. Static-format winners are still passed explicitly via
+`--config`, bypassing prettier's own search entirely, so a bug in the classifier can only make it
+too cautious, never permissive. Residual risk is documented in the file rather than silently
+closed: a static config's own `plugins` array can still name a local `.js` file that prettier
+will load, and prettier 3 has no flag to refuse plugin loading outright.
+
+**The same lines paid full Node module resolution to fail on a fresh clone.** Measured by
+performance-engineer PICKLE-RICK P-92: a repo with a prettier config but no `npm install` yet —
+the state of every clone before its first install — sent `npx --no-install` through full
+resolution before giving up, at 639, 494 and 464 milliseconds across three repeated edits. The
+rewrite above looks for the formatter binary directly under `node_modules/.bin`, walking up the
+same way the config search does, and only runs it when it is actually installed rather than
+trying to fetch it: 63, 65 and 64 milliseconds on the same three edits.
+
+**The destructive-command guard's decision table grew by one rule.** `guard-destructive.sh`
+gained the ask-tier match for the trust-store name above, and the falsifiability suite that
+exercises it grew from 22 entries to 24, covering both `vstack trust .` and a direct
+`verify-trust` append, asserted in both directions. Independently re-verified against the rest
+of the table: no existing verdict moved — `npm test` and `rm -rf node_modules` still allow,
+`rm -rf /` and a compound force-push still deny.
+
+**Flagged, not fixed: `SECURITY.md:43` undercounts the guard it describes.** It reads "check 23
+tests all sixteen across three tiers" — a claim that was already stale before this release, since
+the guard's table had grown past sixteen some time before this audit, and is stale by a larger
+margin now that it has grown again. Nothing ties that sentence to the real count: it is the same
+gap check 12 exists to close everywhere else in this repo's docs, except this sentence spells the
+number out in words rather than digits, which was never in check 12's extraction grammar, so it
+passes unmeasured rather than being caught by it. Left as a stated defect rather than a quiet
+correction, because a corrected number with nothing enforcing it only looks fixed until the table
+grows by one more entry.
+
 **The compaction numbers in 1.29.0 were reasoned, and now they are measured.** Two things that
 release asserted turn out to be wrong, and one turns out to be right. Method: a headless session
 driven past the window on Claude Code v2.1.241, once with `--autocompact 100k` and once with
