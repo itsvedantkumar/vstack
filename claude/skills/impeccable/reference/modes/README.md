@@ -1,76 +1,77 @@
-# Measured modes
+# Taste, per project
 
-Three reference sites, measured rather than described: computed styles read from a live browser,
-pixel histograms, autocorrelation on canvas output. Adjectives were excluded on purpose. The one
-head-to-head anyone has run on config-layer interventions found prose instruction without
-retrieval made outcomes worse than no instruction (9.94% regression rate against a 6.08%
-baseline) while the same instruction with retrieval context cut it to 1.82%. A mode file carries
-numbers for that reason.
+There is no bundled set of reference sites here, and there was briefly: four measured sites baked
+into this skill. They were removed. A frozen corpus is a taste snapshot — it rots, it knows nothing
+about the project in front of you, and it pushes every build toward whatever those four sites
+happened to do in August 2026. Shipping somebody else's answer is the same defect as shipping a
+count nobody re-derives.
 
-Sources: talk2hug.com, perseus.computer, forgeresidency.com, lighthousehq.com, measured 2026-08-23.
+What ships instead is the measurement.
+[`scripts/extract-brand.sh`](../../scripts/extract-brand.sh) points a headless browser at any URL
+and returns the properties that separate an expensive build from a default one, as numbers a gate
+can enforce afterwards.
 
-## What every one of them does
+## The pipeline
 
-These held across all three. Treat a violation as a defect, not a choice.
+**1. Requirements before references.** What is the surface, who is it for, what must it do. The
+four surface modes in SKILL.md — Persuade, Operate, Read, Experience — answer this and constrain
+everything downstream. A dashboard does not get a landing page's typography no matter which
+references the user liked. Do not proceed to step 2 with an unanswered brief.
 
-**Weight carries no hierarchy.** `font-weight: 400` for every display and body element. Forge uses
-500/600 on exactly two buttons and the wordmark. Hierarchy comes from size and tracking.
+**2. The user names the references.** Two to five URLs they want this to feel like. Ask for them;
+do not supply them. If the user has no references, ask for adjacent products they admire, or for
+an existing surface of their own to stay consistent with. **Never substitute a default set.**
 
-**Tracking is a monotonic function of size, locked in `em`.** Negative on display, zero in the
-middle, positive on small uppercase. Measured curves:
+**3. Measure.**
 
-| site | at display | crossover | at eyebrow |
-|---|---|---|---|
-| forge | −0.12em @ 400px | 0 @ ~20px | +0.22em @ 11px |
-| perseus | −0.04em @ 124px | 0 @ 15–18px | +0.16em @ 10px |
-| hug | −0.05em @ 48px | 0 @ 16px | +0.24em @ 14px |
+    ./scripts/extract-brand.sh <url> <url> ... > .impeccable/candidate.json
 
-Locked in `em` so the ratio survives a fluid resize untouched. Forge's mobile display is exactly
-0.50× desktop with byte-identical tracking; that is why it does not read loose.
+Returns per URL: the rendered type scale, tracking per size in em, leading per size, measure in ch,
+resolved ink/ground/hue count and the full colour frequency table, a spacing census with base-unit
+conformance, transition durations and easing frequencies, and the radius set.
 
-**Line-height inverts with size.** Display 0.88–0.95. Mid 1.35–1.5. Body 1.5–1.75. No exceptions
-in any of the three.
+**4. Reconcile into one brand.json.** Where the references agree, take the agreement. Where they
+disagree, the disagreement is a decision to put to the user, not an average — base unit, texture
+and radius policy in particular contradict each other between sites, and a blend resolves every
+contradiction toward the stock default. Write the result to `.impeccable/brand.json` against
+[brand.schema.json](brand.schema.json).
 
-**One accent hue, or none.** Perseus `#647fff`. Forge `#16a85a`. Hug has no type accent at all and
-reserves pure `#ffffff` for a single line of stats. Everything else is a neutral ramp plus alpha.
+**5. Show before building.** Produce static mockups of the key screens at 1440 and 375 and put them
+in front of the user. Screenshot them with `agent-browser screenshot` so what is reviewed is what
+renders, not a description of it. Get an explicit yes on the visual direction before any component
+is written. A wireframe approved in prose is not approved.
 
-**Ink is never pure white on a dark ground.** Hug `#f7f4ec` (4.3% warm). Perseus `#ecebf2` (cool).
-Ground is never pure black: `#050505`, `#09090b`, `#060708`.
+**6. Hand off to Claude Design for wireframing** where the project wants it — see the Claude
+Design section in SKILL.md. That lane pushes a design system up with `/design-sync`; it does not
+generate back into the session.
 
-**Tight groups inside enormous silence.** The ratio is the signature, not any single value:
-forge 7:1 (16px intra, 112–128px section), perseus 16:1 (1:1.5:3:5:16), hug 24:1 (8px to 192px).
+**7. Build against the tokens, with the gate armed.** `ui-gate/rules/tokens.sh` reads
+`type.scale` from `.impeccable/brand.json` and fails a build that drifts off it. `ui-iterate`
+re-shoots at 375/768/1440. Without a `brand.json` none of this fires and the surface is built
+normally.
 
-**Measure under 60ch.** Forge 42–58ch. Perseus 55–62ch for prose. Hug 32.6ch. Machine output is
-exempt and runs long on purpose (perseus terminal transcript at 134ch).
+## What to read off a reference, and why each one
 
-**Emptiness is the product.** Text ink coverage: hug 1.22% of hero pixels, forge 12–27% per
-section, perseus ~20% of hero. Nothing here is dense.
+Every item is here because it is measurable, it survives into a gate, and it differed between
+expensive builds and default ones.
 
-**Motion has two bands and a hole.** Hover and colour 130–200ms. Entrance 420–760ms. Nothing
-between 300 and 420ms in any of the three. Stagger steps are small and explicit: 45ms (forge),
-75/80ms (perseus).
+| property | why it is on the list |
+|---|---|
+| type scale | the sizes actually rendered; `TOK-TYPE-SCALE` fails against exactly this |
+| tracking per size, in `em` | the property that survives a fluid resize unchanged; `px` tracking does not |
+| leading per size | it inverts with size on expensive builds and is flat on default ones |
+| measure in ch | short measure is one of the cheapest signals of care |
+| ink, ground, hue count | pure black on pure white, and more than two hues, both read as default |
+| hairline treatment | whether borders are a solid grey or ink at low alpha |
+| spacing base unit | inferred from a census of what rendered, not from a config file |
+| tight-to-open ratio | the ratio between intra-group and inter-section spacing carries more than any value |
+| duration bands | expensive builds cluster short and long with a gap; default ones sit at 300ms |
+| easing frequency | one house curve doing most of the work is a signal; five curves evenly used is not |
+| radius set | a declared set, so anything off it is drift |
 
-**prefers-reduced-motion is honoured structurally, not gestured at.** Hug removes the filter
-entirely rather than freezing a distorted frame. Forge defines its marquee only inside
-`@media (prefers-reduced-motion: no-preference)` so it never starts. Copy that, not a blanket
-duration clamp.
+## Two things to check on any reference before copying it
 
-## Where they diverge, and what that makes them
-
-| | pixel | plate | editorial | scrollfield |
-|---|---|---|---|---|
-| reference | talk2hug | perseus | forge | lighthouse |
-| base unit | 4px | **2px** | 4px | **2px** (8pt conformance 13%) |
-| grain | feTurbulence `screen` .52 | feTurbulence `overlay` .06 | **none** | **none** |
-| radius | 0 | 8 / 12 / 28 | **0 or 9999 only** | — |
-| elevation | `blur(14px)` | `blur(56px)`, shadow `0 28px 80px/.76` | **zero shadows**, `ring-1` | 31× `backdrop-filter` |
-| display tracking | −0.05em | −0.04em | −0.12em | **`normal`, even at 80px** |
-| motion | CSS filter swap | mount-time entrances | IntersectionObserver | **`animation-timeline`, no library** |
-| signature | `pixel.md` | `plate.md` | `editorial.md` | `scrollfield.md` |
-
-`scrollfield` is the one exception to the tracking invariant above: it leaves display type at
-`normal` and uses tracking only to open small mono caps. If you take that mode, take it whole.
-
-Pick one. Averaging them produces the stock look with extra steps: the base unit, the grain and
-the radius policy contradict each other directly, and a blend resolves each contradiction toward
-the default.
+Measure contrast on the smallest text. Measure `prefers-reduced-motion` coverage against the
+motion actually present. Reference sites ship accessibility defects — a 12px line at 4.34:1 and a
+scroll-driven hero uncovered by any reduced-motion rule were both found in sites worth learning
+from otherwise. Take the craft, not the defect.

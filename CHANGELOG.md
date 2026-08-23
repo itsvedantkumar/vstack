@@ -6,6 +6,30 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.24.0 — 2026-08-23
+
+**The four bundled reference modes shipped in 1.23.0 are deleted.** They were four sites measured
+in detail and frozen into the skill, which is a taste snapshot: it rots, it knows nothing about the
+surface in front of you, and it drags every build toward whatever those four did on the day. That
+is the same defect as a count nobody re-derives, one layer up — an answer shipped in place of the
+thing that produces answers.
+
+`scripts/extract-brand.sh` ships instead. It points a headless browser at any URL the user names
+and returns the rendered type scale, tracking per size in em, leading per size, measure in ch,
+resolved ink and ground with a hue count, a spacing census with base-unit conformance, transition
+duration and easing frequencies, and the radius set. Colour is resolved by painting one pixel and
+reading it back rather than parsing the string, because `getComputedStyle` returns `oklch()` on
+modern sites and both a digit regex and `canvas.fillStyle` hand back nonsense for it.
+
+The pipeline it feeds is requirements first, then references the user names, then measurement,
+then reconciliation with disagreements put to the user rather than averaged, then mockups
+screenshotted and approved before a component is written, then optional handoff to Claude Design,
+then build with the gate armed. Nothing fires without a `.impeccable/brand.json` in the target.
+
+What survives from 1.23.0 is the list of what to read off a reference and why each item earns its
+place — every one is measurable, survives into a gate, and differed between expensive builds and
+default ones.
+
 ## 1.23.0 — 2026-08-23
 
 **Four visual modes, measured rather than described.** `impeccable` described the bar in

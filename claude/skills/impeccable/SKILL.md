@@ -33,36 +33,36 @@ The mode names what the visitor's success looks like on this surface.
 
 Choose the mode from the requested surface, not the product, and persist it only in that surface brief. A tool's landing page is still Persuade; a fashion house's documentation is still Read; a docs index is Read, not Persuade. See [new-work.md](reference/new-work.md) for new surfaces and [operate.md](reference/operate.md) for deeper Operate/Read guidance.
 
-## Visual modes, measured
+## Visual direction, measured per project
 
 The four surface modes above answer *what the visitor is doing*. They do not answer *what it looks
 like*, and a description of visual quality cannot produce it: the one head-to-head anyone has run
 found prose instruction without retrieval made outcomes worse than none (9.94% regression rate
-against a 6.08% baseline), while the same instruction with retrieval context reached 1.82%.
+against a 6.08% baseline) while the same instruction with retrieval context reached 1.82%.
 
-So the visual bar is carried by numbers read off live sites rather than adjectives.
-[reference/modes/](reference/modes/) holds four, measured 2026-08-23 from computed styles, pixel
-histograms and canvas autocorrelation:
+So visual direction is measured, not described — and measured **per project**, from references the
+user names. This skill ships no reference set. A bundled corpus is a taste snapshot: it rots, it
+knows nothing about the surface in front of you, and it drags every build toward whatever those
+sites did on the day they were measured.
 
-| mode | reference | signature | base unit | texture |
-|---|---|---|---|---|
-| [pixel](reference/modes/pixel.md) | talk2hug | 4 SVG turbulence filters swapped at 10fps | 4px | grain .52 screen |
-| [plate](reference/modes/plate.md) | perseus | display face quantized to 32 units/em | **2px** | grain .06 overlay |
-| [editorial](reference/modes/editorial.md) | forge | sticky pinned hero, the page scrolls over it | 4px | **none** |
-| [scrollfield](reference/modes/scrollfield.md) | lighthouse | `animation-timeline`, reveals bound to scroll not to a clock | **2px** | **none** |
+`scripts/extract-brand.sh <url>...` points a headless browser at any reference and returns the
+rendered type scale, tracking per size in em, leading per size, measure in ch, resolved ink and
+ground with a hue count, a spacing census with base-unit conformance, transition duration and
+easing frequencies, and the radius set. Reconcile the references into `.impeccable/brand.json`,
+show mockups, then build.
 
-[reference/modes/README.md](reference/modes/README.md) carries what held across all three —
-weight 400 everywhere, tracking as a monotonic function of size locked in em, line-height
-inverting with size, one accent hue or none, motion in two bands with nothing between 300 and
-420ms. Treat a violation of those as a defect. The divergences are the modes, and they contradict
-each other directly on base unit, texture and radius; averaging them resolves every contradiction
-toward the stock default.
-
-**These apply only where a project opted in.** A `.impeccable/brand.json` in the target repo
-selects the mode and declares the tokens; `ui-gate/rules/tokens.sh` reads its `type.scale` and
-fails a build off it. With no such file, nothing here fires and the surface is built normally.
-Schema and field-by-field rationale:
+The full pipeline, and what to read off a reference and why each item is on the list:
+[reference/modes/README.md](reference/modes/README.md). Schema:
 [reference/modes/brand.schema.json](reference/modes/brand.schema.json).
+
+**Opt-in per project.** With no `.impeccable/brand.json` in the target, none of this fires and the
+surface is built normally. `ui-gate/rules/tokens.sh` reads `type.scale` from that file and fails a
+build off it. A skill that decides on its own whether something deserves to be beautiful would
+fire wrongly and constantly; a file in the repo is a decision somebody made.
+
+Where references disagree, put the disagreement to the user. Do not average it: base unit, texture
+and radius policy contradict each other between sites, and a blend resolves every contradiction
+toward the stock default.
 
 ## Claude Design
 
