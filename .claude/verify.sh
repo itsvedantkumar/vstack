@@ -2231,6 +2231,141 @@ else
   bad "CHANGELOG.md structure" "CHANGELOG.md is missing"
 fi
 
+# --- 40. a latched session still writes a delegation-drift row ---------------------------------
+#
+# The 2-strike latch in skill-mandate.sh (cnt>=2) used to sit above the delegation-drift logger,
+# so once a session accumulated 2 mandate strikes every later Stop returned before logging --
+# permanently blind for exactly the long, multi-directory sessions the log exists to measure.
+# Check 27 exercises the mandate's block/silent decisions in both directions but never drives a
+# session past the latch, so it stayed green through the entire regression.
+#
+# The fix keeps the latch's blocking behaviour (a mandate the model cannot satisfy must not trap
+# the session) and adds one cheap row on the way out: {..., dir_count:null, ext_count:null,
+# task_count:null, named:null, latched:true, ts}. This drives the real hook through three Stops
+# on one synthetic session -- two that trip an unmet mandate (cnt 0->1, 1->2) and a third that
+# lands on the latch (cnt>=2) -- and checks both that logging survives the latch AND that
+# blocking still stops there, because a check that only asserted the former would stay green if
+# the latch also started emitting the block JSON it exists to suppress.
+if command -v jq >/dev/null; then
+  sm="claude/hooks/skill-mandate.sh"
+  if [ ! -x "$sm" ]; then
+    bad "latched session still logs a delegation-drift row" "$sm is missing or not executable"
+  else
+    c40_dir=$(mktemp -d)
+    c40_log="$c40_dir/delegation-log.jsonl"
+    c40_transcript="$c40_dir/t.jsonl"
+    # $$-scoped and prefixed distinctly from check 27's "vfy-" ids: a real session_id is a UUID,
+    # neither of these can collide with one, and the two fixture families stay distinguishable
+    # from each other in a stray log line.
+    c40_sid="chk40-$$-$(date +%s 2>/dev/null || echo 0)"
+    c40_errs=""
+
+    # The real log this hook writes to by default, untouched by this check's own destination
+    # override below. Sampled before and after: this is the exact leak this file's own check 27
+    # comment documents -- a `VAR=x cmd1 | cmd2` scoping mistake let ~12 vfy-* rows land here
+    # once already. If this check ever regresses to that mistake, this is what catches it.
+    c40_real_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-delegation-log.jsonl"
+    c40_real_before=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
+    [ -n "$c40_real_before" ] || c40_real_before=0
+
+    c40_cleanup(){
+      rm -rf "$c40_dir" 2>/dev/null
+      rm -f "${TMPDIR:-/tmp}/vstack-mandate-$c40_sid" "${TMPDIR:-/tmp}/vstack-mandate-ckpt-$c40_sid" 2>/dev/null
+      unset VSTACK_DELEGATION_LOG
+    }
+    trap c40_cleanup EXIT
+
+    # Exported for the rest of this block, not prefixed onto one half of a pipe -- `VAR=x printf
+    # ... | bash "$hook"` scopes the assignment to printf alone and the hook never sees it, which
+    # is exactly how fixture rows reached the real log before. `export` here reaches every
+    # invocation of $sm below, piped or not.
+    export VSTACK_DELEGATION_LOG="$c40_log"
+
+    # An unmet mandate every time it is asked: prose written, unslop never run. What matters
+    # here is the latch, not which mandate trips it, so the simplest one that trips reliably.
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}' \
+      > "$c40_transcript"
+
+    c40_hit(){
+      printf '{"session_id":"%s","transcript_path":"%s","stop_hook_active":false}' \
+        "$c40_sid" "$c40_transcript" | "./$sm" 2>/dev/null
+    }
+
+    c40_out1=$(c40_hit); c40_rc1=$?
+    c40_out2=$(c40_hit); c40_rc2=$?
+    c40_out3=$(c40_hit); c40_rc3=$?
+
+    # Direction 1: the two unlatched Stops both blocked and both logged. A check that only ever
+    # looked at the latched row would stay green if the logger started firing unconditionally --
+    # this is what tells "logs on every Stop" apart from "logs only once latched".
+    printf '%s' "$c40_out1" | grep -q '"decision":"block"' \
+      || c40_errs="$c40_errs\nStop 1 (cnt=0, unmet mandate) did not block"
+    printf '%s' "$c40_out2" | grep -q '"decision":"block"' \
+      || c40_errs="$c40_errs\nStop 2 (cnt=1, unmet mandate) did not block"
+    [ "$c40_rc1" -eq 0 ] || c40_errs="$c40_errs\nStop 1 exited $c40_rc1, expected 0"
+    [ "$c40_rc2" -eq 0 ] || c40_errs="$c40_errs\nStop 2 exited $c40_rc2, expected 0"
+
+    # Direction 2 (the regression itself): the third Stop lands on the latch (cnt=2) and must
+    # still produce a row. Blocking behaviour must be unchanged at the latch: exit 0, no stdout --
+    # the latch's entire purpose is that a mandate the model cannot satisfy does not trap the
+    # session, and a passing check that let the block JSON reappear here has gated the wrong
+    # thing.
+    [ -z "$c40_out3" ] \
+      || c40_errs="$c40_errs\nStop 3 (cnt=2, latched) produced stdout, must stay silent: $c40_out3"
+    [ "$c40_rc3" -eq 0 ] || c40_errs="$c40_errs\nStop 3 (latched) exited $c40_rc3, expected 0"
+
+    c40_nrows=$(grep -c . "$c40_log" 2>/dev/null)
+    [ "${c40_nrows:-0}" -eq 3 ] \
+      || c40_errs="$c40_errs\nexpected 3 delegation-drift rows, found ${c40_nrows:-0}: $(cat "$c40_log" 2>/dev/null)"
+
+    if [ "${c40_nrows:-0}" -eq 3 ]; then
+      c40_row1=$(sed -n '1p' "$c40_log")
+      c40_row2=$(sed -n '2p' "$c40_log")
+      c40_row3=$(sed -n '3p' "$c40_log")
+
+      # Rows 1 and 2: evaluated Stops. Dense -- every count field is a real number, checkpoint
+      # index advances, latched is false.
+      jq -e --arg sid "$c40_sid" \
+        '.session_id==$sid and .checkpoint_index==1 and .latched==false
+         and (.dir_count|type)=="number" and (.ext_count|type)=="number"
+         and (.task_count|type)=="number" and (.named|type)=="boolean"' \
+        <<<"$c40_row1" >/dev/null 2>&1 \
+        || c40_errs="$c40_errs\nrow 1 is not a well-formed evaluated row: $c40_row1"
+      jq -e --arg sid "$c40_sid" \
+        '.session_id==$sid and .checkpoint_index==2 and .latched==false
+         and (.dir_count|type)=="number" and (.ext_count|type)=="number"
+         and (.task_count|type)=="number" and (.named|type)=="boolean"' \
+        <<<"$c40_row2" >/dev/null 2>&1 \
+        || c40_errs="$c40_errs\nrow 2 is not a well-formed evaluated row: $c40_row2"
+
+      # Row 3: latched. checkpoint_index still advanced (the counter moved above the latch),
+      # latched is true, and every count field this row cannot afford to compute is JSON null,
+      # not zero -- null is what makes this row tellable apart from a dense row where breadth
+      # genuinely measured zero, which is the whole reason the fix chose null over 0.
+      jq -e --arg sid "$c40_sid" \
+        '.session_id==$sid and .checkpoint_index==3 and .latched==true
+         and (.dir_count|type)=="null" and (.ext_count|type)=="null"
+         and (.task_count|type)=="null" and (.named|type)=="null"' \
+        <<<"$c40_row3" >/dev/null 2>&1 \
+        || c40_errs="$c40_errs\nrow 3 is not a well-formed latched row: $c40_row3"
+    fi
+
+    c40_real_after=$(wc -l < "$c40_real_log" 2>/dev/null | tr -d ' ')
+    [ -n "$c40_real_after" ] || c40_real_after=0
+    [ "$c40_real_before" = "$c40_real_after" ] \
+      || c40_errs="$c40_errs\nthe operator's real delegation log changed ($c40_real_before -> $c40_real_after lines) -- fixture rows leaked into it"
+
+    c40_cleanup
+    trap - EXIT
+
+    [ -z "$c40_errs" ] \
+      && ok "latched session still logs a delegation-drift row (3 Stops, both directions)" \
+      || bad "latched session still logs a delegation-drift row" "$(printf '%b' "$c40_errs")"
+  fi
+else
+  skip "latched session still logs a delegation-drift row" "jq not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

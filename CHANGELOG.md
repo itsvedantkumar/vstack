@@ -4,6 +4,83 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.40.0 — 2026-08-23
+
+**The instrument built to measure long-session delegation drift went blind in exactly the sessions
+it exists to measure.** `skill-mandate.sh`'s 2-strike latch — `[ "$cnt" -ge 2 ] && exit 0`, the
+guard that stops a mandate the model cannot satisfy from trapping a session — sat above both the
+checkpoint counter and the delegation logger. Once a session accumulated two mandate strikes every
+later Stop exited before logging, permanently. Long, multi-directory sessions are the ones that
+latch, and long, multi-directory sessions are the entire population `tests/delegation-drift.sh`
+was built to describe, so the log was not merely sparse: it was filtered against its own subject.
+Proven by a synthetic 3-Stop drive rather than inferred from an empty file — Stop 1 gives cnt=1,
+ckpt=1, one row; Stop 2 gives cnt=2, ckpt=2, two rows; Stop 3 latches and leaves both frozen.
+The checkpoint counter moved above the latch, and a latched Stop now emits
+`{latched:true, dir_count:null, ...}` before exiting; the full-evaluation row carries
+`latched:false`. Both paths share one `_delegation_log_row()`, so there is one rotation policy
+instead of two copies to drift apart. Blocking behaviour is untouched. Check 40 now drives the
+real hook through a synthetic multi-Stop session and asserts both directions, so this cannot
+regress silently again. (MEESEEKS M-4; check 40 and row 40, BIRDPERSON B-3.)
+
+Logging the full counts on a latched Stop was proposed and rejected on measurement, not taste.
+The full evaluation path costs ~116ms on a one-line synthetic, which reads as affordable; on this
+machine's real transcripts it is 1438ms mean / 1536ms p95 at 17.5MB, and 2009ms / 2114ms at
+39.1MB, because the mandate pipeline scans the transcript five-plus separate times. Sampling one
+latched Stop in ten would still stall the end of a long session by 1.4-2.1 seconds, on precisely
+the population this latch exists to protect. The reasoning and the bar for revisiting it — a
+measured p99 under 200ms against this file's own real transcripts, not another synthetic — are
+recorded at the latch.
+
+**Both drift instruments counted subagent sub-transcripts as independent sessions.** 965 of 3292
+files under `~/.claude/projects` are per-subagent leaves nested inside a parent session, and an
+unbounded `find` admitted each as a top-level session at equal weight. Live, not theoretical: 15
+of 51 replayed sessions were leaves of two parents, 13 of them from one. A session that fans out
+that fanned out to thirteen leaves counted as fourteen. For `delegation-drift.sh` the exclusion is outright — a leaf's turn
+1 is not the parent's turn 1, so it has no position in the lifetime being measured, and the parent
+transcript already records the `Task`/`Agent` call that spawned it, so counting the leaf counts
+one delegation twice. For `compaction-effect.py` the reasoning is different and is written down as
+different: a compaction inside a subagent is a real event, excluded from the primary for pooling
+independence rather than validity, and the excluded count now prints on its own line so a zero is
+stated instead of assumed. Neither instrument's current numbers moved — `contributing_sessions`
+held at 3 because the leaves were already failing the single-checkpoint filter, and all 8 compact
+boundaries were independently confirmed top-level. The defect had not yet reached a printed
+number. It would have. (GLOOTIE G-5.)
+
+`tests/compaction-effect.sh` crossed from NOT EVALUATED to a result: **no signal.** `is_error`
+across 3 qualifying auto boundaries reads 1/45 pre against 0/45 post (ratio 0.00x), and across 6
+manual boundaries 5/90 against 7/90 (ratio 1.40x), both under a 1.5x threshold. `autoCompactWindow`
+at 300k neither helps nor hurts the error rate at the sample available on this machine. The corpus
+that unblocked it was boundary count and pooled calls, not session count. `delegation-drift.sh`
+remains honestly NOT EVALUATED at 2 and 3 eligible windows against a floor of 8, and its secondary
+block now carries the contributing-session count and no-verdict qualifier on the rate lines
+themselves rather than in a header a reader can skim past. (GLOOTIE G-5.)
+
+**Added `tests/plugin-manifests.sh`**, the by-hand authenticated-machine harness for the one lane
+`tests/container-matrix.sh` structurally cannot measure, because a throwaway container never
+installs `claude`. Eight checks, both positive controls biting: a validator that stops
+discriminating aborts the run at rc=2 rather than reporting its silence as health, and neutered
+`ok`/`bad` helpers trip the `ran == 0` floor. It covers what check 19 never did — cross-referencing
+`claude plugin details`'s live component inventory against disk, every skill, command and agent
+entry matched, plus SKILL.md presence and `hooks.json` script resolution. A skill directory with broken
+frontmatter that the loader silently drops passes `claude plugin validate` and fails here. Also
+disproved a standing assumption while building it: `plugin validate` and `plugin details` are
+static and local, answering correctly under an empty unauthenticated config dir. (BETH C-3.)
+
+**Pre-registered the `principle-build-the-lever` investigation** at
+`tests/evals/build-the-lever/PREREGISTRATION.md`, with thresholds written before any run: confirm
+at k>=8/10, falsify at k<=2/10, 3-7 reported as nothing else, whole run void if the control drops
+below 7/10. Stage 0 spent 3 calls to establish that the skill description reaches the model
+verbatim at `MODEL=sonnet` — byte-identical, 171/171 — killing the worry that
+`skillListingBudgetFraction` was truncating the listing on the model the suite actually pins, and
+establishing that the six dead hypotheses were tested against text the model really saw. Two
+findings about the harness came out of the discarded probes. `ToolSearch` is absent from
+`auto-trigger.sh`'s `--disallowedTools` and this build has a deferred-tool registry: two turns
+went to tool discovery returning `No matching deferred tools found`, which is the entire budget of
+a case at the suite default of 3. That is not evidence any case has lost turns; it is evidence
+nobody has looked. And `Skill` must never be denied in any harness — deny it and the skill listing
+is not in context at all, so the harness measures a fleet that is not mounted. (ZEEP Z-3.)
+
+
 ## 1.39.0 — 2026-08-23
 
 **The headline curl-pipe installed three Claude Code plugins and edited another vendor's config

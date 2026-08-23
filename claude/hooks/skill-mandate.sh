@@ -68,19 +68,101 @@ done
 lock_acquired=1
 trap '[ "$lock_acquired" = 1 ] && rmdir "$lock_dir" 2>/dev/null' EXIT
 
-cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
-# Same latch as the verify gate. A mandate the model cannot satisfy must not trap the session.
-[ "$cnt" -ge 2 ] && exit 0
+# One shared writer for both the latched (below) and the full (bottom of file) delegation-drift
+# log rows, so the append+rotate mechanics exist in exactly one place instead of two copies free
+# to drift apart. Takes the fully-built JSON object as $1 and does nothing else -- callers decide
+# what goes in the object, this only decides where it lands and when it rotates.
+_delegation_log_row() {
+  log_file="${VSTACK_DELEGATION_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-delegation-log.jsonl}"
+  # Parameter expansion instead of `$(dirname ...)`: one fewer forked process on the path every
+  # single Stop takes. `${log_file%/*}` strips the last /-segment; if log_file itself had no "/"
+  # at all, the expansion leaves it unchanged, so the explicit fallback to "." matches what
+  # dirname would have printed for a bare filename.
+  log_dir_="${log_file%/*}"
+  [ "$log_dir_" = "$log_file" ] && log_dir_="."
+  mkdir -p "$log_dir_" 2>/dev/null
+  printf '%s\n' "$1" >> "$log_file" 2>/dev/null
+  # Rotation: capped at ~2MB. The check on every write is one `stat` call for the file's byte
+  # size -- O(1), not a line count. Only once that cap is crossed does this pay to rewrite the
+  # file, keeping the last 5000 lines (roughly 250-500KB at this schema's width) and dropping the
+  # rest -- a sawtooth bounded at ~2MB, not an unbounded file.
+  sz=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+  case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+  if [ "$sz" -gt 2097152 ]; then
+    tail -n 5000 "$log_file" > "$log_file.rot" 2>/dev/null && mv "$log_file.rot" "$log_file" 2>/dev/null
+  fi
+}
 
-# Monotonic per-session Stop counter for the delegation-drift logger below (tests/delegation-drift.sh).
+cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
+
+# Monotonic per-session Stop counter for the delegation-drift logger (tests/delegation-drift.sh).
 # Lives under the same lock as $cnt_file for the same reason: concurrent Stop invocations racing
-# an unlocked read-modify-write would produce duplicate or skipped indices. Only advances once the
-# 2-strike latch above has been checked, so it counts "Stops where the mandate was actually
-# evaluated" -- which is exactly what the logger below has data for, and no more.
+# an unlocked read-modify-write would produce duplicate or skipped indices.
+#
+# Advances on EVERY Stop that reaches this point, latched or not. It used to advance only once
+# the 2-strike latch below had been checked, on the theory that it then "counts Stops where the
+# mandate was actually evaluated" -- which sounded right and was wrong in the population that
+# matters: it meant this counter, and the log row it feeds, went silent forever the instant a
+# session tripped the mandate twice, which is exactly the long, multi-directory session the log
+# exists to measure. Confirmed against this machine's real installs: per-session cnt files existed
+# in $TMPDIR for real session UUIDs, but not one had a matching ckpt file -- every real session
+# that reached cnt>=2 stopped producing rows, and only short-lived fixtures (which never latch)
+# were logging at all. Moved above the latch so a latched session still gets an index and a row
+# (below); only the transcript-driven mandate evaluation itself stays gated on the latch, because
+# that parse is the actual cost the latch exists to skip once the session can no longer be blocked
+# by it anyway.
 ckpt_file="${TMPDIR:-/tmp}/vstack-mandate-ckpt-$sid"
 ckpt=$(cat "$ckpt_file" 2>/dev/null || echo 0)
 ckpt=$((ckpt + 1))
 printf '%s' "$ckpt" > "$ckpt_file" 2>/dev/null
+
+# Same latch as the verify gate. A mandate the model cannot satisfy must not trap the session:
+# once cnt reaches 2, skip the transcript-driven mandate evaluation entirely and never block
+# again. The delegation-drift log still gets a row for this Stop -- it just cannot carry
+# dir_count/ext_count/task_count/named, because those come from the same transcript parse the
+# mandates below do, and paying for that parse on a Stop that can no longer block anything would
+# undo the entire reason the latch exists. `latched:true` with null counts is what lets
+# tests/delegation-drift.sh tell this row apart from an evaluated one -- a row that silently meant
+# something different from its neighbours would be worse than the blind spot it replaces.
+if [ "$cnt" -ge 2 ]; then
+  if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
+    (
+      ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+      row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --arg ts "$ts" \
+        '{session_id:$sid, checkpoint_index:$ckpt, dir_count:null, ext_count:null, task_count:null, named:null, latched:true, ts:$ts}')
+      _delegation_log_row "$row"
+    ) 2>/dev/null
+  fi
+  exit 0
+fi
+
+# Sampling was considered here and rejected: on every k-th latched checkpoint, pay for the full
+# transcript-driven evaluation above (real dir_count/ext_count/task_count/named) instead of the
+# null-count row, so the exact population that never contributes to the drift analyser (latched,
+# long, multi-directory sessions) would start contributing real breadth data 1 Stop in k.
+#
+# Rejected on measurement, not on principle. The 116ms figure that made this look affordable was
+# measured on a single-line synthetic transcript, which is not what a latched session's transcript
+# looks like -- a latched session is definitionally a long one. Timing the SAME full-evaluation
+# path this hook already runs (the mandates below, unlatched) against two real transcripts already
+# on this machine:
+#   17.5MB / 1593 assistant turns: mean 1438ms, p50 1435ms, p95 1536ms, max 1536ms  (n=10)
+#   39.1MB / larger session      : mean 2009ms, p50 2002ms, p95 2114ms, max 2114ms  (n=10)
+# roughly 12-17x the synthetic estimate, because the mandates below don't read the transcript
+# once -- $paths, $skills, $bash_cmds, task_count, and turn_json are each their own jq/awk pass
+# over the whole file. At k=10 the amortized mean (~144-200ms) would still look tolerable next to
+# the ~16ms this fix already accepted for the null-count row, but a Stop hook runs synchronously
+# in the one moment a long session is trying to end, and the number that matters there is the
+# tail, not the mean: 1 latched Stop in 10 would synchronously stall that exact moment by 1.4-2.1s,
+# on exactly the sessions this file exists not to trap. That is a user-visible regression traded
+# for data on an instrument (tests/delegation-drift.sh) whose own live run the same day measured
+# needing >=8 eligible windows per tertile against 2-3 available -- more rows at this per-row cost
+# would not have closed that gap by the next release either.
+#
+# Revisit only with new evidence, not new arithmetic: a measured (not estimated) full-evaluation
+# cost against this file's own real transcript population that lands under, say, 200ms at p99 for
+# k=10 would change this. Guessing from the single-line-synthetic number again is what produced
+# the wrong estimate the first time.
 
 # Every file this session wrote or edited, and every skill it invoked. Both come from the
 # transcript, so this measures what happened rather than what was asked for.
@@ -404,17 +486,19 @@ fi
 # blocks would show a denominator only when the gate already fired, which is the gate's own
 # effect, not the rate the gate is trying to move.
 #
-# Not logged: any Stop that exits before this point (VSTACK_NO_MANDATE=1, no jq, no readable
-# transcript, stop_hook_active, or the 2-strike latch at the top of this file). None of those
-# paths computes dir_count/ext_count/task_count, so there is nothing free to log there -- doing
-# so would mean the second transcript pass this comment above says this does not take.
+# Not logged: any Stop that exits before reaching even the latch above (VSTACK_NO_MANDATE=1, no
+# jq, no readable transcript, or stop_hook_active). A latched Stop (cnt>=2) IS logged -- see the
+# latch block near the top of this file -- but with null counts and latched:true instead of the
+# fields below, because computing dir_count/ext_count/task_count there would mean paying for the
+# transcript parse this comment's "not a second pass" claim is about, on a Stop that can no longer
+# be blocked by anything that parse would find.
 #
 # Never lets logging break the hook's JSON-stdout-or-nothing contract: the entire block is one
 # subshell with stderr discarded, nothing in it writes to this script's own stdout, and no
 # command's exit status here is checked or allowed to change the exit path below.
 #
-# No file contents, no paths: five integers and a session id, matching the same discipline the
-# mandates above already apply to $paths before it ever reaches a message.
+# No file contents, no paths: session id, five integer/boolean fields, and a timestamp -- matching
+# the same discipline the mandates above already apply to $paths before it ever reaches a message.
 #
 # Opt-out: VSTACK_NO_DELEGATION_LOG=1, same shape as VSTACK_NO_MANDATE.
 # Destination override: VSTACK_DELEGATION_LOG, for tests/delegation-drift.sh's own fixtures and
@@ -424,33 +508,16 @@ fi
 # this repo. Any fixture harness that drives this hook directly with synthetic transcripts MUST
 # set this, or its synthetic checkpoints land in the real log next to genuine sessions.
 #
-# Rotation: capped at ~2MB. The check that runs on every single Stop is one `stat` call for the
-# file's byte size -- O(1), not a line count, so the common case (well under the cap) costs one
-# syscall. Only once that cap is crossed does this pay to rewrite the file, keeping the last 5000
-# lines (roughly 250-500KB at this schema's width) and dropping the rest -- a sawtooth bounded at
-# ~2MB, not an unbounded file, and the O(n) rewrite is amortized over every write between one
-# rotation and the next rather than paid on every Stop.
+# Append + rotation both live in _delegation_log_row(), defined once near the top of this file
+# and shared with the latched row above it -- see that definition for the rotation policy.
 if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
   (
-    log_file="${VSTACK_DELEGATION_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-delegation-log.jsonl}"
-    # Parameter expansion instead of `$(dirname ...)`: one fewer forked process on the path
-    # every single Stop takes. `${log_file%/*}` strips the last /-segment; if log_file itself had
-    # no "/" at all, the expansion leaves it unchanged, so the explicit fallback to "." matches
-    # what dirname would have printed for a bare filename.
-    log_dir_="${log_file%/*}"
-    [ "$log_dir_" = "$log_file" ] && log_dir_="."
-    mkdir -p "$log_dir_" 2>/dev/null
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
-    "$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --argjson dc "$dir_count" \
+    row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --argjson dc "$dir_count" \
       --argjson ec "$ext_count" --argjson tc "$task_count" --argjson named "$named" \
       --arg ts "$ts" \
-      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, named:$named, ts:$ts}' \
-      >> "$log_file" 2>/dev/null
-    sz=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
-    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
-    if [ "$sz" -gt 2097152 ]; then
-      tail -n 5000 "$log_file" > "$log_file.rot" 2>/dev/null && mv "$log_file.rot" "$log_file" 2>/dev/null
-    fi
+      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, named:$named, latched:false, ts:$ts}')
+    _delegation_log_row "$row"
   ) 2>/dev/null
 fi
 

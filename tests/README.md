@@ -332,3 +332,21 @@ Edit `tests/auto-trigger.sh`:
 Write prompts the way a person would actually phrase the ask. Do not name
 the skill directly. The point is to prove routing works from natural
 language, not from an exact keyword match.
+
+## plugin-manifests.sh
+
+`plugin-manifests.sh` needs an authenticated CLI but spends no tokens and makes no model call. It
+proves the CLI accepts `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`,
+with a positive control in both directions, and that every skill, command, agent and `hooks.json`
+script reference resolves to a file on disk. This is the check `container-matrix.sh` can never
+run, because a throwaway container never installs `claude` — that lane reports
+`UNMEASURABLE WITHOUT CREDENTIALS` and stays that way on purpose rather than being folded into a
+pass.
+
+It covers one thing `verify.sh` check 19 does not: `claude plugin validate` reads only the two
+manifest files, so a skill directory whose frontmatter the loader silently drops passes it. This
+harness cross-references `claude plugin details`'s live component inventory against the tree and
+fails on that.
+
+Known gap: `hooks.json` names three of the six scripts under `claude/hooks/` directly. The other
+three are invoked from inside those, so renaming one of them is not caught here.

@@ -318,6 +318,31 @@ def main():
         sessions.append(sess)
         ran += 1
 
+    # Subagent-leaf exclusion, decided 2026-08-23 (see delegation-drift.py for the sibling
+    # decision and why the two metrics resolve the same corpus question differently):
+    #
+    # A compact_boundary inside a subagent's own leaf transcript (~/.claude/projects/*/*/
+    # subagents/agent-*.jsonl) is a REAL compaction event with real pre/post tool-calls -- unlike
+    # delegation-drift's subagent leaves, this is not obviously invalid data, so it is not
+    # dropped from the corpus outright. The problem is independence, not validity: this script's
+    # entire pooling model (signal_verdict, MIN_BOUNDARIES_FOR_SIGNAL, MIN_POOLED_CALLS_FOR_SIGNAL)
+    # treats every pooled boundary as one independent draw. A parent session and its own subagent
+    # leaf are not independent draws -- the parent's transcript already contains the Task/Agent
+    # call that spawned the leaf, and a busy subagent that itself compacts mid-task shares
+    # whatever made the parent's task big or messy in the first place. Pooling both sides beside
+    # each other, and beside OTHER parents' single boundaries, lets one busy parent silently
+    # outweigh every other session in the pool.
+    #
+    # So: excluded from every pooled analysis below (per-boundary detail, auto/manual pooled
+    # rates, abandonment) -- not because the data is bad, but because this script cannot certify
+    # the independence its own statistics assume. The excluded count is printed unconditionally,
+    # every run, including when it is zero -- a silent zero on this line is exactly the kind of
+    # gap this repo has shipped before (see tests/delegation-drift.py's identical printed count
+    # for its own, differently-reasoned, subagent-path exclusion).
+    subagent_leaf_sessions = [s for s in sessions if "/subagents/" in s["path"]]
+    subagent_leaf_count = len(subagent_leaf_sessions)
+    sessions = [s for s in sessions if "/subagents/" not in s["path"]]
+
     print("=== compaction-effect: bucketing ===")
     print(f"total local transcripts scanned for candidacy: {total_sessions}")
     print(f"transcripts containing >=1 compact_boundary:    {declared}")
@@ -346,12 +371,23 @@ def main():
     print(
         f"total compact_boundary records: {total_boundaries}  (auto={auto_boundaries_n}, manual={manual_boundaries_n})"
     )
+    print(
+        f"sessions excluded from pooling as subagent leaves (non-independent boundaries): "
+        f"{subagent_leaf_count} of {ran}"
+    )
 
-    if ran == 0:
+    if not sessions:
         print()
-        print(
-            "INCONCLUSIVE: zero sessions with a compact_boundary were found on this machine."
-        )
+        if ran == 0:
+            print(
+                "INCONCLUSIVE: zero sessions with a compact_boundary were found on this machine."
+            )
+        else:
+            print(
+                f"INCONCLUSIVE: {ran} session(s) had a compact_boundary but all {subagent_leaf_count} "
+                "were excluded as subagent leaves (see the exclusion note above) -- nothing "
+                "independent left to pool."
+            )
         print(
             "No before/after rate can be computed. This is not a passing result and must not"
         )

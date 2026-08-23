@@ -357,6 +357,7 @@ def pool_tertiles(all_checkpoints):
     first_n = last_n = first_hits = last_hits = 0
     first_named_n = last_named_n = first_named_hits = last_named_hits = 0
     contributing = set()
+    contributing_named = set()
     for sid, pos, row in all_checkpoints:
         if pos is None:
             continue
@@ -373,6 +374,7 @@ def pool_tertiles(all_checkpoints):
                 last_n += 1
                 last_hits += 1 if delegated(row) else 0
         if delegated(row):
+            contributing_named.add(sid)
             if is_first:
                 first_named_n += 1
                 first_named_hits += 1 if row.get("named") else 0
@@ -389,6 +391,7 @@ def pool_tertiles(all_checkpoints):
         "first_named_hits": first_named_hits,
         "last_named_n": last_named_n,
         "last_named_hits": last_named_hits,
+        "contributing_sessions_secondary": len(contributing_named),
     }
 
 
@@ -545,15 +548,32 @@ def main():
     print(
         "=== secondary: call-sign attribution rate among task_count>=1 checkpoints (no verdict) ==="
     )
+    sec_contrib = pooled["contributing_sessions_secondary"]
+    sec_underpowered = (
+        pooled["first_named_n"] < MIN_ELIGIBLE_PER_TERTILE
+        or pooled["last_named_n"] < MIN_ELIGIBLE_PER_TERTILE
+        or sec_contrib < MIN_CONTRIBUTING_SESSIONS
+    )
+    # Same floors as the primary metric, applied here purely as a per-line power indicator --
+    # this metric is never verdict-gated by design (see header), but an unqualified rate reads
+    # as a finding regardless of prose above it, so the caveat travels with the number itself.
+    sec_note = (
+        f"UNDERPOWERED: {sec_contrib} contributing session(s) (need >= {MIN_CONTRIBUTING_SESSIONS}), "
+        f"windows first={pooled['first_named_n']} last={pooled['last_named_n']} (need >= {MIN_ELIGIBLE_PER_TERTILE} each) -- no verdict"
+        if sec_underpowered
+        else f"{sec_contrib} contributing session(s) -- no verdict"
+    )
     print(
         "  "
         + rate_report(
             "first-third", pooled["first_named_hits"], pooled["first_named_n"]
         )
+        + f"  [{sec_note}]"
     )
     print(
         "  "
         + rate_report("last-third ", pooled["last_named_hits"], pooled["last_named_n"])
+        + f"  [{sec_note}]"
     )
 
     print()

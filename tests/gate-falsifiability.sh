@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40"
 
 BK=$(mktemp -d)
 NOJQ=$(mktemp -d)
@@ -156,6 +156,7 @@ files_for(){ case "$1" in
   38)  printf 'tests/README.md' ;;
   34)  printf 'overlay.sh' ;;
   39)  printf 'CHANGELOG.md' ;;
+  40)  printf 'claude/hooks/skill-mandate.sh' ;;
 esac }
 
 # The label the gate must print. Matched against the FAIL lines only.
@@ -204,6 +205,7 @@ label_for(){ case "$1" in
   37)  printf 'optimiser decides correctly' ;;
   38)  printf 'every repository path named in prose exists' ;;
   39)  printf 'CHANGELOG.md structure' ;;
+  40)  printf 'latched session still logs a delegation-drift row' ;;
 esac }
 
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
@@ -396,6 +398,12 @@ exit 0
       # first "## " line is touched -- no /g -- so this proves the duplicate-heading assertion
       # in isolation rather than also tripping the ordering one.
       perl -0pi -e 's/(^## \S.*\n)/$1$1/m' CHANGELOG.md ;;
+  40) # MEESEEKS's own reproduction of the regression this check exists to catch: reinstate the
+      # latch's old shape, which returned before the delegation-drift logger ever got to write a
+      # row for it. cnt>=2 still exits 0 and stays silent -- blocking is untouched -- only the
+      # row is lost, which is what isolates this from check 27's blocking assertions.
+      sed -i.bak 's/^if \[ "\$cnt" -ge 2 \]; then$/[ "$cnt" -ge 2 ] \&\& exit 0; if false; then/' \
+        claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.bak ;;
 esac }
 
 echo "falsifying $(printf '%s' "$CHECKS" | wc -w | tr -d ' ') checks"

@@ -52,13 +52,16 @@
 #
 # Zero model calls. Two sources, one schema (session_id, checkpoint_index, dir_count, ext_count,
 # task_count, named): the forward log claude/hooks/skill-mandate.sh writes on every evaluated
-# Stop, and a replay pass over ~/.claude/projects/*/*.jsonl that recomputes the same four fields
-# from raw tool_use blocks, restricted to transcripts postdating a2d7f46 (the commit that fixed
-# task_count to recognize "Agent" alongside "Task" -- anything earlier replays a hook that was
-# structurally blind to its own dispatches, a different treatment condition, not the one this
-# measures). Expect NOT EVALUATED on day one: the forward log starts empty and the replay window
-# is hours old. That is the correct outcome, not a failure -- see tests/README.md's
-# compaction-effect.sh note for the precedent.
+# Stop, and a replay pass over ~/.claude/projects/*/*.jsonl (excluding */subagents/*.jsonl leaf
+# transcripts -- decided 2026-08-23, full reasoning at the find(1) call site below: a subagent
+# leaf has no position in its PARENT session's lifetime, and the parent's own transcript already
+# records the Task/Agent call that spawned it, so folding the leaf in would double-count one
+# delegation) that recomputes the same four fields from raw tool_use blocks, restricted to
+# transcripts postdating a2d7f46 (the commit that fixed task_count to recognize "Agent" alongside
+# "Task" -- anything earlier replays a hook that was structurally blind to its own dispatches, a
+# different treatment condition, not the one this measures). Expect NOT EVALUATED on day one: the
+# forward log starts empty and the replay window is hours old. That is the correct outcome, not a
+# failure -- see tests/README.md's compaction-effect.sh note for the precedent.
 #
 # Usage: tests/delegation-drift.sh
 #   Override VSTACK_DELEGATION_LOG to point at a different forward log (claude/hooks/skill-mandate.sh
@@ -339,7 +342,24 @@ fi
 LIVE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/delegation-drift-live.XXXXXX")
 trap 'sweep_ddstate_; rm -rf "$WORK" "$LIVE_TMP"' EXIT
 LIVE_CANDIDATES="$LIVE_TMP/candidates.txt"
-find "$PROJECTS_DIR" -type f -name '*.jsonl' > "$LIVE_CANDIDATES" 2>/dev/null
+# Excluding */subagents/*.jsonl outright, decided 2026-08-23 (see tests/compaction-effect.py for
+# the sibling decision, which pools subagent-leaf boundaries in but excludes them from primary --
+# a DIFFERENT resolution, because the two metrics are asking different questions about the same
+# nested-transcript shape).
+#
+# This metric's unit of analysis is one orchestrating session's own lifetime -- first-third vs
+# last-third delegation rate across that session's own checkpoints. A subagent's leaf transcript
+# (~/.claude/projects/*/*/subagents/agent-*.jsonl) has no position within the PARENT's lifetime:
+# its own turn 1 is not the parent's turn 1, so pooling it as an independent "session" measures
+# the wrong clock. Folding its checkpoints into the parent's instead (the tempting alternative)
+# is also wrong, for a second and separate reason: the parent's own transcript already records
+# the Task/Agent tool_use that spawned the leaf, so that act of delegation is already counted at
+# the moment it happened. Counting the leaf's own checkpoints too would count one delegation
+# twice -- once as an act in the parent, once again as a whole session of its own. Measured live
+# on this machine: 15 of 51 replayed sessions were subagent leaves before this exclusion, 13 of
+# them from a single parent session -- one busy orchestrator was outweighing every other session
+# in contributing_sessions 13-to-1.
+find "$PROJECTS_DIR" -type f -name '*.jsonl' -not -path '*/subagents/*' > "$LIVE_CANDIDATES" 2>/dev/null
 
 python3 "$PY" "$FORWARD_LOG_PATH" "$LIVE_CANDIDATES"
 exit $?

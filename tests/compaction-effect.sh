@@ -73,6 +73,15 @@ TOTAL_SESSIONS=$(wc -l < "$ALL_FILE" | tr -d ' ')
 
 # Cheap pre-filter in the shell: grep -l is far faster than asking python to open and stream
 # every transcript in the tree just to find the ~0.3% that contain a compact_boundary at all.
+#
+# Deliberately NOT filtering out */subagents/*.jsonl here, unlike delegation-drift.sh's live-run
+# find. A compact_boundary inside a subagent's own leaf transcript is a real compaction event
+# with real pre/post tool-calls, not invalid data -- excluding it at candidate-collection time
+# would hide it from the "sessions excluded from pooling" count tests/compaction-effect.py prints
+# unconditionally. The independence problem (a parent session and its own subagent leaf are not
+# two independent boundaries) is handled downstream in tests/compaction-effect.py, right where
+# the pooling itself happens, with the full reasoning in a comment there -- not here, where only
+# the candidate list is being built.
 : > "$CANDIDATES_FILE"
 if [ "$TOTAL_SESSIONS" -gt 0 ]; then
   while IFS= read -r f <&3; do
