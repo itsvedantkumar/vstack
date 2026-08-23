@@ -243,6 +243,26 @@ new state -- including a rate number from before the change, compared against on
 Skipping the control doesn't make the harness wrong; it makes the next finding unfalsifiable,
 because a regression in the harness and a regression in dispatch produce the same printed output.
 
+## team-start.sh
+
+`tests/team-start.sh` measures, rather than asserts, the two properties `CLAUDE.md`'s NAME THE
+AGENT policy and the delegation mandate only state in prose: does a session that plainly warrants
+delegation issue an `Agent` tool_use, and does the assistant's own text name a roster call sign
+when it does. Three positive fixtures that meet `skill-mandate.sh`'s own breadth threshold, one
+negative — a one-line typo, `team.md`'s explicit "does not need the ceremony" case. n=5 per
+fixture, raw k/5, no retry-to-first-hit, because a loop that stops at first success measures
+whether it ever happened rather than how often.
+
+**It refuses to spend a call when the installed `~/.claude/hooks` differ from this checkout**
+(override with `VSTACK_ALLOW_HOOK_DRIFT=1`). Its own first run spent 9 samples against stale
+hooks before that was caught, and they were discarded rather than folded in. Any harness that
+probes the live CLI needs this preflight: a measurement of code you did not ship is a number
+about a different program.
+
+```bash
+tests/team-start.sh
+```
+
 ## compaction-effect.sh
 
 Zero-model-call local parsing: does auto-compaction at the configured `autoCompactWindow`
