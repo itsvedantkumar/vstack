@@ -784,6 +784,71 @@ if [ -f "$B" ]; then
     && ok "bridge env matches settings" || bad "bridge env" "settings=$want not in bridge-state.json"
 fi
 [ "${1:-}" = "--mcp" ] && { echo "── mcp ──"; claude mcp list 2>/dev/null | grep -E 'Connected|Failed'; }
+echo "── CI ──"
+# GitHub Actions CI health is unverifiable locally — what runs green here may fail in the sandbox.
+# This check reaches GitHub to read the conclusion of the last run on main. If CI is failing, any
+# release built from that commit is unreliable, and any install from that release inherits the
+# unseen breakage. `gh run list` reports both the conclusion (success/failure/cancelled/timed_out)
+# and the status (completed/in_progress/requested/queued/stale); this check handles both.
+#
+# Skip honestly: each missing dependency (gh, jq, auth, network, GitHub remote) names itself.
+# A skip is reported as a note, not a pass: the output line appears with the dot notation used
+# elsewhere for informational lines and does not contribute to the final verdict.
+_ci_skip=""
+if ! command -v gh >/dev/null 2>&1; then
+  _ci_skip="gh not on PATH"
+elif ! command -v jq >/dev/null 2>&1; then
+  _ci_skip="jq not on PATH"
+elif ! gh auth status >/dev/null 2>&1; then
+  _ci_skip="not authenticated with GitHub"
+else
+  _rr=$(resolve_vstack_repo 2>/dev/null) || _rr=""
+  if [ -z "$_rr" ]; then
+    _ci_skip="vstack repo not found"
+  fi
+
+  if [ -z "$_ci_skip" ]; then
+    if ! _remote=$(git -C "$_rr" remote get-url origin 2>/dev/null) || [ -z "$_remote" ]; then
+      _ci_skip="no GitHub remote"
+    fi
+  fi
+
+  if [ -z "$_ci_skip" ]; then
+    # Timeout chosen at 5s: slow enough for most networks, fast enough that a dead network
+    # (blackholed DNS, wrong gateway) does not stall doctor for the underlying transport's 75s+
+    # connect timeout. This is the same rationale as the release-reachability check's timeout.
+    _ci_out=$(run_with_timeout 5 gh run list --branch main --limit 1 --json conclusion,status,displayTitle,databaseId 2>&1)
+    _rc=$?
+    if [ "$_rc" -eq 124 ] || [ "$_rc" -eq 143 ]; then
+      _ci_skip="gh timed out after 5s"
+    elif [ "$_rc" -ne 0 ]; then
+      _ci_skip="gh query failed"
+    elif [ -z "$_ci_out" ]; then
+      _ci_skip="no runs found for main"
+    else
+      _conclusion=$(printf '%s' "$_ci_out" | jq -r '.[0].conclusion // "null"' 2>/dev/null)
+      _status=$(printf '%s' "$_ci_out" | jq -r '.[0].status // "null"' 2>/dev/null)
+      _title=$(printf '%s' "$_ci_out" | jq -r '.[0].displayTitle // "?"' 2>/dev/null)
+      _id=$(printf '%s' "$_ci_out" | jq -r '.[0].databaseId // "?"' 2>/dev/null)
+
+      if [ "$_status" = "null" ] || [ "$_title" = "?" ]; then
+        bad "CI" "could not parse run from gh output"
+      elif [ "$_status" != "completed" ]; then
+        note "CI" "run in progress: $_title"
+      elif [ "$_conclusion" = "success" ]; then
+        ok "CI (main: $_title)"
+      elif [ "$_conclusion" = "failure" ] || [ "$_conclusion" = "cancelled" ] || [ "$_conclusion" = "timed_out" ]; then
+        bad "CI" "$_conclusion on main: $_title (run $_id) — gh run view $_id --log-failed"
+      else
+        bad "CI" "unexpected conclusion '$_conclusion' on main: $_title"
+      fi
+    fi
+  fi
+fi
+
+if [ -n "$_ci_skip" ]; then
+  note "CI" "skipped — $_ci_skip"
+fi
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL GREEN ✔   (· lines are yours to decide on, not drift)"

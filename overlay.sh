@@ -158,8 +158,16 @@ else
 # This line is different: it lives in a file you committed, in a disposable sandbox, for a
 # repo you deliberately dispatched work to. That is the consent, and it is visible in the diff.
 #
+# --yes: `vstack trust` (5922ccf) added a TTY confirmation prompt, refusing to run unattended
+# without it. This line always runs unattended -- there is no terminal in a sandbox bootstrap --
+# so since 5922ccf it exited 1 ("no terminal to confirm on") on every cloud sandbox and never
+# wrote the trust hash, leaving the Stop-hook gate permanently unarmed. The consent this comment
+# already describes (a human committed this line, in a repo they chose to dispatch) is exactly
+# what --yes is for; the prompt guards the case where nobody reviewed it, which does not apply
+# to a line that shipped in a diff someone read.
+#
 # Add this repo's own install step (npm ci, uv sync, ...) to the end of this line.
-setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/__PIN__/bootstrap.sh | bash && \"$HOME/.config/agents/bin/vstack\" trust"
+setup = "curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/__PIN__/bootstrap.sh | bash && \"$HOME/.config/agents/bin/vstack\" trust --yes"
 run_mode = "concurrent"
 
 [scripts.run.verify]

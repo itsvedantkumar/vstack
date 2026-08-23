@@ -4,6 +4,53 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.42.0 — 2026-08-23
+
+**The cloud sandbox gate has never armed, and has shipped inert since v1.30.0.** `overlay.sh`
+generates the sandbox setup line as `bootstrap.sh | bash && vstack trust`. Commit `5922ccf` gave
+`trust` a TTY confirmation prompt; a sandbox bootstrap has no terminal, so every cloud sandbox
+since then has hit `no terminal to confirm on; re-run with --yes to accept unseen`, exited 1, and
+never written the trust hash. Without that hash `verify-gate.sh`'s Stop hook stays unarmed
+permanently, which means the mechanism commit `757f3c9` was written specifically to guarantee -- a
+failing `.claude/verify.sh` blocks the agent -- has been dead on arrival on every real sandbox for
+twelve releases. The setup line now passes `--yes`, which is what the comment above it already
+argued for: a line committed to a file, in a repo somebody deliberately dispatched work to, is the
+consent, and the prompt exists for the case where nobody read it. `tests/install-matrix.sh`'s
+cloud-gate lane was calling `trust` without `--yes` and so was testing a command the setup line
+does not run; it now mirrors the generated line exactly. Matrix 23 passed, 0 failed.
+(SCARY-TERRY T-1.)
+
+**Nothing in this repository ever read the CI conclusion, so GitHub Actions failed on `main` for
+six consecutive runs across two releases without anyone noticing.** The lane that catches the
+defect above was correct and red the entire time. The gap was never the test: `bin/doctor`,
+`.claude/verify.sh` and the release flow all inspect local same-machine state, and a falsifiable
+gate still gets ignored when nothing puts its result in front of whoever is shipping. `bin/doctor`
+now reads the `conclusion` field for the last run on `main`, never an exit code, and fails the
+overall verdict on `failure`, `cancelled` or `timed_out` while naming the run and printing the
+command to read its logs. A run still in progress carries a null conclusion and is reported as
+neither pass nor failure. Every reason the check cannot run -- no `gh`, no auth, no network, no
+remote -- prints which dependency is missing rather than a bare skip. Five-second timeout.
+(PICKLE-RICK P-5.)
+
+**Two more cleanup globs disarmed by the same refactor.** The mandate latch split in `f4f5468`
+inserted a `ckpt-` segment into the counter filenames, and every glob anchored before that point
+stopped matching. `.claude/verify.sh`'s check 27 swept `vstack-mandate-vfy-*`, which matches none
+of the `vstack-mandate-ckpt-vfy-*` files the hook now creates, and the comment directly above that
+line documents it as the fix for contamination already found once -- a guard explaining why it
+matters while matching nothing. Check 40 was missing the `.delegate`, `.delegate-ts` and
+`.delegate-scan` siblings the hook hangs off the counter. Both are now anchored on both ends, and
+`tests/test-breadth-mandate.sh` got the identical fix in `76d2366`. That makes five guards one
+refactor disarmed in a single day, counting the three falsifiability rows in v1.41.0, none of which
+went red.
+
+The leak turned out to be inert to check 27's assertions, and the reason it was inert is worth more
+than the fix: the leaked file feeds only the delegation-log row, which that check disables. But
+seeding a *pre-latched* counter before the first call makes all three probes return empty and the
+check still passes, because case `g` asserts only on the third probe and pipes the first two to
+`/dev/null`. A session that never blocked once is indistinguishable from one that hit the latch
+legitimately. Recorded rather than fixed; the fix belongs with the assertion, not the cleanup.
+(BIRDPERSON B-7 fixed the globs and found the weakness; NOOBNOOB N-1 fixed the sibling glob.)
+
 ## 1.41.0 — 2026-08-23
 
 **The statusline's dispatch counter had a reader and no writer.** `claude/statusline.sh` renders

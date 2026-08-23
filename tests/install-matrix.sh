@@ -615,7 +615,11 @@ if want cloud-gate; then
     d0=$(printf '{"session_id":"c0"}' | env HOME="$H" TMPDIR="$ROOT/cloud-tmp" CLAUDE_PROJECT_DIR="$T/repo" \
          bash "$SRC/claude/hooks/verify-gate.sh" 2>/dev/null | jq -r '.decision // "none"' 2>/dev/null)
     [ "$d0" = none ] || e="$e; an unarmed repo's gate ran without trust (decision=$d0)"
-    ( cd "$T/repo" && HOME="$H" "$H/.config/agents/bin/vstack" trust >/dev/null 2>&1 )
+    # --yes: mirrors the pinned setup line in overlay.sh exactly. `vstack trust` (5922ccf)
+    # added a TTY confirmation prompt that refuses without one, and this step -- like the real
+    # setup line -- runs with no terminal attached. Testing it without --yes was testing a
+    # command the setup line does not actually run.
+    ( cd "$T/repo" && HOME="$H" "$H/.config/agents/bin/vstack" trust --yes >/dev/null 2>&1 )
     d1=$(printf '{"session_id":"c1"}' | env HOME="$H" TMPDIR="$ROOT/cloud-tmp" CLAUDE_PROJECT_DIR="$T/repo" \
          bash "$SRC/claude/hooks/verify-gate.sh" 2>/dev/null | jq -r '.decision // "none"' 2>/dev/null)
     [ "$d1" = block ] || e="$e; after arming, a failing gate did not block (decision=$d1)"

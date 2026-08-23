@@ -61,8 +61,8 @@ cd ~/Projects/vstack && ./install.sh
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.41.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.41.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.42.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.42.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this

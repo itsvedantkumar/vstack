@@ -1497,7 +1497,15 @@ if command -v jq >/dev/null; then
     say_ "$P"; [ -z "$(hit_ m)" ] || errs="$errs\nzero Task calls falsely blocked on naming rule"
     say_ "$TA"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ n)" ] || errs="$errs\nVSTACK_NO_MANDATE=1 did not disable agent naming block"
 
-    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-vfy-* 2>/dev/null
+    # "*vfy-[a-n]*" not "vfy-*": the mandate latch split (f4f5468) inserts "ckpt-" between the
+    # "vstack-mandate-" anchor and the session id, and the delegation-family counters (h/i/j
+    # exercise the breadth mandate) append ".delegate"/".delegate-ts"/".delegate-scan"/".lock"
+    # after it -- a bare "vfy-*" anchor matches none of the ckpt files and missed every one of
+    # them (verified: 12 stale vstack-mandate-ckpt-vfy-* sat in $TMPDIR across runs of this gate
+    # before this fix). Anchored on both ends the way 76d2366 fixed the identical bug in
+    # tests/test-breadth-mandate.sh: "vfy-[a-n]" is exactly the 14 single-letter session ids this
+    # block hands to hit_ above, so this cannot reach a file this check did not create.
+    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-n]* 2>/dev/null
     [ -z "$errs" ] && ok "skill mandate decides correctly (14 cases, both directions)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
   fi
@@ -2270,7 +2278,14 @@ if command -v jq >/dev/null; then
 
     c40_cleanup(){
       rm -rf "$c40_dir" 2>/dev/null
-      rm -f "${TMPDIR:-/tmp}/vstack-mandate-$c40_sid" "${TMPDIR:-/tmp}/vstack-mandate-ckpt-$c40_sid" 2>/dev/null
+      # $c40_sid drives three checkpoint Stops, which is enough to reach the delegation-family
+      # gate (skill-mandate.sh's $cnt_file.delegate / .delegate-ts / .delegate-scan) as well as
+      # the plain counter and its ckpt-split sibling -- ".delegate-scan" is exactly the file that
+      # leaked here (vstack-mandate-chk40-<pid>-<ts>.delegate-scan) when this only swept the
+      # first two names. One anchored glob catches the counter and every suffix skill-mandate.sh
+      # hangs off it (present or not yet added); the ckpt file needs its own line, same as check
+      # 27, because "ckpt-" sits before the anchor rather than after it.
+      rm -rf "${TMPDIR:-/tmp}/vstack-mandate-$c40_sid"* "${TMPDIR:-/tmp}/vstack-mandate-ckpt-$c40_sid" 2>/dev/null
       unset VSTACK_DELEGATION_LOG
     }
     trap c40_cleanup EXIT
