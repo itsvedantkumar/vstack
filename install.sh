@@ -229,6 +229,12 @@ done
 [ "$DRY" = 0 ] && chmod 755 "$HOME"/.config/agents/bin/*
 say "installed  bin wrappers"
 
+# claude-bg.sh writes its per-run log under here and never created the directory itself (it only
+# printed "dispatched" and let the redirection into a nonexistent dir fail silently before the
+# subshell even started). First invocation on a fresh install must not lie about having dispatched.
+run mkdir -p "$HOME/.config/agents/bg"
+say "installed  bg log dir"
+
 # --- secrets scaffold ---------------------------------------------------------------------
 # Never overwrite real secrets. Only create the file (from the example) when it is absent.
 SE="$HOME/.config/agents/secrets.env"

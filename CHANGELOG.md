@@ -6,6 +6,46 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+## 1.32.0 — 2026-08-23
+
+**The three `bin/` wrappers claimed success when nothing happened.** `tests/bin-scripts.sh`
+(new) ran them for the first time ever, off local stubs, and found 17 failures across all
+three: the exact "green gate that measures nothing" class this repository exists to catch,
+shipped in its own payload.
+
+- `claude-task.sh`'s exit code never reflected the inner `claude -p` run — a hard failure
+  (crash, `--max-turns`, auth error) still exited 0, so cron/launchd could never learn a
+  scheduled run failed. It now propagates the inner exit code.
+- `claude-task.sh` silently exited 0 with no output and no log on a missing task directory, a
+  task directory with no `SKILL.md`, `--help`, and any bogus flag (previously a flag fell
+  through and was treated as a task name). All four now exit non-zero with an authored
+  message on stderr.
+- `claude-task.sh` discarded the caller's `PATH` and substituted a hardcoded list, so a
+  `claude` install anywhere else on the caller's own `PATH` was invisible to it. The known
+  locations are now prepended to the inherited `PATH` instead of replacing it; if `claude` is
+  still unresolvable, the script fails loudly rather than proceeding.
+- `claude-task.sh`'s no-arg case emitted raw bash parameter-expansion text
+  (`line 24: 1: task name required`) instead of an authored message. Fixed, and the SC2012
+  `ls -dt | head` in the nvm-detection fallback is now a glob ranked by `stat` mtime.
+- `claude-bg.sh` did no `PATH` hardening at all: under a cron-shaped minimal `PATH` it printed
+  `dispatched → …/log (pid N)` and exited 0 while the backgrounded job died with
+  `command not found`, surfaced nowhere. It now hardens `PATH` the same way and refuses to
+  dispatch (non-zero, authored message) when `claude` cannot be resolved.
+- `~/.config/agents/bg/` was never created by `install.sh`, so the first invocation on a fresh
+  install failed the log redirection before the subshell even started — after already printing
+  `dispatched`. Fixed in both places: `install.sh` now creates the directory, and
+  `claude-bg.sh` creates it and verifies the log is writable before printing any success line.
+- `claude-bg.sh` forwarded `--help` and bogus flags to the model as literal prompt text,
+  spending a real headless call on a typo. Both scripts now recognise `--help`/`-h` and any
+  `-*` argument before dispatch and refuse with an authored message instead.
+- `deploy-auto.sh`'s `cd` failures leaked the builtin's own stderr
+  (`line 7: cd: -x: invalid option`) ahead of its authored "cannot enter" message. `cd --` plus
+  a suppressed builtin stderr fixes both the flag-shaped-argument and nonexistent-path cases.
+- All three now warn (not silently drop) extra positional arguments, and implement `--help`.
+
+`tests/bin-scripts.sh` is green (37/0) and stable across repeated runs; nothing in this release
+touches what ships to `claude plugin install` beyond these three wrapper scripts.
+
 ## 1.31.0 — 2026-08-23
 
 **`git add -A` in a tree you do not own now asks first.** On 2026-08-23 two sessions were writing

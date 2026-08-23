@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
 # Autonomous deploy: verify -> deploy -> health-check -> notify. Detects Vercel / Cloudflare.
 set -uo pipefail
+
+case "${1-}" in
+  --help|-h)
+    cat >&2 <<'EOF'
+usage: deploy-auto.sh [dir]
+
+Autonomous deploy: verify -> deploy -> health-check -> notify (Vercel or Cloudflare,
+auto-detected). dir defaults to $PWD.
+EOF
+    exit 2
+    ;;
+esac
+if [ $# -gt 1 ]; then
+  echo "deploy-auto: ignoring extra argument(s): ${*:2}" >&2
+fi
+
 # `cd || exit`, because without it a bad path left this running in the caller's directory and
 # every step below — verify, detect, deploy — operated on whatever project the shell happened to
 # be sitting in. A stale argument could deploy something nobody named.
-d="${1:-$PWD}"; cd "$d" || { echo "deploy-auto: cannot enter $d" >&2; exit 1; }
+# `cd --` so a flag-shaped argument (e.g. -x) is treated as a literal directory name rather than
+# a `cd` option, and `2>/dev/null` so the builtin's own decoration ("cd: -x: invalid option")
+# never leaks ahead of the message this script authored.
+d="${1:-$PWD}"; cd -- "$d" 2>/dev/null || { echo "deploy-auto: cannot enter $d" >&2; exit 1; }
 notify(){ osascript -e "display notification \"$1\" with title \"Deploy\" sound name \"$2\"" >/dev/null 2>&1 || true; }
 if [ -x .claude/verify.sh ]; then echo "▶ verify"; bash .claude/verify.sh || { echo "✖ verify failed — aborting"; notify "verify failed — aborted" Basso; exit 1; }; fi
 url=""
