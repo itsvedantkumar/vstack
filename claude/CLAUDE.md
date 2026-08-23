@@ -12,3 +12,10 @@ GitHub via `gh` CLI, deploys via `vercel`/`wrangler` CLI — prefer CLIs over MC
 Skills auto-fire on their situation — never wait for a slash command; their listing descriptions are the triggers. A plan or decision you want torn apart → grill-me, before you build it. A capability you are about to write from scratch → find-skills first. For any feature/change, proactively chain: brainstorming → writing-plans → test-driven-development → executing-plans → principle-prove-it-works (enforced by the verify.sh Stop-hook gate); auto-apply the rest without being asked.
 
 Token + delegation discipline arrives via the SessionStart hook and a two-line per-prompt digest — not restated here.
+
+DOGFOOD: this configuration is developed with itself. Any error you hit while working in the
+vstack repo is an error a stranger will hit, so fix it in vstack, commit it, and push it rather
+than working around it locally. A workaround in your session is a bug report you decided not to
+file. This is not a request to fix unrelated things you notice; it is that a defect which
+obstructed you has already proven it obstructs someone, and that evidence expires the moment you
+route around it.

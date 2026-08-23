@@ -273,6 +273,106 @@ print(fetch_stats()["total"])
 EOF
 }
 
+# --- Setup functions added for the 14 previously-uncovered skills below. ---
+
+setup_plan() {
+  local dir="$1"
+  cat > "$dir/PLAN.md" <<'EOF'
+# Implementation Plan: Add search to notes app
+
+## Phase 1 - Search index
+- Add an in-memory index over note text
+- Unit test the index lookup
+
+## Phase 2 - Search UI
+- Add a search box to index.html
+- Wire it to the index from Phase 1
+
+## Phase 3 - Persistence
+- Persist notes and index to localStorage
+EOF
+}
+
+setup_authdiff() {
+  local dir="$1"
+  cat > "$dir/auth_middleware.py" <<'EOF'
+# auth_middleware.py - verifies a bearer token before allowing a request through
+import hmac
+
+SECRET = "dev-secret"
+
+def verify_token(token: str) -> bool:
+    expected = hmac.new(SECRET.encode(), b"user", "sha256").hexdigest()
+    return token == expected
+
+def handle_request(headers: dict):
+    token = headers.get("Authorization", "").replace("Bearer ", "")
+    if verify_token(token):
+        return {"status": 200}
+    return {"status": 401}
+EOF
+}
+
+setup_stale_verify() {
+  local dir="$1"
+  setup_webapp "$dir"
+  # A feature the verification setup below does not know about -- the drift under test.
+  cat > "$dir/search.js" <<'EOF'
+export function searchNotes(notes, query) {
+  return notes.filter((n) => n.text.includes(query));
+}
+EOF
+  mkdir -p "$dir/.claude/skills/verify-notes-app"
+  cat > "$dir/.claude/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+node --test
+echo "verify: add-note flow OK"
+EOF
+  chmod +x "$dir/.claude/verify.sh"
+  cat > "$dir/.claude/skills/verify-notes-app/SKILL.md" <<'EOF'
+---
+name: verify-notes-app
+description: Drives the notes app and proves the add-note feature works.
+---
+# Feature map
+- add-note: covered, see verify.sh
+EOF
+}
+
+setup_draft() {
+  local dir="$1"
+  cat > "$dir/draft.md" <<'EOF'
+In today's fast-paced digital landscape, it is important to note that our new
+onboarding flow leverages cutting-edge best practices to seamlessly delight
+users. Furthermore, it's worth noting that this represents a significant step
+forward in our ongoing journey towards excellence.
+EOF
+}
+
+setup_bulk() {
+  local dir="$1"
+  mkdir -p "$dir/modules"
+  for f in auth billing search reports export inventory users notifications; do
+    cat > "$dir/modules/$f.js" <<EOF
+export function $f() { return "$f"; }
+EOF
+  done
+}
+
+setup_gostruct() {
+  local dir="$1"
+  cat > "$dir/order.go" <<'EOF'
+package main
+
+type Order struct {
+	Status       string
+	TrackingCode string
+	CancelReason string
+}
+EOF
+}
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -369,6 +469,111 @@ run_case \
   "What skills exist for working with Terraform? Search for one I can install." \
   "find-skills" \
   ""
+
+# --- Cases added for the 14 skills that previously had zero coverage. ---
+
+run_case \
+  "agent-browser-screenshot" \
+  "I'm working in a Conductor workspace and need to screenshot this app's dev server on localhost:3000, but the shared Chrome window is already busy with another workspace's session." \
+  "agent-browser" \
+  "setup_webapp"
+
+# Discriminator: "no automated way to prove it works ... from scratch" states nothing exists
+# yet, which is create-verification-skill's situation, not maintain-verification-skill's
+# (something exists and has drifted) or principle-prove-it-works' (verify one already-done task).
+run_case \
+  "create-verification-skill-cold-start" \
+  "This webapp has no automated way to prove it works end-to-end -- no test script, no smoke test, nothing that actually launches it and checks a real feature. Set that up from scratch." \
+  "create-verification-skill" \
+  "setup_webapp"
+
+run_case \
+  "executing-plans-checkpoints" \
+  "PLAN.md is the implementation plan we approved last session. Execute it, and pause for my review after each phase." \
+  "executing-plans" \
+  "setup_plan"
+
+run_case \
+  "impeccable-polish" \
+  "This notes app UI already works and renders fine, but visually it looks like generic default styling. Push the typography, spacing, and motion to a genuinely production, award-winning level." \
+  "impeccable" \
+  "setup_styled"
+
+# Discriminator: the diff already exists ("already written", "nobody else has reviewed it") and
+# the prompt uses interrogate's own trigger phrase "tear this apart" -- grill-me is for a plan or
+# design the user is still forming, before anything exists to review.
+run_case \
+  "interrogate-auth-diff" \
+  "This auth middleware change is already written and nobody else has reviewed it. Tear this apart -- find every way it can be broken before we merge." \
+  "interrogate" \
+  "setup_authdiff"
+
+# Discriminator: verify.sh and a feature map already exist and have drifted from the app
+# (a feature was added that the gate/map don't know about) -- maintain-verification-skill's
+# situation, not create-verification-skill's "nothing exists yet".
+run_case \
+  "maintain-verification-skill-drift" \
+  "verify.sh here still exits 0, but I added a search feature to this app last week and I don't think the verification skill's feature map or the gate actually exercises it anymore. Bring it back in sync." \
+  "maintain-verification-skill" \
+  "setup_stale_verify"
+
+run_case \
+  "reflect-session" \
+  "Before we wrap up -- reflect on this session. I corrected your approach twice today; what should turn into a skill edit so it doesn't happen a third time?" \
+  "reflect" \
+  ""
+
+run_case \
+  "unslop-draft-pass" \
+  "The draft in draft.md is done. Do the final pass to cut the AI-sounding phrasing and make it read like a human wrote it." \
+  "unslop" \
+  "setup_draft"
+
+run_case \
+  "boundary-discipline-api" \
+  "Wire up input validation and error handling for this API's incoming request body, and make sure the business logic underneath never has to re-check any of it." \
+  "principle-boundary-discipline" \
+  "setup_webapp"
+
+run_case \
+  "build-the-lever-headers" \
+  "Every file in modules/ needs the same license header pasted at the top. I'll go through and add it to each one by hand." \
+  "principle-build-the-lever" \
+  "setup_bulk"
+
+# Discriminator: asks for a structural fix to the repo's own CI (a lint/check), for a correction
+# that has already repeated once -- principle-encode-lessons-in-structure's situation. This is
+# not "reflect on this session": nothing here asks to mine the transcript or edit a Claude skill.
+run_case \
+  "encode-lessons-lint" \
+  "This is the second time a PR has shipped without a trailing newline at end of file. Add something to CI that catches this automatically -- I don't want to keep telling people by hand." \
+  "principle-encode-lessons-in-structure" \
+  "setup_webapp"
+
+# Discriminator: declaring one specific, already-attempted fix done on the strength of "it
+# compiles" -- principle-prove-it-works' exact situation. Unlike create-verification-skill, this
+# is not a request to generate any verify.sh/skill infrastructure, just the habit of checking a
+# concrete claim before it's made.
+run_case \
+  "prove-it-works-declare-done" \
+  "I fixed the crash in fetch_stats by adding a retry, and the code compiles cleanly -- this task is done." \
+  "principle-prove-it-works" \
+  "setup_flaky"
+
+run_case \
+  "sequence-verifiable-units-migration" \
+  "We're migrating all 12 API endpoints in this service to the new auth middleware across a stack of PRs. How should we order the steps so each one lands in a known-good state before the next starts?" \
+  "principle-sequence-verifiable-units" \
+  ""
+
+# Go, not TypeScript, on purpose: a .ts file here would compete with typescript-best-practices,
+# which also covers type design and is the broader match on that extension. Go has no such
+# competing skill installed, so the prompt can only land on the general type-system principle.
+run_case \
+  "type-system-discipline-go" \
+  "Redesign this Go Order struct so an invalid combination like a cancelled order with a tracking code can't compile -- model pending, shipped, and cancelled as separate cases." \
+  "principle-type-system-discipline" \
+  "setup_gostruct"
 
 run_negative_case \
   "negative-arithmetic" \
