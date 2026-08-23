@@ -145,14 +145,37 @@ Fourteen subagents, each with its own context window and its own tool allowlist,
 Task tool. A reviewer with its own context cannot be talked out of a finding by the conversation
 that produced the code.
 
-<details>
-<summary>The roster</summary>
+Every agent carries a call sign and signs its reasoning with it, not only its final report. An
+unattributed verdict cannot be challenged, and separate contexts are worth routing to only because
+they can disagree. The lead is **RICK**. A Stop hook blocks a session that dispatched subagents and
+then reported their work without naming any of them.
 
-`product-owner` · `planner` · `ui-engineer` · `worker` · `test-writer` · `qa` · `code-reviewer` ·
-`security-auditor` · `design-reviewer` · `accessibility-auditor` · `performance-engineer` ·
-`debugger` · `release-manager` · `explorer`
+Instances are distinguished by a dimension code, so three reviewers reading the same diff at once
+are `BIRDPERSON C-137`, `BIRDPERSON J-19`, `BIRDPERSON D-99` rather than three anonymous voices.
 
-</details>
+| call sign | agent | what it is for |
+|---|---|---|
+| **RICK** | *the lead* | routes the work and holds the bar; does none of it |
+| **SUMMER** | `product-owner` | asks what this is actually for before anyone builds it |
+| **ZEEP** | `planner` | builds the system the work will run inside |
+| **MEESEEKS** | `worker` | spawned for one task, does it, ceases to exist |
+| **MORTY** | `explorer` | sent to go and look, comes back with what it saw |
+| **GLOOTIE** | `ui-engineer` | develops the app, whatever the advice on the arm says |
+| **JAGUAR** | `test-writer` | precise, silent, and the job is done when it leaves |
+| **BETH** | `qa` | a surgeon: verifies before anything gets closed up |
+| **BIRDPERSON** | `code-reviewer` | grave, blunt, and never once tactful about a defect |
+| **EVIL-MORTY** | `security-auditor` | thinks like the attacker because it is one |
+| **NOOBNOOB** | `debugger` | the one who actually cleans up after everybody |
+| **PICKLE-RICK** | `performance-engineer` | extreme optimisation under an absurd constraint |
+| **SCARY-TERRY** | `design-reviewer` | judges how it looks, and you cannot hide from it |
+| **POOPYBUTTHOLE** | `accessibility-auditor` | was always there; the room just never noticed |
+| **UNITY** | `release-manager` | gets an entire population moving in sync, or nothing ships |
+
+`/team` runs the whole roster on a goal — spec, plan, build, verify, review, fix, presentation,
+ship — and writes a handoff log to `.audit/team-log.tsv`, one row per phase with the agent, its
+verdict, the evidence, and what the lead decided. `vstack receipt` renders it. A log where every
+decision is `proceed` is called out as decoration: it cannot tell a lead who held the bar from one
+who had nothing to hold it against.
 
 ## Limits
 

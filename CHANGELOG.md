@@ -6,6 +6,12 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## Unreleased
 
+**The roster is documented on the front page.** The README listed fourteen bare agent names in a
+collapsed block and said nothing about call signs, the lead, the dimension codes, or the handoff
+log — all of which shipped in v1.27.0 and v1.28.0 with no way for a reader to discover them. It
+now carries the full table, what each agent is for, and the rule that an unattributed verdict
+cannot be challenged.
+
 ## 1.28.0 — 2026-08-23
 
 Six auditors and five fixers went through this repository in one day. What follows is what was
