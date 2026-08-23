@@ -99,7 +99,7 @@ tests, because a fixture with nothing wrong in it makes every assertion below va
 
 ## container-matrix.sh
 
-`container-matrix.sh` runs `install.sh`, `bin/doctor`, `.claude/verify.sh`, the mandate and
+`tests/container-matrix.sh` runs `install.sh`, `bin/doctor`, `.claude/verify.sh`, the mandate and
 destructive-command hooks, `vstack trust`, `vstack update` and `uninstall.sh` inside real
 `debian:stable-slim`, `alpine:latest` and `ubuntu:latest` containers. It clones from published
 GitHub with no worktree mounted and no credentials, so it tests the artifact a stranger gets
