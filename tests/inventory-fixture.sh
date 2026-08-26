@@ -66,7 +66,12 @@ UNKNOWN CONSUMER: $1 exited non-zero for $3/$4 without mentioning it -- attribut
 skip_row(){ printf '  n/a     %-24s %s\n' "$1" "$2"; }
 STALE_LINES=""
 
-PRE_STATUS=$(git status --porcelain)
+# tree_fingerprint() (tests/lib-collision-guard.sh, sourced above), not bare `git status
+# --porcelain`: porcelain cannot see an empty directory, and do_plant()'s own `mkdir -p` is
+# exactly that shape. This is the file that bit on this once already (do_unplant's directory
+# leak, fixed in abbf41a) -- the fingerprint is what turns "forgot to rmdir" into a loud failure
+# here instead of a silently poisoned baseline for the next family.
+PRE_STATUS=$(tree_fingerprint .)
 
 # --- concurrency: acquire the same lock verify.sh checks, the same way gate-falsifiability.sh
 # does. --git-common-dir, not --git-dir: the latter is per-worktree, so a lock written there is
@@ -232,6 +237,13 @@ do_unplant(){ # family
   # not call it "noticed" for those families. It was mis-labeled STALE, not mis-labeled noticed;
   # see unknown() for why that distinction gets its own state now, and rmdir above for the fix
   # that makes the leak (and therefore the whole question) stop recurring.
+  #
+  # This `rmdir` is the fix for THIS family's specific leak; PRE_STATUS/POST_STATUS at the top
+  # and bottom of this file now use tree_fingerprint() (tests/lib-collision-guard.sh), which
+  # includes the empty-directory set, as the general backstop -- if a future family or a future
+  # edit reintroduces a leaked empty directory anywhere in the tree, the final tree-unchanged
+  # check fails loudly naming it, instead of the silent six-family poisoning this comment
+  # documents happening once already.
   rmdir "$(dirname "$pp")" 2>/dev/null || true
 }
 
@@ -414,16 +426,24 @@ for fam in $FAMILIES; do
     unknown "install-matrix.sh default" "exit=$im_rc, FAIL line(s): $(printf '%s\n' "$im_out" | grep -i 'FAIL' | tr '\n' ';')" "$fam" "$name"
   fi
 
-  # 8. tests/plugin-manifests.sh -- the loader-vs-disk diffs (checks 3-4) derive BOTH sides from
-  #    this same tree per invocation, same shape as row 7. Does not check hooks/wrappers/
-  #    mcp_servers/agent_references counts at all -- only whether wired hooks.json references
-  #    resolve, which an unwired plant never touches.
+  # 8. tests/plugin-manifests.sh -- checks 3-4 diff `claude plugin details`'s loader inventory
+  #    against a filesystem glob, both pointed at THIS tree (:156 opens with `--plugin-dir
+  #    "$REPO/claude"`, :161-169 globs the same claude/). That is not the same shape as row 7:
+  #    row 7's counts are a completeness assertion undermined by reading both sides off one
+  #    glob; checks 3-4 are a CONSISTENCY assertion -- do the loader and the disk agree? -- for
+  #    which reading both sides off the same tree is the design, not a gap. A plant this harness
+  #    adds is valid to both readers (a real SKILL.md, a real agent file, ...), so it is present
+  #    on both sides identically and cannot produce a diff, structurally, the same way an
+  #    untracked file cannot appear in `git ls-files` for check 31 below: the check is doing its
+  #    job and finding no disagreement, not failing to notice growth it was never asked to count.
+  #    Does not check hooks/wrappers/mcp_servers/agent_references counts at all -- only whether
+  #    wired hooks.json references resolve, which an unwired plant never touches.
   if command -v claude >/dev/null 2>&1; then
     pm_out=$(./tests/plugin-manifests.sh 2>&1); pm_rc=$?
     if [ "$pm_rc" -ne 0 ] && printf '%s\n' "$pm_out" | grep -q "$name"; then
       noticed "plugin-manifests.sh" "$(printf '%s\n' "$pm_out" | grep "$name" | head -1)"
     elif [ "$pm_rc" -eq 0 ]; then
-      stale "plugin-manifests.sh" "exit=0 -- loader and disk inventories are both derived from this tree, or the family is not covered at all" "$fam" "$name"
+      stale "plugin-manifests.sh" "exit=0 -- checks 3-4 measure loader/disk AGREEMENT, not completeness; a plant valid to both readers matches on both sides by construction and can never produce a diff (not a coverage gap -- same category as check 31's untracked-plant blindness below)" "$fam" "$name"
     else
       unknown "plugin-manifests.sh" "exit=$pm_rc, FAIL line(s): $(printf '%s\n' "$pm_out" | grep '^FAIL' | tr '\n' ';')" "$fam" "$name"
     fi
@@ -518,11 +538,11 @@ fi
 
 echo
 echo "== tree unchanged =========================================================================="
-POST_STATUS=$(git status --porcelain)
+POST_STATUS=$(tree_fingerprint .)
 if [ "$PRE_STATUS" = "$POST_STATUS" ]; then
-  ok "git status --porcelain unchanged from before this run"
+  ok "tree unchanged from before this run (porcelain + empty directories)"
 else
-  bad "git status --porcelain changed" "$(diff <(printf '%s' "$PRE_STATUS") <(printf '%s' "$POST_STATUS"))"
+  bad "tree changed" "$(diff <(printf '%s' "$PRE_STATUS") <(printf '%s' "$POST_STATUS"))"
 fi
 
 echo

@@ -24,9 +24,23 @@
 # `git worktree list` are both anchored on the repo's one shared .git, verified identical from
 # every worktree of the same repo. cg_worktree_report below uses the shared anchor.
 #
-# Nothing here is wired into any existing harness (this is a sourceable library and a repro test,
-# not a running gate) -- integration into tests/gate-falsifiability.sh is out of this file's
-# ownership; see docs/worktree-collision-detection.md for the exact patch to hand to its owner.
+# 3. `git status --porcelain` cannot see an empty directory -- git does not track directories,
+#    only blobs, so a `mkdir -p` with nothing written under it is invisible to porcelain in both
+#    directions: it never appears as untracked before it's removed, and its removal never appears
+#    as a change either. Every harness here that plants something, restores, and proves "tree
+#    unchanged" by diffing `git status --porcelain` before and after has this hole. It already
+#    bit once for real: tests/inventory-fixture.sh's do_plant() created a directory do_unplant()
+#    forgot to remove, and six of seven consumers were recorded as blind for failures the harness
+#    itself caused by poisoning the next family's baseline (fixed in abbf41a with an `rmdir`;
+#    catalogued as entry eleven in docs/checks-that-inherit-their-answer.md). tree_fingerprint()
+#    below closes the hole at the assertion, not at each caller: porcelain plus the empty-directory
+#    set, so forgetting a directory fails loudly instead of silently poisoning the next run.
+#
+# cg_save/cg_checkpoint/cg_restore and cg_worktree_report are not wired into any existing harness
+# (integration into tests/gate-falsifiability.sh's own per-row save/restore is out of scope here;
+# see docs/worktree-collision-detection.md for the patch). tree_fingerprint() below IS wired into
+# both tests/gate-falsifiability.sh's whole-run before/after and tests/inventory-fixture.sh's, as
+# a straight replacement for their prior `git status --porcelain` comparisons.
 set -uo pipefail
 
 _cg_hash(){ # path
@@ -126,4 +140,37 @@ cg_worktree_report(){
     printf '           wait for it to finish, or `ps -p %s` to identify it before touching this tree.\n' "$pid"
   done
   [ "$found" = 1 ] && return 0 || return 1
+}
+
+# tree_fingerprint([path]): `git status --porcelain -- <path>` (default '.') PLUS the sorted set
+# of empty directories under it, one `EMPTYDIR <path>` line per directory. Use this everywhere a
+# harness proves "the tree is unchanged" by comparing a before-snapshot to an after-snapshot --
+# never bare `git status --porcelain`, for the reason in the header comment above: porcelain
+# alone cannot see a directory that was created (or removed) with nothing written under it, so a
+# `mkdir -p` a harness forgets to `rmdir` composes into an invisible "pass" instead of a "the tree
+# changed" failure.
+#
+# Portability, verified rather than assumed (both directions of L5's brief): `find -type d
+# -empty` runs correctly on this machine's BSD find (macOS 25.4, Bash 3.2) AND on BusyBox find
+# v1.37.0 under Alpine (`docker run --rm alpine sh -c 'find . -type d -empty'`, checked directly
+# for this fix) -- both accept `-type d -empty -not -path PATTERN` with the same result. No
+# fallback needed; if a future host's find lacks `-empty`, add one here rather than at every
+# caller, which is the entire point of this being one function.
+#
+# `sort` (not `sort -V`, which is banned for busybox elsewhere in this repo -- plain `sort` is
+# portable) makes the output byte-comparable across two separate `find` invocations: directory
+# traversal order is not a documented guarantee, so without sorting a fingerprint could differ
+# between an unchanged before/after pair purely on readdir order, which would be exactly the kind
+# of false failure this repo's checks-that-inherit-their-answer catalogue exists to prevent.
+#
+# The `EMPTYDIR ` prefix keeps the two halves of the fingerprint visually distinct in a diff, and
+# is what makes a forgotten directory nameable in the failure output rather than just "something
+# differs" -- the regression this function exists to make possible is a mutation that plants a
+# directory and does not clean it up turning the suite red WITH THE DIRECTORY'S NAME IN THE
+# OUTPUT, not merely red.
+tree_fingerprint(){ # [path]
+  local root="${1:-.}"
+  git status --porcelain -- "$root" 2>/dev/null
+  find "$root" -type d -empty -not -path "$root/.git/*" -not -path "$root/.git" 2>/dev/null \
+    | sort | sed 's/^/EMPTYDIR /'
 }

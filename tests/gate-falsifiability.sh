@@ -16,6 +16,8 @@
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+# shellcheck source=tests/lib-collision-guard.sh
+. "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
 CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
@@ -186,9 +188,16 @@ done
 
 # Snapshot the working tree up front and compare against that, not against HEAD: this has to
 # be runnable mid-change without reporting the operator's own edits as a failed restore.
+#
+# tree_fingerprint() (tests/lib-collision-guard.sh), not bare `git status --porcelain`: porcelain
+# alone cannot see a directory a row's mutation creates and forgets to remove -- git does not
+# track empty directories -- so a leaked directory would compose into a silent pass here instead
+# of the "tree unchanged" check below catching it. Catalogued as entry eleven in
+# docs/checks-that-inherit-their-answer.md; this is the same invariant, same hole, this file's
+# own instance of it.
 TREE_BEFORE=""
 if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  TREE_BEFORE=$(git status --porcelain -- . 2>/dev/null)
+  TREE_BEFORE=$(tree_fingerprint .)
 fi
 
 PASSED=0
@@ -839,9 +848,10 @@ fi
 echo
 # Restoration has to be exact, or a row silently rewrites the repo it is testing.
 if command -v git >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  if [ "$(git status --porcelain -- . 2>/dev/null)" != "$TREE_BEFORE" ]; then
+  TREE_AFTER=$(tree_fingerprint .)
+  if [ "$TREE_AFTER" != "$TREE_BEFORE" ]; then
     printf 'FAIL  a mutation was not restored:\n%s\n' \
-      "$(diff <(printf '%s\n' "$TREE_BEFORE") <(git status --porcelain -- .) | sed 's/^/      /')"
+      "$(diff <(printf '%s\n' "$TREE_BEFORE") <(printf '%s\n' "$TREE_AFTER") | sed 's/^/      /')"
     FAILED=$((FAILED+1))
   else
     printf 'ok    tree unchanged by the run\n'; PASSED=$((PASSED+1))
