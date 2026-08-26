@@ -55,14 +55,30 @@ skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIP=$((SKIP+1)); }
 count_dirs(){  find "$1" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
 count_files(){ find "$1" -maxdepth 1 -type f -name "$2" 2>/dev/null | wc -l | tr -d ' '; }
 
-NSK=$(count_dirs "$SRC/claude/skills")
-NAG=$(count_files "$SRC/claude/agents" '*.md')
-NCM=$(count_files "$SRC/claude/commands" '*.md')
-NHK=$(count_files "$SRC/claude/hooks" '*.sh')
-NWR=$(find "$SRC/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+# Expected counts come from claude/inventory.json's components.<family>.count, not from a second
+# glob of the tree being installed. A glob of $from compared to a glob of $cdir (the installed
+# copy of $from) moves both sides together: a payload that gains or loses a component changes
+# both the "expected" and the "actual" identically and no count assertion can ever go red. The
+# inventory contract is an independent, human-maintained statement of what should ship, and
+# tests/inventory-contract.sh + verify.sh check 48 are what keep it honest against the tree — so
+# routing the expectation through it, instead of through find twice, is not circular.
+# jq is an unconditional dependency of this harness already (the config-dir lane at "hp=" below
+# calls it with no `command -v` guard), so this adds no new fragility.
+expected_count(){ # <family> <tree-root>
+  jq -r --arg f "$1" '.components[$f].count // empty' "$2/claude/inventory.json" 2>/dev/null
+}
+expected_members(){ # <family> <tree-root>
+  jq -r --arg f "$1" '.components[$f].members[]? // empty' "$2/claude/inventory.json" 2>/dev/null | sort
+}
+
+NSK=$(expected_count skills   "$SRC")
+NAG=$(expected_count agents   "$SRC")
+NCM=$(expected_count commands "$SRC")
+NHK=$(expected_count hooks    "$SRC")
+NWR=$(expected_count wrappers "$SRC")
 
 # A full install, asserted against the tree rather than against the installer's own summary.
-assert_install(){ # <label> <config-dir> <home> [atleast]
+assert_install(){ # <label> <config-dir> <home> [atleast] [from]
   # Counts are exact by default, which is what catches an install that scatters extra files.
   # With `atleast` they become a floor: a home that already held the user's own skills and
   # agents legitimately ends up with more than this repo ships, and demanding equality there
@@ -73,25 +89,115 @@ assert_install(){ # <label> <config-dir> <home> [atleast]
   # what is on this disk. Measuring a published install against local counts made the matrix go
   # red for the entirely correct reason that a new hook had not been pushed yet -- and since
   # preflight gates the commit, that is a state no ordering of commit and push can clear. The
-  # expectation comes from the tree that was actually installed.
-  NSK=$(count_dirs "$from/claude/skills")
-  NAG=$(count_files "$from/claude/agents" '*.md')
-  NCM=$(count_files "$from/claude/commands" '*.md')
-  NHK=$(count_files "$from/claude/hooks" '*.sh')
-  NWR=$(find "$from/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
-  cmp_count(){ # <what> <got> <want>
-    if [ "$mode" = atleast ]; then
-      [ "$2" -ge "$3" ] || errs="$errs; $1 $2/$3"
+  # expectation still has to come from the tree that was actually installed -- but "the tree"
+  # means that tree's OWN inventory.json contract, not a second glob of it. A published tag or
+  # clone carries its own claude/inventory.json (it is a tracked file), which is that tree's own
+  # independent statement of what it ships, verified against that same tree by its own
+  # inventory-contract.sh run at the commit it was built from -- so reading it here is still
+  # routing through a contract, not through find("$from") twice.
+  # $from may be a published tree that predates claude/inventory.json entirely -- true today of
+  # origin/main and every released tag, since this file has not shipped yet. Measured: `git show
+  # origin/main:claude/inventory.json` and `git show v1.45.1:claude/inventory.json` both answer
+  # "exists on disk, but not in <ref>". There is no independent oracle to route the expectation
+  # through in that case, so this falls back to the pre-fix tree-vs-tree comparison for $from
+  # only, named out loud rather than silently reusing the weaker check -- and it stays the
+  # narrowest possible fallback: the LOCAL tree ($SRC, the default $from) always carries the
+  # contract, so `default`, `config-dir`, `spaces` and `existing-config` -- everything that
+  # matters for catching a local regression -- get the full named member-diff below, every run.
+  if [ -f "$from/claude/inventory.json" ]; then
+    HAVE_CONTRACT=1
+    NSK=$(expected_count skills   "$from")
+    NAG=$(expected_count agents   "$from")
+    NCM=$(expected_count commands "$from")
+    NHK=$(expected_count hooks    "$from")
+    NWR=$(expected_count wrappers "$from")
+  else
+    HAVE_CONTRACT=0
+    # stderr, not stdout: assert_install's stdout is captured whole by `e=$(assert_install ...)`
+    # at every call site, so a note printed to stdout here silently becomes part of the return
+    # value and corrupts every downstream `[ -z "$e" ]` check, exact-mode error text, and the
+    # pass/fail line's own formatting.
+    printf 'note  %s: %s/claude/inventory.json does not exist (this tree predates the contract file) -- falling back to counting %s directly, the weaker tree-vs-tree check this file used before the fix\n' "$lbl" "$from" "$from" >&2
+    NSK=$(count_dirs "$from/claude/skills")
+    NAG=$(count_files "$from/claude/agents" '*.md')
+    NCM=$(count_files "$from/claude/commands" '*.md')
+    NHK=$(count_files "$from/claude/hooks" '*.sh')
+    NWR=$(find "$from/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  # Name what differs, not just how many differ. A count-only check cannot see a family that
+  # swapped one member for another at an unchanged total, and it cannot report which file a
+  # plant added -- both real gaps, so this diffs the member SETS: expected from the contract's
+  # own components.<family>.members (that family's independent, human-maintained list), actual
+  # from a glob of what actually landed on disk. `find -print0 | sort -z` and a `while read -d ''`
+  # loop, not `xargs -n1 basename`: xargs's default delimiter is any whitespace, not newline, so
+  # a $HOME containing a space (the `spaces` case exists specifically to catch this class of bug)
+  # split every installed path at that space and fed basename the fragments instead of the paths.
+  # A `case` statement's patterns end in a bare `)`, which collides with the parens bash uses to
+  # delimit `<( ... )` process substitution when the case sits directly inside one -- factored
+  # into its own function and called by name instead. (Confirmed empirically: the inline form
+  # fails `bash -n` with "syntax error near unexpected token `find'" pointing at the case's own
+  # first arm, not at anything this rewrite touches.)
+  _members_glob(){ # <family> <cdir> <home>
+    case "$1" in
+      skills)   find "$2/skills" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null ;;
+      agents)   find "$2/agents" -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null ;;
+      commands) find "$2/commands" -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null ;;
+      hooks)    find "$2/hooks" -maxdepth 1 -type f -name '*.sh' -print0 2>/dev/null ;;
+      wrappers) find "$3/.config/agents/bin" -maxdepth 1 -type f -print0 2>/dev/null ;;
+    esac
+  }
+  actual_members(){ # <family> <cdir> <home>
+    local out="" f b
+    while IFS= read -r -d '' f; do
+      b=$(basename "$f")
+      case "$1" in agents|commands) b=${b%.md} ;; esac
+      out="$out$b
+"
+    done < <(_members_glob "$1" "$2" "$3")
+    printf '%s' "$out" | grep -v '^$' | sort
+  }
+  cmp_members(){ # <family> <legacy-got> <legacy-want>
+    fam="$1"
+    if [ "$HAVE_CONTRACT" = 1 ]; then
+      exp="$(expected_members "$fam" "$from")"; got="$(actual_members "$fam" "$cdir" "$h")"
+      extra="$(comm -13 <(printf '%s\n' "$exp") <(printf '%s\n' "$got") 2>/dev/null | grep -v '^$' | tr '\n' ',' | sed 's/,$//')"
+      missing="$(comm -23 <(printf '%s\n' "$exp") <(printf '%s\n' "$got") 2>/dev/null | grep -v '^$' | tr '\n' ',' | sed 's/,$//')"
+      if [ "$mode" = atleast ]; then
+        # A home that already held the user's own files legitimately has extras (theirs); only a
+        # contract member that never arrived is a defect.
+        [ -z "$missing" ] || errs="$errs; $fam missing:[$missing]"
+      else
+        { [ -z "$extra" ] && [ -z "$missing" ]; } || errs="$errs; $fam extra:[$extra] missing:[$missing]"
+      fi
     else
-      [ "$2" = "$3" ] || errs="$errs; $1 $2/$3"
+      # No contract in $from (see the note above): the same count-only comparison this file used
+      # everywhere before the fix, scoped to this one $from.
+      if [ "$mode" = atleast ]; then
+        [ "$2" -ge "$3" ] || errs="$errs; $fam $2/$3"
+      else
+        [ "$2" = "$3" ] || errs="$errs; $fam $2/$3"
+      fi
     fi
   }
-  cmp_count skills   "$(count_dirs "$cdir/skills")"           "$NSK"
-  cmp_count agents   "$(count_files "$cdir/agents" '*.md')"   "$NAG"
-  cmp_count commands "$(count_files "$cdir/commands" '*.md')" "$NCM"
-  cmp_count hooks    "$(count_files "$cdir/hooks" '*.sh')"    "$NHK"
-  [ "$(find "$h/.config/agents/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" = "$NWR" ] \
-    || errs="$errs; wrappers missing"
+  cmp_members skills   "$(count_dirs "$cdir/skills")"           "$NSK"
+  cmp_members agents   "$(count_files "$cdir/agents" '*.md')"   "$NAG"
+  cmp_members commands "$(count_files "$cdir/commands" '*.md')" "$NCM"
+  cmp_members hooks    "$(count_files "$cdir/hooks" '*.sh')"    "$NHK"
+  cmp_members wrappers "$(find "$h/.config/agents/bin" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" "$NWR"
+  # agent_references and mcp_servers are claude/inventory.json's other two families and are
+  # deliberately NOT diffed here -- naming the gap rather than leaving it silent:
+  #   agent_references  install.sh copies claude/agents/reference/ verbatim alongside agents/ but
+  #                      no lane in this file asserts its member set; nothing here would notice a
+  #                      plant. Not covered by any other consumer either except
+  #                      tests/inventory-contract.sh / verify.sh check 48 (component-list diff)
+  #                      and check 46 (the .md-vs-.ref loader-safety check) -- both tree-vs-
+  #                      contract, not tree-vs-tree, so they are not subject to this file's defect.
+  #   mcp_servers        install.sh merges mcp/servers.json's keys into ~/.claude.json's
+  #                      .mcpServers rather than copying discrete files, so there is no
+  #                      $cdir-relative directory for actual_members to glob. The `existing-config`
+  #                      and `uninstall-clean` cases below do assert individual server keys land
+  #                      and survive uninstall, by name, so the family is not entirely unchecked
+  #                      in this file -- only its full member SET is, here, in assert_install.
   [ -f "$cdir/CLAUDE.md" ]     || errs="$errs; no CLAUDE.md"
   [ -f "$cdir/statusline.sh" ] || errs="$errs; no statusline.sh"
   [ -x "$cdir/hooks/verify-gate.sh" ] || errs="$errs; verify-gate.sh not executable"
