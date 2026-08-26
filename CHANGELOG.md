@@ -67,6 +67,96 @@ the writer never uses. Check 45 passed over all of it, because its sandbox had a
 Reproduction: `tests/repro/lifecycle.sh`, 9 assertions over 6 install/uninstall sequences, 4 red
 before this change and 0 after.
 
+### The Stop gate ran in a lane that claimed to have no hooks
+
+`claude/hooks/hooks.json` is auto-discovered by the plugin lane, and it wired `verify-gate.sh`
+into `Stop`. A plugin install therefore ran a cloned repository's own `.claude/verify.sh` on every
+Stop, with none of the full install's surrounding machinery, while `README.md` said the lane
+shipped no hooks at all and `bin/doctor` told plugin users the same. Four artefacts in this
+repository, two answers, and nothing able to see the disagreement: check 12 resolves one number
+per noun for the whole tree, and README states its counts per lane, so the plugin rows passed by
+coincidence and the row that genuinely differed did not match the table regex at all.
+
+`hooks.json` now carries routing only. The lane ships two hooks, `SessionStart` and the skill
+mandate on `Stop`, and README says so.
+
+**Check 47** executes every script `hooks.json` names under `env -i`, with `PATH` scrubbed of both
+wrapper directories, and asserts each exits 0, emits valid JSON or nothing, and never tells a
+plugin-lane user to run a command that lane does not install. Its positive control plants a hook
+emitting `run vstack trust` and requires the check to catch it. Its fixture seeds a failing
+`.claude/verify.sh` in the sandbox, because the first version of it passed over the regression:
+an empty cwd meant the gate hook exited silently, which is indistinguishable from correct.
+
+README also gained a section stating five things `vstack trust` does not cover.
+
+### The formatter executed cloned repositories' JavaScript
+
+`SECURITY.md` said cloning a hostile repository does not run that repository's code. False for any
+repository carrying a static `.prettierrc.json` with a `plugins` entry: Prettier `require()`s the
+named local `.js` at format time, and `format.sh` fires on `PostToolUse` for every `Edit`, `Write`
+and `MultiEdit`. Not at `Stop`, so the `verify-trust` record never entered the picture. An ordinary
+edit in a freshly cloned repository executed attacker-controlled JavaScript.
+
+`format.sh` now refuses a `plugins`-declaring config from an untrusted repository and says why in
+its `systemMessage`. Executable Prettier config is never loaded, trusted or not: Prettier 3 has no
+flag that reads `prettier.config.js` without executing it.
+
+`SECURITY.md` now describes both hooks that run repository-controlled code, and adds a section
+naming what the trust boundary does not cover: path dependencies recorded by path rather than
+content hash, test files, dynamically built paths inside a gate, and the fact that the gate cannot
+defend against an agent sharing its uid.
+
+### Releases were gated on the machine that ran the gate
+
+`release.yml` now resolves the commit the tag names and reads that exact SHA's check runs from the
+GitHub API, once at resolve and again immediately before `gh release create`. Never a local exit
+code, never `main`'s tip. Six releases here shipped over red CI because every gate asked the
+machine it ran on. Verified against v1.45.1's commit (four of four `success`) and against a null
+SHA (fails). `container-matrix` runs between resolve and publish; a failed required job deletes the
+tag it arrived on, so a red gate cannot leave a tag behind.
+
+Branch and tag protection rulesets are prepared in `.github/` and deliberately **not applied**.
+`branch-protection.md` carries both `gh api` commands and the reasoning, including why tag deletion
+stays open.
+
+### Three CI lanes reported green while proving less than one
+
+CI trusted `.claude/verify.sh`'s exit code alone, and a skip never moves that. Alpine had no
+shellcheck, so check 29 skipped there every run. `install-macos` and `install-alpine` checked out
+shallow, so check 24 could not read a tag and skipped too. `require-no-unexpected-skips.sh` now
+reads the gate's output against a per-lane allow-list and fails the job naming any skip that is not
+on it. Alpine installs shellcheck with no fallback; both install lanes fetch depth 0. Actions and
+the Claude CLI are pinned to exact SHAs and versions. `tests/bin-scripts.sh` was in the repository
+and invoked by nothing; it runs now.
+
+`tests/dispatch-static.sh` was the same defect one directory over: a missing parser and a file with
+nothing to parse landed in the same skip bucket, and the summary only checked that no case failed.
+On a runner without node, twenty-eight of thirty-five fixtures were never parsed and it printed
+`ok`. Real validators are wired for `.ts`, `.go`, `.html` and `.css`; prose files stay a named skip;
+every other extension and every missing binary is now a failure naming it. Measured both
+directions: full `PATH`, twenty-five parsed and exit 0; without the four validators, fifteen named
+failures and exit 1. `verify.yml` installs them, because that suite now needs them to prove
+anything.
+
+`tests/install-matrix.sh` gained `reinstall-uninstall` and `version-upgrade-uninstall`, both of
+which fail at v1.45.1 and pass at HEAD. The obvious version pairing was rejected first: v1.45.1 and
+`86d19a3` ship byte-identical hooks, so that lane would have passed pre-fix on the `cmp -s`
+shortcut alone and proved nothing.
+
+### A repro's own control inverted when its fix landed
+
+`tests/repro/formatter-config.sh` proved it was not vacuous by reverting to
+`HEAD:claude/hooks/format.sh` and requiring the attack to reproduce. The moment the fix was
+committed, HEAD became the fixed hook, the attack stopped reproducing, and the repro reported the
+hole OPEN because its control had gone green. Caught by running all six repros after committing,
+not by reading them.
+
+The baseline is derived now: walk `format.sh`'s history newest-first and take the first blob
+without the guard. No SHA to remember, and no baseline is a loud failure rather than a comparison
+of the fix against itself.
+
+All six reproductions are green.
+
 ## 1.45.1 — 2026-08-24
 
 **`doctor --drift` printed `no drift ✔ (74 item(s) compared)` over a tree containing a file it

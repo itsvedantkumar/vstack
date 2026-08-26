@@ -1,0 +1,887 @@
+{
+  "$comment": "Machine-readable contract for what vstack ships, which install profile puts it where, who owns which settings key, and what verifies all of it. CHECK-TIME ORACLE ONLY: no shipped script reads this file at runtime. install.sh, uninstall.sh, overlay.sh and bin/doctor keep deriving from the filesystem; the gate compares their derivation against this file and fails on disagreement. See design note in docs/ (Brief 1 Phase 6 / Brief 3 Phase 1).",
+  "contract_version": 1,
+  "product": {
+    "name": "vstack",
+    "version": "1.46.0",
+    "version_source": [
+      "claude/.claude-plugin/plugin.json",
+      ".claude-plugin/marketplace.json"
+    ],
+    "repository": "https://github.com/itsvedantkumar/vstack"
+  },
+  "derived_at": {
+    "head": "3f1d02061b319a07e3773463c3fa428dedd5b542",
+    "payload_digest": "936ef1b35440cc97214511033901406c38ade2d68a3483ae302c5296a2a1d326",
+    "digest_recipe": "{ git ls-files -s -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh; git status --porcelain -- <same>; } | shasum -a 256",
+    "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
+    "concurrency_warning": "Derived from a working tree that other agents were editing at the same time. Any consumer that trusts these numbers without regenerating them is the defect this file exists to catch."
+  },
+  "regeneration": {
+    "rule": "Every list and count below is derived from the tree, never hand-written. A validator regenerates them and diffs.",
+    "derivations": {
+      "skills": "for d in claude/skills/*/; do basename \"${d%/}\"; done",
+      "agents": "for f in claude/agents/*.md; do basename \"$f\" .md; done",
+      "agent_references": "for f in claude/agents/reference/*.ref; do basename \"$f\"; done",
+      "commands": "for f in claude/commands/*.md; do basename \"$f\" .md; done",
+      "hooks": "for f in claude/hooks/*.sh; do basename \"$f\"; done",
+      "wrappers": "for f in bin/*; do basename \"$f\"; done",
+      "mcp_servers": "jq -r 'keys[]' mcp/servers.json",
+      "settings_keys": "jq -r 'keys[]' claude/settings.json",
+      "project_keys": "grep -vE '^[[:space:]]*#|^[[:space:]]*$' claude/settings.project-keys",
+      "skill_overrides": "jq -r '.skillOverrides|keys[]' claude/settings.json",
+      "checks": "grep -oE '^# --- [0-9]+[a-z]?\\.' .claude/verify.sh",
+      "falsifiability_rows": "sed -n 's/^CHECKS=\"\\(.*\\)\"/\\1/p' tests/gate-falsifiability.sh",
+      "ci_runners": "grep -oE '(runs-on|container): *[A-Za-z0-9:._-]+' .github/workflows/verify.yml"
+    }
+  },
+  "profiles": {
+    "full": {
+      "selected": true,
+      "entrypoint": "./install.sh",
+      "description": "git clone + ./install.sh. The only lane that installs hooks at user scope, the CLI wrappers, the shell lane, the MCP merge and the Conductor managed layer.",
+      "config_dir": "${CLAUDE_CONFIG_DIR:-$HOME/.claude}",
+      "ships": [
+        "skills",
+        "agents",
+        "agent_references",
+        "commands",
+        "hooks",
+        "wrappers",
+        "mcp_servers",
+        "settings_merge",
+        "claude_md",
+        "statusline",
+        "shell_lane",
+        "conductor_settings"
+      ],
+      "dest": {
+        "skills": "$CDIR/skills/<name>/",
+        "agents": "$CDIR/agents/<name>.md",
+        "agent_references": "$CDIR/agents/reference/<name>.ref",
+        "commands": "$CDIR/commands/<name>.md",
+        "hooks": "$CDIR/hooks/<name>.sh",
+        "wrappers": "$HOME/.config/agents/bin/<name>",
+        "mcp_servers": "merged into $CJSON .mcpServers",
+        "settings_merge": "$CDIR/settings.json",
+        "claude_md": "$CDIR/CLAUDE.md",
+        "statusline": "$CDIR/statusline.sh",
+        "shell_lane": "$HOME/.config/agents/shell/claude-parity.zsh + rc snippets",
+        "conductor_settings": "$HOME/.conductor/settings.toml (create-only), $HOME/.conductor/settings.managed.toml (always overwritten)"
+      },
+      "receipt": "$HOME/.config/agents/vstack-installed",
+      "backups": "$HOME/.config/agents/backups/install-<timestamp>/"
+    },
+    "plugin": {
+      "selected": false,
+      "entrypoint": "claude plugin marketplace add itsvedantkumar/vstack && claude plugin install vstack@vstack",
+      "description": "Marketplace lane. plugin source is ./claude, so everything under claude/ that Claude Code auto-discovers ships: skills, agents, commands AND claude/hooks/hooks.json.",
+      "root": "$CDIR/plugins/cache/vstack/vstack/<version>/",
+      "ships": [
+        "skills",
+        "agents",
+        "agent_references",
+        "commands",
+        "hooks"
+      ],
+      "does_not_ship": [
+        "wrappers",
+        "mcp_servers",
+        "settings_merge",
+        "claude_md_at_user_scope",
+        "shell_lane",
+        "conductor_settings"
+      ],
+      "hook_note": "This lane DOES wire hooks, via claude/hooks/hooks.json auto-discovery. .claude/verify.sh check 11 asserts the exact event set and check 47 runs each wired script in a sandbox with no ~/.config/agents and no vstack wrappers on PATH. A hook whose only reachable outcome names a command this lane never installs does not belong here.",
+      "hook_events": [
+        "SessionStart",
+        "Stop"
+      ],
+      "hook_scripts_wired": [
+        "inject-session-context.sh",
+        "skill-mandate.sh"
+      ],
+      "hook_scripts_deliberately_absent": [
+        {
+          "script": "verify-gate.sh",
+          "reason": "It refuses to run an untrusted .claude/verify.sh and tells the operator to run `vstack trust`, which only the full install provides. Enforced by check 47."
+        }
+      ],
+      "profile_env": "VSTACK_PROFILE=skills (inject-session-context.sh drops the token/delegation/autonomy policy in this lane)"
+    },
+    "overlay": {
+      "selected": false,
+      "entrypoint": "./overlay.sh [target-repo]",
+      "description": "Commits a project-scope .claude/ into another repo. The only config lane that reaches a cloud sandbox, which has no ~/.claude.",
+      "root": "<target>/.claude/",
+      "ships": [
+        "skills",
+        "agents",
+        "agent_references",
+        "commands",
+        "hooks",
+        "statusline",
+        "policy_md",
+        "verify_template",
+        "conductor_repo_settings"
+      ],
+      "does_not_ship": [
+        "wrappers",
+        "mcp_servers",
+        "shell_lane",
+        "claude_md_at_project_root_as_CLAUDE_md"
+      ],
+      "settings_subset": "claude/settings.project-keys allowlist only",
+      "policy_note": "claude/CLAUDE.md ships as .claude/hooks/policy.md, NOT .claude/CLAUDE.md: the latter is project memory and would load the same bytes twice alongside ~/.claude/CLAUDE.md."
+    }
+  },
+  "components": {
+    "skills": {
+      "dir": "claude/skills",
+      "pattern": "*/SKILL.md",
+      "kind": "directory",
+      "count": 28,
+      "floor": 18,
+      "floor_reason": "claude/skills/ATTRIBUTION.md states that eighteen of the shipped skills are ported from pstack. A total below eighteen makes that section arithmetically impossible, so 18 is the lowest number at which the shipped documentation is still self-consistent.",
+      "lanes": [
+        "full",
+        "plugin",
+        "overlay"
+      ],
+      "members": [
+        "agent-browser",
+        "blast-radius",
+        "brainstorming",
+        "component-registry",
+        "create-verification-skill",
+        "executing-plans",
+        "find-skills",
+        "grill-me",
+        "impeccable",
+        "interrogate",
+        "maintain-verification-skill",
+        "principle-boundary-discipline",
+        "principle-build-the-lever",
+        "principle-encode-lessons-in-structure",
+        "principle-fix-root-causes",
+        "principle-make-operations-idempotent",
+        "principle-prove-it-works",
+        "principle-sequence-verifiable-units",
+        "principle-type-system-discipline",
+        "reflect",
+        "show-me-your-work",
+        "swarm",
+        "technical-writing",
+        "test-driven-development",
+        "typescript-best-practices",
+        "ui-iterate",
+        "unslop",
+        "writing-plans"
+      ],
+      "provenance": {
+        "pstack": {
+          "license": "see claude/skills/LICENSE.pstack",
+          "upstream": "https://github.com/cursor/plugins",
+          "skills": [
+            "blast-radius",
+            "create-verification-skill",
+            "interrogate",
+            "maintain-verification-skill",
+            "principle-boundary-discipline",
+            "principle-build-the-lever",
+            "principle-encode-lessons-in-structure",
+            "principle-fix-root-causes",
+            "principle-make-operations-idempotent",
+            "principle-prove-it-works",
+            "principle-sequence-verifiable-units",
+            "principle-type-system-discipline",
+            "reflect",
+            "show-me-your-work",
+            "swarm",
+            "technical-writing",
+            "typescript-best-practices",
+            "unslop"
+          ]
+        },
+        "superpowers": {
+          "license": "MIT",
+          "upstream": "https://github.com/obra/superpowers",
+          "skills": [
+            "brainstorming",
+            "executing-plans",
+            "test-driven-development",
+            "writing-plans"
+          ]
+        },
+        "impeccable": {
+          "license": "Apache-2.0",
+          "upstream": "https://github.com/pbakaus/impeccable",
+          "skills": [
+            "impeccable"
+          ]
+        },
+        "vercel-labs": {
+          "license": "Apache-2.0 (agent-browser), MIT (find-skills)",
+          "upstream": "https://github.com/vercel-labs",
+          "skills": [
+            "agent-browser",
+            "find-skills"
+          ]
+        },
+        "mattpocock": {
+          "license": "MIT",
+          "upstream": "https://github.com/mattpocock/skills",
+          "skills": [
+            "grill-me"
+          ]
+        },
+        "original": {
+          "license": "MIT",
+          "upstream": "this repository",
+          "skills": [
+            "component-registry",
+            "ui-iterate"
+          ]
+        }
+      }
+    },
+    "agents": {
+      "dir": "claude/agents",
+      "pattern": "*.md",
+      "kind": "file",
+      "count": 14,
+      "floor": 9,
+      "floor_reason": "nine agent prompts point at claude/agents/reference/ENVIRONMENT.ref (grep -l). Fewer than nine of them means at least one of those referrers was deleted, which is a payload change and not a count drift.",
+      "lanes": [
+        "full",
+        "plugin",
+        "overlay"
+      ],
+      "members": [
+        "accessibility-auditor",
+        "code-reviewer",
+        "debugger",
+        "design-reviewer",
+        "explorer",
+        "performance-engineer",
+        "planner",
+        "product-owner",
+        "qa",
+        "release-manager",
+        "security-auditor",
+        "test-writer",
+        "ui-engineer",
+        "worker"
+      ],
+      "reference_consumers": [
+        "code-reviewer",
+        "debugger",
+        "performance-engineer",
+        "planner",
+        "qa",
+        "release-manager",
+        "security-auditor",
+        "test-writer",
+        "worker"
+      ]
+    },
+    "agent_references": {
+      "dir": "claude/agents/reference",
+      "pattern": "*.ref",
+      "kind": "file",
+      "count": 1,
+      "floor": 1,
+      "floor_reason": "nine agent prompts name ENVIRONMENT.ref by path. Zero files here means those pointers resolve to nothing.",
+      "extension_is_load_bearing": true,
+      "extension_reason": "Claude Code's plugin agent walker recurses into subdirectories and loads every file ending .md, at any depth, as an agent. A reference written as .md would install as a nameless plugin agent (vstack:reference:ENVIRONMENT, description auto-filled 'Agent from vstack plugin') competing for dispatch. .claude/verify.sh check 46 enforces both directions.",
+      "lanes": [
+        "full",
+        "plugin",
+        "overlay"
+      ],
+      "members": [
+        "ENVIRONMENT.ref"
+      ]
+    },
+    "commands": {
+      "dir": "claude/commands",
+      "pattern": "*.md",
+      "kind": "file",
+      "count": 15,
+      "floor": 6,
+      "floor_reason": "README.md's 'Day to day' table names /ship, /review, /team, /doctor by hand, and CLAUDE.md routing names /goal and /commit. All six must exist for the shipped prose to resolve.",
+      "lanes": [
+        "full",
+        "plugin",
+        "overlay"
+      ],
+      "members": [
+        "bootstrap",
+        "commit",
+        "deploy",
+        "deploy-auto",
+        "doctor",
+        "goal",
+        "observability",
+        "pr",
+        "push",
+        "release",
+        "review",
+        "security",
+        "ship",
+        "team",
+        "test"
+      ]
+    },
+    "hooks": {
+      "dir": "claude/hooks",
+      "pattern": "*.sh",
+      "kind": "file",
+      "count": 7,
+      "floor": 7,
+      "floor_reason": "Derived, not literal: the floor is the number of distinct hook scripts install.sh's own jq rebuild program names. Every one of those must exist on disk or the user lane installs a hook command pointing at nothing. Recomputed from install.sh on every validation, so it cannot go stale.",
+      "lanes": [
+        "full",
+        "plugin",
+        "overlay"
+      ],
+      "members": [
+        "dispatch-counter.sh",
+        "failure-diagnose.sh",
+        "format.sh",
+        "guard-destructive.sh",
+        "inject-session-context.sh",
+        "skill-mandate.sh",
+        "verify-gate.sh"
+      ],
+      "wiring": {
+        "project": {
+          "file": "claude/settings.json",
+          "events": [
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PreToolUse",
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit"
+          ]
+        },
+        "user": {
+          "file": "install.sh (inline jq rebuild)",
+          "events": [
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PreToolUse",
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit"
+          ],
+          "scripts": [
+            "dispatch-counter.sh",
+            "failure-diagnose.sh",
+            "format.sh",
+            "guard-destructive.sh",
+            "inject-session-context.sh",
+            "skill-mandate.sh",
+            "verify-gate.sh"
+          ]
+        },
+        "plugin": {
+          "file": "claude/hooks/hooks.json",
+          "events": [
+            "SessionStart",
+            "Stop"
+          ],
+          "scripts": [
+            "inject-session-context.sh",
+            "verify-gate.sh",
+            "skill-mandate.sh"
+          ]
+        }
+      },
+      "shell_scripts_in_repo": 53,
+      "user_lane_exempt": [],
+      "user_lane_exempt_rule": "A hook that ships to the plugin lane only must be named here with a one-line reason. Empty today: installing vstack for real use is what install.sh does, so every shipped hook belongs in the user lane. Mirrors USER_LANE_EXEMPT in .claude/verify.sh check 11."
+    },
+    "wrappers": {
+      "dir": "bin",
+      "pattern": "*",
+      "kind": "file",
+      "count": 6,
+      "floor": 4,
+      "floor_reason": "bin/doctor asserts four wrappers by name (claude-bg.sh, claude-task.sh, cloudflare-mcp, deploy-auto.sh). Below that, doctor fails anyway; the floor makes the failure name the cause instead of the symptom.",
+      "lanes": [
+        "full"
+      ],
+      "members": [
+        "claude-bg.sh",
+        "claude-task.sh",
+        "cloudflare-mcp",
+        "deploy-auto.sh",
+        "doctor",
+        "vstack"
+      ],
+      "named_by_doctor": [
+        "claude-bg.sh",
+        "claude-task.sh",
+        "cloudflare-mcp",
+        "deploy-auto.sh"
+      ],
+      "not_named_by_doctor": [
+        "doctor",
+        "vstack"
+      ],
+      "not_named_reason": "bin/doctor is the checker itself and bin/vstack is the CLI that invokes it; both are covered by --drift's bin/* sweep."
+    },
+    "mcp_servers": {
+      "file": "mcp/servers.json",
+      "kind": "json_keys",
+      "count": 2,
+      "floor": 1,
+      "floor_reason": "bin/doctor iterates the keys of mcp/servers.json and reports success when the loop body never runs. One key is the minimum at which that loop measures anything.",
+      "lanes": [
+        "full"
+      ],
+      "members": [
+        "cloudflare-mcp",
+        "context7"
+      ],
+      "merge_target": "$CJSON .mcpServers, ours win on key collision"
+    }
+  },
+  "ownership": {
+    "settings": {
+      "file": "claude/settings.json",
+      "shipped_keys": [
+        "agentPushNotifEnabled",
+        "autoCompactWindow",
+        "autoUpdatesChannel",
+        "awaySummaryEnabled",
+        "cleanupPeriodDays",
+        "effortLevel",
+        "enableWorkflows",
+        "enabledPlugins",
+        "env",
+        "fastMode",
+        "fileCheckpointingEnabled",
+        "forceLoginMethod",
+        "hooks",
+        "inputNeededNotifEnabled",
+        "model",
+        "outputStyle",
+        "precomputeCompactionEnabled",
+        "preferredNotifChannel",
+        "prefersReducedMotion",
+        "promptSuggestionEnabled",
+        "remoteControlAtStartup",
+        "showTurnDuration",
+        "skillListingBudgetFraction",
+        "skillListingMaxDescChars",
+        "skillOverrides",
+        "spinnerTipsEnabled",
+        "switchModelsOnFlag",
+        "theme",
+        "tui"
+      ],
+      "shipped_count": 29,
+      "retired_keys": [],
+      "retired_rule": "A key may enter RETIRED (install.sh) only if claude/settings.json shipped it at some commit and does not ship it now. Enforced by .claude/verify.sh check 21. Deleting a key vstack never shipped is deleting a Claude Code feature on a stranger's machine.",
+      "project_scope_keys": [
+        "effortLevel",
+        "enableWorkflows",
+        "env",
+        "fastMode",
+        "hooks",
+        "model",
+        "skillListingBudgetFraction",
+        "skillListingMaxDescChars",
+        "skillOverrides",
+        "statusLine"
+      ],
+      "project_scope_count": 10,
+      "project_scope_rule": "overlay.sh may write only these into another repo's committed .claude/settings.json. Source: claude/settings.project-keys. Enforced by .claude/verify.sh check 17.",
+      "user_scope_keys_note": "bin/doctor carries USER_SCOPE: keys that legitimately exist only on a machine (Claude Code's own, plus per-account state). A live key in neither shipped_keys nor USER_SCOPE is unclassified and doctor --drift reports it.",
+      "merge_semantics": {
+        "top_level": "portable file is authoritative for every key it ships; keys it never mentions survive untouched",
+        "hooks": "merged by ownership: an entry is vstack's when its command path ends in /hooks/<a filename vstack ships>. Never by directory prefix (a HOME move breaks that) and never by event name (that destroys the user's own hooks).",
+        "skillOverrides": "merged, ours win on collision; a stale entry naming no shipped skill is inert",
+        "enabledPlugins": "typescript-lsp entry is stripped only when `claude plugin list` does not show it"
+      }
+    },
+    "files": {
+      "rule": "Ownership by receipt first, byte-identity second.",
+      "receipt": "$HOME/.config/agents/vstack-installed — install.sh appends every path it writes; survives a version change, where content comparison cannot.",
+      "byte_identity_fallback": "For a machine with no receipt yet, a target byte-identical to the repo file about to overwrite it is treated as vstack's.",
+      "stated_trade": "A user file whose bytes exactly equal vstack's is indistinguishable from vstack's and is treated as vstack's, so uninstall deletes it. The alternative loses the ability to uninstall at all.",
+      "uninstall_rules": [
+        "a backup holding a prior version wins: restore it",
+        "a file edited since install is kept and named, never deleted",
+        "only a file still byte-identical to what vstack shipped is removed",
+        "symlinks are never touched (builtin and plugin skills link in from elsewhere)",
+        "settings.json and .claude.json are unpicked key by key, never deleted"
+      ]
+    },
+    "skill_overrides": {
+      "keys": [
+        "build-mcp-server",
+        "claude-in-chrome",
+        "dataviz",
+        "docx",
+        "fewer-permission-prompts",
+        "init",
+        "keybindings-help",
+        "loop",
+        "pdf",
+        "pptx",
+        "run",
+        "schedule",
+        "security-review",
+        "simplify",
+        "skill-creator",
+        "update-config",
+        "xlsx"
+      ],
+      "count": 17,
+      "purpose": "Quiet skills that Claude Code and its plugins install on their own. It never parks a skill from this repo. Enforced by .claude/verify.sh check 15."
+    }
+  },
+  "verification": {
+    "gate": {
+      "command": "./.claude/verify.sh",
+      "declared_checks": 47,
+      "check_ids": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "9b",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "14b",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+        "20",
+        "21",
+        "22",
+        "23",
+        "24",
+        "25",
+        "26",
+        "27",
+        "28",
+        "29",
+        "30",
+        "31",
+        "32",
+        "33",
+        "34",
+        "35",
+        "36",
+        "37",
+        "38",
+        "39",
+        "40",
+        "44",
+        "45",
+        "46",
+        "47"
+      ],
+      "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
+      "offline": true,
+      "offline_reason": "The Stop hook runs it on every Stop. Network reachability questions live in bin/doctor instead."
+    },
+    "required": [
+      {
+        "id": "gate",
+        "command": "./.claude/verify.sh",
+        "where": [
+          "local",
+          "ci:verify"
+        ]
+      },
+      {
+        "id": "falsifiability",
+        "command": "./tests/gate-falsifiability.sh",
+        "where": [
+          "ci:verify"
+        ],
+        "rows": 56,
+        "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way."
+      },
+      {
+        "id": "baseline",
+        "command": "./tests/compare-baseline.sh",
+        "where": [
+          "ci:verify"
+        ]
+      },
+      {
+        "id": "breadth-mandate",
+        "command": "./tests/test-breadth-mandate.sh",
+        "where": [
+          "ci:verify"
+        ]
+      },
+      {
+        "id": "dispatch-static",
+        "command": "./tests/dispatch-static.sh",
+        "where": [
+          "ci:verify"
+        ],
+        "note": "No model calls. Fixture integrity only; it does not prove a skill fires."
+      },
+      {
+        "id": "install-matrix",
+        "command": "./tests/install-matrix.sh",
+        "where": [
+          "ci:install-linux",
+          "ci:install-macos",
+          "ci:install-alpine"
+        ]
+      },
+      {
+        "id": "drift",
+        "command": "./bin/doctor --drift",
+        "where": [
+          "ci:install-linux",
+          "local"
+        ]
+      },
+      {
+        "id": "plugin-manifests",
+        "command": "./tests/plugin-manifests.sh",
+        "where": [
+          "local"
+        ],
+        "note": "Needs an authenticated claude CLI."
+      },
+      {
+        "id": "tree-restored",
+        "command": "git diff --exit-code",
+        "where": [
+          "ci:verify"
+        ]
+      }
+    ],
+    "optional": [
+      {
+        "id": "auto-trigger",
+        "command": "./tests/auto-trigger.sh",
+        "cases": 28,
+        "why_optional": "Billed model calls against a live session; CI has no auth."
+      },
+      {
+        "id": "team-gating",
+        "command": "./tests/team-gating.sh",
+        "why_optional": "Billed model calls."
+      },
+      {
+        "id": "team-start",
+        "command": "./tests/team-start.sh",
+        "why_optional": "Billed model calls."
+      },
+      {
+        "id": "evals",
+        "command": "./tests/evals/run-pathways.sh",
+        "why_optional": "Billed model calls; costed suites need an explicit ask."
+      },
+      {
+        "id": "container-matrix",
+        "command": "./tests/container-matrix.sh",
+        "why_optional": "Needs Docker and network access to published tags."
+      },
+      {
+        "id": "bin-scripts",
+        "command": "./tests/bin-scripts.sh",
+        "why_optional": "Needs local stubs for deploy targets."
+      }
+    ],
+    "allowed_skip_reasons": [
+      {
+        "reason": "jq not installed",
+        "applies_to": [
+          "gate checks 2,8,11,12,13,15,17,19,21,45"
+        ],
+        "note": "NOT allowed for check 0: the toolchain check fails rather than skips, because five checks depend on jq and a partial run must not read as a full pass."
+      },
+      {
+        "reason": "git not installed",
+        "applies_to": [
+          "gate checks 4,5,6,7,21,24,31,46"
+        ]
+      },
+      {
+        "reason": "shellcheck not installed",
+        "applies_to": [
+          "gate check 29"
+        ],
+        "note": "NOT allowed on CI: .github/workflows/verify.yml installs shellcheck and runs `shellcheck --version` so a broken install stops the run."
+      },
+      {
+        "reason": "claude CLI unusable",
+        "applies_to": [
+          "gate check 19",
+          "tests/plugin-manifests.sh",
+          "tests/install-matrix.sh marketplace"
+        ],
+        "note": "NOT allowed on ci:verify or ci:install-linux: those jobs install the platform binary on purpose and assert the check did not skip."
+      },
+      {
+        "reason": "no tags in this checkout",
+        "applies_to": [
+          "gate check 24"
+        ],
+        "note": "A shallow clone has no tags. CI uses fetch-depth: 0 so this must not fire there."
+      },
+      {
+        "reason": "declared version is not tagged yet",
+        "applies_to": [
+          "gate check 24"
+        ],
+        "note": "Between the version bump and the tag there is no payload to diff against. Tagging restarts the measurement."
+      },
+      {
+        "reason": "no docs/ directory",
+        "applies_to": [
+          "gate check 28"
+        ],
+        "note": "Reported as a FAILURE, not a skip: the directory is tracked, so its absence is a defect."
+      }
+    ],
+    "forbidden_skip_rule": "A skip is honest only when the missing thing is genuinely not this repo's to supply. A skip on a machine that was set up to run the check is a green measuring nothing, and CI asserts the not-skipped condition explicitly for checks 19 and the marketplace lane."
+  },
+  "trust": {
+    "store": "$HOME/.config/agents/verify-trust",
+    "format": "<sha256>  <absolute path>",
+    "armed_by": [
+      "./install.sh (this repo's own .claude/verify.sh only)",
+      "vstack trust [--yes] (any repo, interactive confirmation unless --yes)"
+    ],
+    "inputs": [
+      {
+        "kind": "gate",
+        "what": ".claude/verify.sh of the repo",
+        "why": "the script the Stop hook executes"
+      },
+      {
+        "kind": "sourced",
+        "what": "every file the gate `source`s or `.`s",
+        "why": "executed in the same process"
+      },
+      {
+        "kind": "invoked",
+        "what": "every *.sh the gate names",
+        "why": "executed as a child"
+      },
+      {
+        "kind": "build-manifest",
+        "what": "package.json / pyproject.toml + uv.lock / Cargo.toml + Cargo.lock + build.rs, where the gate reaches for that toolchain",
+        "why": "npm run test executes arbitrary script bodies from package.json"
+      }
+    ],
+    "rule": "The Stop hook refuses to execute a repo's verify.sh unless a machine-local hash entry matches. A bare clone never arms itself. A cloud sandbox arms itself only through a line the operator committed into .conductor/settings.toml, which is the visible consent.",
+    "removed_by": "./uninstall.sh"
+  },
+  "platforms": {
+    "source": ".github/workflows/verify.yml",
+    "ci_runners": [
+      "alpine:latest",
+      "macos-latest",
+      "ubuntu-latest"
+    ],
+    "rule": "Support is a claim about what is tested. The runner names in the workflow and the platform names in README.md must be the same set in both directions. Enforced by .claude/verify.sh check 26.",
+    "shell": "bash 3.2 (macOS /bin/bash) is the floor: no mapfile, no declare -A, no sort -V.",
+    "known_non_gnu": "BusyBox (Alpine) date, sed, find and stat differ from both BSD and GNU."
+  },
+  "evidence": {
+    "schema": {
+      "measured": {
+        "file": "docs/what-this-actually-does.md",
+        "section": "1. Measured",
+        "columns": [
+          "claim",
+          "evidence",
+          "source_and_date"
+        ],
+        "rule": "A row requires a command or a file that produced the number, and the date it was run."
+      },
+      "implemented_unmeasured": {
+        "file": "docs/what-this-actually-does.md",
+        "section": "2. Mechanism works, effect unmeasured",
+        "columns": [
+          "mechanism",
+          "what_it_verifiably_does",
+          "what_is_not_measured"
+        ],
+        "rule": "The third column is mandatory. A mechanism with no stated unknown belongs in section 1 with evidence, or it is a claim without one."
+      },
+      "open_question": {
+        "file": "docs/what-this-actually-does.md",
+        "section": "3. Unproven, and named as such",
+        "columns": [
+          "question",
+          "status"
+        ],
+        "rule": "Status names the harness that would answer it and its pre-registered floors, or says no harness exists."
+      }
+    },
+    "run_log": {
+      "format": "tsv",
+      "location": ".audit/",
+      "rule": "Pin run parameters in the log header. A result produced by uncommitted harness edits is not reproducible."
+    }
+  },
+  "claims": {
+    "counts_are_derived": true,
+    "counts_verified_by": ".claude/verify.sh check 12, which derives every count from the tree and reads back every claim in every tracked *.md and *.json outside docs/provenance and docs/research.",
+    "known_gaps": [
+      {
+        "id": "lane-blind-counts",
+        "what": "Check 12 resolves one number per noun for the whole repository. README.md states counts per install lane. The plugin-lane rows happen to equal the full-lane rows for skills, agents and commands today, so the check is satisfied by coincidence rather than by lane.",
+        "status": "open"
+      },
+      {
+        "id": "attribution-breakdown-unverified",
+        "what": "claude/skills/ATTRIBUTION.md's per-source counts (18/4/1/2/1/2) and its per-source skill name lists are prose. Nothing compares them to the tree or asserts they sum to the skill count. The provenance block in components.skills is the machine-readable form; nothing reads it yet.",
+        "status": "open"
+      },
+      {
+        "id": "stale-measured-value",
+        "what": "docs/what-this-actually-does.md line 25 quotes a run line reading 'checks: 44 declared, 44 ran' as the evidence for a claim whose headline number is the current declared-check total. Check 12 matches the noun but not the bare word 'declared', so the stale measurement is invisible to the gate.",
+        "status": "open"
+      },
+      {
+        "id": "doctor-fallback-constants",
+        "what": "bin/doctor's repo-less fallbacks (HOOKS=, WANT_AGENTS=) name four hook basenames and an agent floor of six, against a tree that ships more of both. They only fire when no vstack repo can be resolved, which is exactly the case with no other source of truth.",
+        "status": "open"
+      },
+      {
+        "id": "uninstall-comment-counts",
+        "what": "uninstall.sh's comment block cites agent, command, hook and wrapper totals that no longer match the tree. Comments are outside check 12's scan of *.md and *.json, so nothing reads them back.",
+        "status": "open"
+      }
+    ],
+    "open_contradictions": [],
+    "contradictions_resolved_during_this_snapshot": [
+      {
+        "id": "plugin-lane-hooks",
+        "what": "At commit 3f1d020 README.md's plugin-lane table claimed the lane installed no hooks at all and bin/doctor printed 'hooks not part of the plugin lane by design', while claude/hooks/hooks.json wired SessionStart and Stop for that lane and check 11 asserted that exact set. Three of this repository's own artefacts disagreed about whether a shipped component existed in a lane.",
+        "resolution": "Fixed in the working tree concurrently with this snapshot: verify-gate.sh removed from the plugin lane, README's row corrected to name the routing hooks it does install, and a check added to run every plugin-lane hook standalone.",
+        "residual": "bin/doctor still prints 'hooks not part of the plugin lane by design' at its hooks and secrets branches. Verify before treating this as closed.",
+        "status": "verify"
+      }
+    ]
+  }
+}
