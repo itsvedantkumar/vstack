@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The ten
+## The eleven
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -84,6 +84,24 @@ trusted that record on its own and `rm -rf`'d on a name match, so a user directo
 loop is safe. No check caught it because check 45 and the profile round-trips all start from a
 machine with no prior install, where the fingerprint reads zero and the seeder returns before its
 first loop. Inherited from: what the repository contains, standing in for what the run installed.
+
+**The tree-clean invariant that cannot see a directory.** Harnesses here plant a defect, measure,
+restore, and then prove they restored it by comparing `git status --porcelain` before and after.
+`tests/inventory-fixture.sh` did exactly that and reported `ok  git status --porcelain unchanged`
+in the same run whose own control caught `.claude/verify.sh` returning four FAIL lines where it
+had returned two. Both statements were true. **Git does not track empty directories**, so the
+`mkdir -p claude/skills/vstack-fixture-skill` that `do_plant()` created and `do_unplant()` never
+removed was invisible to porcelain and plainly visible to every consumer that globs the
+filesystem. Each family's plant contaminated the next family's baseline, and
+`tests/plugin-manifests.sh` was recorded as blind six times for failures the harness itself had
+caused. Reproduced in isolation: against a clean worktree, `mkdir -p
+claude/skills/vstack-fixture-skill` leaves `git status --porcelain` empty and takes
+`plugin-manifests.sh` to `exit=1` with two FAIL lines. Note what caught it. Not the tree-unchanged
+control, which is the check written for this exact purpose and which passed; the *positive
+control* running an unrelated gate noticed the answer had moved. `tests/gate-falsifiability.sh`
+carries the same porcelain-based invariant at :191 and :836 and is not known to be exposed, only
+because its mutations happen to edit files that already exist, which is a property nothing in it
+enforces. Inherited from: what git chooses to report, standing in for what is on disk.
 
 ## The test
 
