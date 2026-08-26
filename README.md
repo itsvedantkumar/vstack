@@ -23,7 +23,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 47 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 48 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -82,7 +82,10 @@ never more:
 Stop gate — with no opinion about how you work: no roster, no routing policy, no skill that only
 encodes taste. `CLAUDE.md` (the routing policy itself) ships with `opinionated` only; installing
 it under a profile that ships none of the roster or skills it routes to would be a claim about a
-payload that profile does not carry. `--dry-run` works per profile and changes nothing on disk.
+payload that profile does not carry. `--dry-run` works per profile and changes nothing on disk, and `tests/profiles.sh` proves all
+of the above end to end -- per-profile membership, that uninstall removes exactly what its
+profile installed and nothing else, and that `opinionated` is byte-identical to a bare,
+no-argument install -- in throwaway `mktemp -d` sandboxes.
 `VSTACK_PROFILE=skills` is a different, unrelated axis — a hook-runtime value read by
 `inject-session-context.sh`, not an install profile — and `install.sh` rejects it by name rather
 than silently treating it as unknown.
@@ -192,14 +195,16 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 47 checks. `tests/gate-falsifiability.sh` breaks the repository once per check, at
+The gate is 48 checks (this number moves as checks are added; check 12 fails if this prose
+and the tree disagree, so it stays honest by construction rather than by discipline).
+`tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
 naming that check, restores the tree byte for byte, and fails if anything was left behind.
 **Check 16 fails if any check has no mutation row**, so a check cannot be added without proof it
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 47 checks
+./.claude/verify.sh                  # 48 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
