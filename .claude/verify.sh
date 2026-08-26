@@ -1241,6 +1241,7 @@ external_path(){
 # times over -- an exemption nothing holds to account. Renaming OWNED_PATHS's target turns this
 # check red naming the floor, instead of silently widening the exemption to cover the old name
 # forever.
+# shellcheck disable=SC2088  # a literal "~/..." spelling to match against, like runtime_path above
 INSTALL_GENERATED_PATHS='~/.config/agents/vstack-installed'
 # shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
 install_generated(){
