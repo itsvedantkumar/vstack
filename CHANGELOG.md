@@ -4,7 +4,7 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
-## 1.46.0 — 2026-08-26
+## 1.46.0 — 2026-08-27
 
 ### claude-mem removed
 
@@ -296,13 +296,95 @@ the seeding over-claim under a non-default profile, ownership disagreeing with c
 identity between `opinionated` and the no-argument default. Each fix was reverted alone and watched
 turn exactly one check red.
 
-### The catalogue goes from six to ten
+### The catalogue goes from six to twelve
 
 `docs/checks-that-inherit-their-answer.md` closed by predicting a seventh instance next month. It
 got four in a day, five weeks early: the guard decision nothing downstream honoured, check 18's cap
 clearing by one byte because the injected block embeds the absolute repository path, a reproduction
 whose no-op control inverted the moment its own fix was committed, and an ownership record that
 read the repository's contents as a report of what had been installed.
+
+Then two more, and both are a different shape from the first ten. Neither was a check that
+measured the wrong thing. Both were a **true statement read as the answer to a different
+question**, which no mutation can catch and which the falsifiability suite was green throughout.
+
+Eleven: `git status --porcelain` is blind to empty directories, because git does not track
+directories. `tests/inventory-fixture.sh` planted a defect, restored it, and proved the restore by
+diffing porcelain before and after — while leaving behind a `mkdir -p` that `do_unplant()` never
+removed. Every family's plant contaminated the next family's baseline, and `tests/plugin-manifests.sh`
+was recorded as blind six times for failures the harness itself had caused. What caught it was a
+positive control running an unrelated gate, not the tree-unchanged check written for that exact
+purpose, which passed. `tree_fingerprint()` now pairs porcelain with a sorted list of empty
+directories; verified on BSD `find` and BusyBox `find` 1.37.0.
+
+Twelve: `.claude/verify.sh` refuses to run while another process holds the falsifiability lock. It
+prints `REFUSED`, explains why, and exits 2 — correct on every count — and its last line was "Wait
+for it to finish". Output that ends with no verdict is indistinguishable from a clean run to anyone
+who tails the last lines or counts `FAIL` lines, which is how gate output is actually read. That
+reading reached a commit message here as `VERIFIED`, in a commit about labels overstating what they
+assert. The exit code was right the whole time; nothing read it. Refusals now end with `NOT RUN` in
+the position a real run puts `VERIFIED`, and check 14 asserts the refusal's *last* line, not just
+its first. **A discipline that has to be remembered is not a control.**
+
+### `payload_digest` hashed no bytes, and read its own recipe out of the file it was checking
+
+Two independent holes in the same field, both reproduced before being accepted.
+
+The recipe hashed `git ls-files -s` (index blob ids) plus `git status --porcelain` (status letters
+and paths, never contents), so two different unstaged edits to the same payload file produced the
+same digest, and so did two different untracked files at the same path:
+
+    clean  923c92b7...
+    dirtyA fe75bb39...   <- different bytes
+    dirtyB fe75bb39...   <- same digest
+
+`payload_digest_compute()` in `tests/inventory-contract.sh` now hashes working-tree bytes, tracked
+and untracked-not-ignored, with the exec bit and path, NUL-delimited, with a gitlink arm so a
+future submodule does not hash as `absent` forever. What it does *not* see is stated in place:
+`--exclude-standard` skips ignored files, and `install.sh` copies directories, so an ignored file
+sitting in one reaches the installed tree unhashed.
+
+The validator used to `eval` the recipe string out of `claude/inventory.json`, on the reasoning
+that the two "can never drift apart". That is the defect: the artifact supplied its own oracle, so
+editing the recipe and the digest together passed while measuring nothing — and eval'ing a string
+out of the file under test is arbitrary code execution from the artifact. The recipe lives in the
+independent half now; the file names where (`digest_recipe_source`), a check requires that pointer
+to resolve to a function that file defines, and reintroducing an executable `digest_recipe` is
+itself a failure. `tests/inventory-contract.sh --print-digest` is the only supported recompute.
+
+### A server vstack stopped shipping stayed installed forever
+
+`run_drift()` iterated the keys `mcp/servers.json` declares *today*, so a server removed from the
+repo was not among them and no lane ever looked at it again. It cannot be inferred from
+`.claude.json` either: the user's own servers live in the same map. `install.sh` now records
+`mcpServers:<key>` lines in the ownership record it already maintains, and doctor reads from the
+installed side. Machines installed by earlier versions carry no such lines and gain the coverage on
+their next install, not retroactively — no record, no claim.
+
+### Three labels that described more than their check asserted
+
+Check 2 said "every JSON file parses" and named five paths against a tree of twelve; both
+`.github` protection rulesets, `brand.schema.json`, `claude/inventory.json` and three ground-truth
+fixtures were outside it. Derived from `git ls-files` now. `.jsonl` is excluded on purpose and says
+so: `truncated.jsonl` is invalid by design.
+
+Checks 3 and 10 said "loadable" and asked only whether *some* line in the file began with `name:`
+or `description:`. That passes a file with no frontmatter, one whose block never closes, and one
+whose only `description:` sits in a fenced example halfway down. `fm_block()` requires `---` on
+line 1 and reads to the closing `---`. The `disable-model-invocation` probe moved into the block
+too — it scanned the whole file, so a skill whose prose *discusses* the flag failed, and this repo
+ships one that does.
+
+### Three falsifiability rows ran two mutations under one oracle
+
+Rows 1, 20 and 29 each edited two files and accepted one shared failure label, so either edit alone
+turned the check red and carried the row while the other lane stayed unproven — precisely the state
+each row had been widened to fix. Row 29's own comment said "one mutation per lane, or half the
+selector stays unproven", and then ran both lanes in one row. Split into 1/1b, 20/20c, 29/29b.
+
+Rows went 57 to 70 across this release. New: 2b (a JSON file the old five-path list never covered),
+3b and 10b (frontmatter block, not its contents), 14c (the refusal terminator), 35b through 35g
+(each of doctor's drift decisions on its own).
 
 ## 1.45.1 — 2026-08-24
 
