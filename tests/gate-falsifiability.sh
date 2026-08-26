@@ -416,7 +416,13 @@ exit 0
   14b) # Honour a stale lock. A killed run leaves its lock behind, and a gate that refuses on a
       # dead pid is wedged for everyone until someone deletes a file they do not know about --
       # the failure mode that makes people delete locks reflexively and defeat the whole thing.
-      sed -i.t 's/ && kill -0 "$(cat "$_lk" 2>\/dev\/null)" 2>\/dev\/null//' \
+      #
+      # Anchored on the liveness test as a whole, not on how the pid is read out of the lock
+      # file. The original pattern spelled `$(cat "$_lk" ...)` literally and stopped matching
+      # the day the lock grew a second line and the reader became `head -1` -- one refactor,
+      # one silently disarmed row, caught only by this suite's own no-op detector. `kill -0`
+      # through the end of the condition is the decision; the pid's spelling is not.
+      sed -i.t 's/ && kill -0 .*2>\/dev\/null;/;/' \
         .claude/verify.sh && rm -f .claude/verify.sh.t ;;
   16) sed -i.t 's/^CHECKS="0 /CHECKS="/' tests/gate-falsifiability.sh \
         && rm -f tests/gate-falsifiability.sh.t ;;
