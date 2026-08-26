@@ -30,6 +30,17 @@ intended check, and a mutation that lands somewhere unreachable proves nothing a
 looking like it passed — appending `exit 3` to the end of `install.sh` did exactly that, because
 the dry-run path exits before reaching it.
 
+## claude/inventory.json
+
+`claude/inventory.json` is a machine-readable contract for what this repo ships: every
+component's directory, glob, count, floor, member list and lane. **Nothing shipped reads it at
+runtime.** `install.sh`, `uninstall.sh`, `overlay.sh` and `bin/doctor` keep deriving what they do
+from the filesystem, exactly as before this file existed. The file exists only so a validator can
+regenerate the same lists independently and diff them against what the file claims — a
+check-time oracle, not a source of truth `install.sh` consumes. If the installer ever reads this
+file, the question "does the inventory match what installs?" becomes unfalsifiable, because the
+two would no longer be independent derivations of the same fact.
+
 ## What this proves
 
 This setup's core property is that Claude Code skills fire on the situation
