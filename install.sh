@@ -834,6 +834,13 @@ elif [ "$DRY" = 0 ]; then
      "$CJ" "$tmp.servers" > "$tmp"
   commit_json "$tmp" "$CJ" "MCP servers in $CJSON" \
     && say "merged     MCP servers into $CJSON"
+  # Record which mcpServers keys are ours, in the same ownership file the file lanes use.
+  # Without this there is no way to tell a server vstack installed from one the user added, so
+  # a server this repo STOPS shipping is invisible forever: bin/doctor iterates the keys the
+  # repo currently declares, and a key that left the repo is not among them. The record is what
+  # lets doctor look from the installed side instead. Machines installed by <= 1.46.0 carry no
+  # mcpServers: lines, so they gain the coverage on their next install, not retroactively.
+  for _mk in $(jq -r 'keys[]' "$tmp.servers" 2>/dev/null); do own "mcpServers:$_mk"; done
   rm -f "$tmp" "$tmp.servers"
 else
   say "skipped    MCP merge (dry run)"

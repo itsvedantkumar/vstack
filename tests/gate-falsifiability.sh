@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -292,6 +292,8 @@ files_for(){ case "$1" in
   35c) printf 'bin/doctor' ;;
   35d) printf 'bin/doctor' ;;
   35e) printf 'bin/doctor' ;;
+  35f) printf 'bin/doctor' ;;
+  35g) printf 'bin/doctor' ;;
   36)  printf 'tests/evals/lib/runlog.sh' ;;
   37)  printf 'tests/evals/optimize.sh' ;;
   38)  printf 'tests/README.md' ;;
@@ -360,6 +362,8 @@ label_for(){ case "$1" in
   35c) printf 'gates refuse a green on nothing measured' ;;
   35d) printf 'gates refuse a green on nothing measured' ;;
   35e) printf 'gates refuse a green on nothing measured' ;;
+  35f) printf 'gates refuse a green on nothing measured' ;;
+  35g) printf 'gates refuse a green on nothing measured' ;;
   36)  printf 'run logs are opened append-safe' ;;
   37)  printf 'optimiser decides correctly' ;;
   38)  printf 'every repository path named in prose exists' ;;
@@ -636,6 +640,23 @@ exit 0
   35e) # Take away the exit STATUS: the drift branch is never taken, so a caller scripting on
       # `doctor --drift` reads success over a tree it just described as broken.
       sed -i.t 's/if \[ "\$DRIFT" = 1 \]; then/if [ "$DRIFT" = 9 ]; then/' bin/doctor \
+        && rm -f bin/doctor.t ;;
+
+  35f) # The reverse-direction lane: a server vstack installed and no longer ships stays
+      # registered forever. Skip the ownership record entirely and the lane silently reports
+      # nothing, which is indistinguishable from a clean machine.
+      sed -i.t 's|if \[ -f "\$_owned" \]; then|if false; then|' bin/doctor \
+        && rm -f bin/doctor.t ;;
+
+  35g) # The still-shipped guard. Drop it and every owned key reads as stale, including the ones
+      # this repo ships right now -- doctor would tell you to remove the servers it just
+      # installed. The third assertion in check 35's reverse-lane probe is what catches it.
+      #
+      # The probe's fourth assertion (a user's own server is never reported) has no row of its
+      # own, deliberately: the loop reads the ownership record, so breaking it means changing
+      # what the loop iterates, which is a rewrite rather than a defect shape a mutation can
+      # express. Said here rather than left for someone to notice the row count.
+      sed -i.t 's#>/dev/null 2>&1 && continue#>/dev/null 2>\&1 \&\& :#' bin/doctor \
         && rm -f bin/doctor.t ;;
 
   36) # Restore the truncation: treat every log as new, which is the line that shipped three

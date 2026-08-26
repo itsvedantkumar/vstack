@@ -185,6 +185,25 @@ run_drift() {
         fi
       fi
     done
+    # The other direction: a server this repo USED to ship, still registered on the machine.
+    # The loop above iterates the keys the repo declares today, so a key that left mcp/servers.json
+    # is not among them and stays behind forever -- and it cannot simply be inferred from $CJSON,
+    # because the user's own servers live in the same map and are none of vstack's business.
+    # $OWNED is what separates them: install.sh records every key it merged. Machines installed by
+    # <= 1.46.0 have no mcpServers: lines in that file, so they gain this on their next install,
+    # not retroactively. No record, no claim -- this lane stays silent rather than guessing.
+    _owned="$HOME/.config/agents/vstack-installed"
+    if [ -f "$_owned" ]; then
+      while IFS= read -r _line; do
+        case "$_line" in mcpServers:*) ;; *) continue ;; esac
+        _ok=${_line#mcpServers:}
+        printf '%s' "$mcp_want" | jq -e --arg m "$_ok" 'has($m)' >/dev/null 2>&1 && continue
+        jq -e --arg m "$_ok" '.mcpServers | has($m)' "$CJSON" >/dev/null 2>&1 || continue
+        COMPARED=$((COMPARED + 1))
+        echo "stale     mcp/servers.json:$_ok  (installed by vstack, no longer shipped, still registered in $CJSON)"
+        DRIFT=1
+      done < "$_owned"
+    fi
     family_floor "mcp/servers.json" "$nfam"; nfam=0
   elif [ -f "$REPO/mcp/servers.json" ]; then
     echo "error     mcp/servers.json  (jq not found, cannot compare)"

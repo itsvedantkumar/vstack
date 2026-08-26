@@ -2395,6 +2395,21 @@ if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
   grep -q 'missing.*mcp/servers.json:stub' <<<"$_o" \
     || g_errs="$g_errs\n  doctor --drift does not notice a declared mcp server that is not registered"
 
+  # A server vstack installed and no longer ships, still registered. Nothing in $CJSON says who
+  # put a key there, so this lane reads install.sh's ownership record; a user's own server must
+  # stay untouched. Both halves asserted here, because a lane that flagged everything registered
+  # would "pass" the first half while being unusable on any real machine.
+  printf '{"mcpServers":{"stub":{"command":"x","args":[],"env":{}},"dropped":{"command":"q"},"users-own":{"command":"z"}}}\n' \
+    > "$g_home/.claude.json"
+  printf 'mcpServers:stub\nmcpServers:dropped\n' > "$g_home/.config/agents/vstack-installed"
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'stale.*mcp/servers.json:dropped' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not notice an mcp server vstack installed and no longer ships"
+  grep -q 'users-own' <<<"$_o" \
+    && g_errs="$g_errs\n  doctor --drift reports the user's own mcp server as drift; only keys in the ownership record are vstack's"
+  grep -q 'stale.*mcp/servers.json:stub' <<<"$_o" \
+    && g_errs="$g_errs\n  doctor --drift calls a server this repo still ships stale; the record names it because it is installed, not because it was dropped"
+
   rm -rf "$g_empty" "$g_repo" "$g_home"
   [ -z "$g_errs" ] \
     && ok "gates refuse a green on nothing measured (ui-gate, doctor --drift, both directions)" \
