@@ -30,6 +30,33 @@ intended check, and a mutation that lands somewhere unreachable proves nothing a
 looking like it passed — appending `exit 3` to the end of `install.sh` did exactly that, because
 the dry-run path exits before reaching it.
 
+## inventory-fixture.sh
+
+`gate-falsifiability.sh` above proves the *checks* in `.claude/verify.sh` fail when their input
+breaks. `tests/inventory-fixture.sh` proves the other half: that everything which reads
+`claude/inventory.json`'s tree, or claims to describe it -- `tests/inventory-contract.sh`, checks
+11/12/31/48 in `.claude/verify.sh`, `bin/doctor --drift`, `tests/install-matrix.sh`,
+`tests/plugin-manifests.sh`, `overlay.sh`, `uninstall.sh --dry-run` -- actually notices when the
+tree gains a new component. A consumer is not proven by reading its source; it is proven by
+planting one minimal, valid file per family (skills, agents, agent_references, commands, hooks,
+wrappers, mcp_servers) and watching which consumers go red naming it.
+
+The assertion that makes this a test rather than a demo: **a consumer that passes with the plant
+in place is the finding, not a clean run.** Every such case is printed as
+`STALE CONSUMER: <name> did not notice <family>/<plant>` -- for example,
+`tests/install-matrix.sh` and `tests/plugin-manifests.sh` derive both the "expected" and the
+"actual" side of every comparison they make from this same live tree, so a family that grows
+correctly on both sides at once can never produce a mismatch there; `.claude/verify.sh` check 31
+iterates `git ls-files`, so it cannot see an untracked plant of any family, tracked-file
+convention aside.
+
+Needs an authenticated `claude` CLI (for the `plugin-manifests.sh` leg) and mutates a live tree,
+so it follows `tests/lib-collision-guard.sh`'s save/checkpoint/restore discipline and takes the
+same `--git-common-dir` falsifiability lock `gate-falsifiability.sh` does before planting
+anything, refusing rather than racing a peer sweep. Run it from a disposable `git worktree`, not
+the checkout you are also editing by hand -- same reason `gate-falsifiability.sh`'s own section
+above gives.
+
 ## claude/inventory.json
 
 `claude/inventory.json` is a machine-readable contract for what this repo ships: every
