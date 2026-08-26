@@ -157,6 +157,122 @@ of the fix against itself.
 
 All six reproductions are green.
 
+### The destructive guard's `ask` tier was inert for every unattended agent
+
+`guard-destructive.sh` returns `ask` for the commands that destroy uncommitted work, and check 23
+verifies it returns exactly that across thirty commands and three tiers, both directions. Under
+`bypassPermissions` — the mode every unattended agent runs in — an `ask` decision is auto-approved.
+Measured live: `git clean -fd` ran unprompted and deleted an untracked file with the guard live and
+answering `ask`, while a `deny` for a force-push to main blocked the entire tool call in the same
+session. Both halves correct for months; the join never tested.
+
+Not hypothetical. On the day this was found, four agents' uncommitted files were taken by a bare
+stash and a fifth agent's work was destroyed by a hard tree reset from another process, and the
+guard had answered `ask` for both.
+
+`permission_mode` is on the PreToolUse payload — confirmed by capturing the live hook's stdin
+during a real tool call, with the enum read out of the installed CLI binary. Under
+`bypassPermissions` the subset that destroys other people's uncommitted work now escalates to
+`deny`: bare `git stash`, hard tree resets, `git clean -fd`, and the already-workspace-scoped
+wildcard staging and no-pathspec commit. A bare stash was not in the file at all before and fell
+through to a silent allow. Every other rule in the tier — database drops, infrastructure teardown,
+the verify-trust store, device writes — is untouched, because an `ask` a human will actually see is
+doing its job. When the mode is absent the decision stays `ask` and the reason says plainly that it
+could not confirm anyone will see it.
+
+The join itself cannot be asserted offline: proving it requires driving Claude Code's own
+tool-execution loop, which is a model-call test. `tests/repro/guard-bypass-escalation.sh` covers the
+decider, and `docs/guard-enforcement-gap.md` states what that does and does not prove rather than
+letting check 23's label imply coverage it does not have.
+
+Known limitation, found immediately by the guard blocking a commit describing the guard: it matches
+syntax, not semantics, so a commit message quoting destructive flag syntax as prose is denied along
+with the whole tool call.
+
+### `vstack self-test`, `explain`, `recover`, and a local run log
+
+`self-test` answers "is this installation working" in one command, for an installed machine rather
+than a repo checkout. Its total is derived from the file's own section markers rather than
+maintained by hand, and a run where nothing executed fails on its own bar — `ran + skipped ==
+declared` holds at zero, which is precisely the accounting a gate that measured nothing satisfies.
+
+`explain` reads the live machine: which lane is installed, which paths vstack claims, which hooks
+are wired to which events, which repositories are trusted, and why a hook did or did not fire.
+Anything it cannot read is `UNKNOWN` and names the field.
+
+`recover` gives a partial install a way back. It delegates the restore to `uninstall.sh` rather
+than reimplementing one — a second blind restore is the shape that already destroyed two agents'
+work here — and refuses when the marker does not parse, names a path outside the backup root, names
+a directory that does not exist, or names a backup that is not the newest on disk. `install.sh`
+writes that marker after the backup directory is created and removes it as the last action before
+its own successful exit, so a marker that survives the process is the signal that the process did
+not finish.
+
+The run log at `~/.config/agents/vstack-runlog.jsonl` records one entry per `self-test` and
+`verify`. It is **not** an attestation and not a receipt: unsigned plaintext, editable by anything
+running as the user, and the file says so in its own schema note. Every field that cannot be
+determined serialises as `UNKNOWN`, never as a fabricated zero.
+
+### An inventory contract, and check 48
+
+`claude/inventory.json` records what this repository ships, every list and count derived by command
+rather than typed. Nothing reads it at run time, and `install.sh` in particular does not: the glob
+in the installer and the list in the contract are worth having only as two independent derivations
+of the same fact, and an installer that read the contract would turn "does the inventory match what
+installs" into a question that answers itself. `contract_version` is the hand-bumped schema version
+and an unrecognised value fails loudly; every count is derived and diffed.
+
+Check 48 runs `tests/inventory-contract.sh` against the tree, with floors per family stated
+alongside the claim that becomes false below each one.
+
+### The release gate picked whichever check-run the API returned last
+
+`require-checks-green.sh` reduced the check-runs for one name and one SHA with
+`sort_by(.name) | last`, applied to an array already filtered to that single name. A stable sort on
+a constant key returns input order, so it selected whatever GitHub happened to place last —
+observed live, that API returns newest first, which makes `last` the oldest. A check re-run to green
+would have been read as the earlier failure, and an earlier success could have been read over a
+later failure. That is publishing over red, inside the script written to prevent publishing over
+red. The projection had also discarded every timestamp, so no ordering was possible even in
+principle.
+
+The selection moved to `latest-check-run.jq` so its test runs the real program rather than a
+restatement of the rule, and there is deliberately no environment seam for injecting fake check-run
+JSON: a release gate with a bypass is not a gate. The caller now prints the attempt count and the
+earlier conclusions when a SHA carries more than one run, and refuses with `UNKNOWN` when several
+runs exist and none carries a timestamp.
+
+`tests/require-checks-green.sh` covers ten cases in both directions. One of them caught a defect in
+the fix while it was being written: ordering on `completed_at` first put an in-flight re-run below
+the finished run it was re-running, so the gate would have read the stale result while the real
+check was still going. `started_at` is the right primary key because every run carries one.
+
+### A compatibility canary, worktree collision detection, and a failure-aware ledger
+
+Every hook parsed Claude Code's payload with `jq ... // empty` and no else branch, so a renamed
+field or an unrecognised event degraded to the same silent exit as nothing happening, and nothing
+checked the Claude version at all. `compat-canary.sh` reports `KNOWN` or `UNKNOWN`, names every
+field it could not read, and writes to stderr rather than stdout because the session hook has four
+bytes of headroom under check 18's cap.
+
+`tests/lib-collision-guard.sh` gives harnesses a save/restore that refuses to overwrite a file
+changed since it was written, and a report naming which worktree, which PID and which lock file is
+holding a collision. The falsifiability lock moved from `git rev-parse --git-dir`, which returns a
+different path inside every linked worktree, to `--git-common-dir`, which resolves identically from
+all of them.
+
+The delegation ledger records `task_fail_count` alongside `task_count`, correlating each dispatch's
+`tool_use` id against a later error result. A ledger that cannot tell a verified fix from an agent
+that died after thirty seconds cannot support any claim about the routing layer, and this
+repository makes claims about the routing layer.
+
+### The catalogue goes from six to nine
+
+`docs/checks-that-inherit-their-answer.md` closed by predicting a seventh instance next month. It
+got three in a day, five weeks early: the guard decision nothing downstream honoured, check 18's cap
+clearing by one byte because the injected block embeds the absolute repository path, and a
+reproduction whose no-op control inverted the moment its own fix was committed.
+
 ## 1.45.1 — 2026-08-24
 
 **`doctor --drift` printed `no drift ✔ (74 item(s) compared)` over a tree containing a file it
