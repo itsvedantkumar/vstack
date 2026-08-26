@@ -84,7 +84,7 @@ cg_restore(){
 # even where a bare `trap ... EXIT` would have been silently sufficient or silently was not).
 cg_install_trap(){
   local paths=("$@")
-  # shellcheck disable=SC2064 -- intentional: expand $paths now, not when the trap fires later.
+  # shellcheck disable=SC2064  # intentional: expand $paths now, not when the trap fires later.
   trap "$(printf 'cg_restore %q; ' "${paths[@]}")" EXIT INT TERM HUP
 }
 

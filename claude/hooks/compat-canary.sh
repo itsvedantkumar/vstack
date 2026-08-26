@@ -94,7 +94,7 @@ fi
 ts=$(date +%s 2>/dev/null || echo 0)
 case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
 
-if [ -n "$reasons" ]; then status="UNKNOWN"; rc=2; else status="KNOWN"; rc=0; fi
+if [ -n "$reasons" ]; then status="UNKNOWN"; else status="KNOWN"; fi
 
 if [ -n "$JQ" ]; then
   rec=$("$JQ" -cn --arg s "$status" --arg v "$version" --arg e "$event" --arg r "$reasons" --argjson ts "$ts" \
