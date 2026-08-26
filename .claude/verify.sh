@@ -1655,9 +1655,25 @@ PINEOF
     if [ -n "$wt" ]; then
       drift=$(printf '%s\n%s' "$drift" "$wt" | grep -v '^$' | sort -u)
     fi
-    [ -z "$drift" ] && ok "declared version matches what installs (v$mv_, HEAD and working tree; the tag is local -- this does not check any remote)" \
-      || bad "declared version matches what installs" \
-             "$(printf 'the manifests say v%s but the payload has moved since that tag:\n%s\nbump the version and changelog it, or the plugin and unpinned lanes ship something v%s never described' "$mv_" "$(printf '%s' "$drift" | sed 's/^/  /' | head -10)" "$mv_")"
+    # How much history actually separates the tag from HEAD. When a tag is cut at HEAD -- exactly
+    # what release day does -- this is 0, `git diff v$mv_..HEAD` is empty by construction because
+    # the *range* is empty, and the old "ok" line below read as a verified match over a comparison
+    # that never happened. Computed unconditionally and reported in whichever line fires, so a
+    # reader never has to re-derive it, and used to choose which sentence is honest: a real range
+    # names how many commits it looked across, a zero-commit range names that it looked at none.
+    chk24_range_size=$(git rev-list --count "v$mv_..HEAD" 2>/dev/null)
+    case "$chk24_range_size" in (''|*[!0-9]*) chk24_range_size=0 ;; esac
+    if [ -n "$drift" ]; then
+      # The working-tree lane still bites here even when the range above is 0 -- a tag cut at
+      # HEAD with a dirty payload afterward is drift $wt puts into $drift, and this branch is
+      # reached before the zero-range branch below ever gets a look.
+      bad "declared version matches what installs" \
+          "$(printf 'the manifests say v%s but the payload has moved since that tag:\n%s\nbump the version and changelog it, or the plugin and unpinned lanes ship something v%s never described' "$mv_" "$(printf '%s' "$drift" | sed 's/^/  /' | head -10)" "$mv_")"
+    elif [ "$chk24_range_size" -eq 0 ]; then
+      ok "declared version matches what installs (v$mv_ is HEAD; 0 commits since the tag, so there was nothing to compare -- this becomes a measurement the moment the payload moves)"
+    else
+      ok "declared version matches what installs (v$mv_, HEAD and working tree; $chk24_range_size commit(s) since the tag touched no payload path; the tag is local -- this does not check any remote)"
+    fi
   fi
 else
   skip "declared version matches what installs" "git or jq not installed"
