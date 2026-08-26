@@ -74,8 +74,8 @@ Three `principle-*` skills fire at or near 0/10 and are named here rather than o
   was reverted rather than shipped, and the failure is recorded rather than retried silently.
 
 **Six checks were found in one day printing `ok` while measuring nothing they controlled.** On
-2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents ten now;
-the four added since are not restated here, because this section is dated and the catalogue is the
+2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents eleven now;
+the five added since are not restated here, because this section is dated and the catalogue is the
 place that stays current:
 
 - An anchor a prose edit silently moved (check 18, blind for eleven commits).
@@ -91,22 +91,29 @@ place that stays current:
 
 This is the closest thing this repository has to a stress test of the "all checks falsifiable"
 claim in category 1. It found the claim true only after finding six ways it had quietly stopped
-being true. The catalogue has since reached ten; four more were found on 2026-08-26 alone, so the
-rate that document predicted at roughly one a month is understated by about an order of magnitude.
+being true. The catalogue has since reached eleven, and by its own dating four of those were found on
+2026-08-26 alone, so the rate that document predicted at roughly one a month is understated by
+about an order of magnitude.
 
 ## What was expected here and not found
 
 Sourcing for the container-matrix Alpine and `vstack update` defects (category 1) traces to the
 CHANGELOG entry and the suite description in `tests/README.md`. The suite itself was not re-run
-for this document, per the constraints under which it was written. The same applies to
-`tests/gate-falsifiability.sh`. Its own re-run, and a fresh confirmation that all 42
-falsifiability rows still go red on cue, is asserted from `tests/README.md`'s description of the
-mechanism and README.md's stated check-16 guarantee, not from executing it again today.
+for this document, per the constraints under which it was written. That no longer applies to
+`tests/gate-falsifiability.sh`. When this section was first written the suite could not be run at
+all: it refuses to mutate a tree the gate did not pass first, and the gate was red, which is the
+refusal working.
 
-That row count is 57 as of 2026-08-26, and the same caveat still applies: the suite has not been
-run against the current tree. It cannot be. It refuses to mutate a tree the gate did not pass
-first, and the gate is red, which is the refusal working. Nothing in this document should be
-read as a claim that the current rows have been watched going red.
+It was run on 2026-08-27, against `c37ce8c` in a detached worktree rather than the shared
+checkout: **61 declared rows, 60 passed, 0 failed, 1 skipped, `FALSIFIABLE`**, followed by
+`ok restore integrity: no concurrent edits during the run` and `ok tree unchanged by the run`. The
+one skip is check 24, which names its reason (no tag to compare against). 58 of those rows carry a
+mutation; the other 3 are fixed rows that assert the harness's own accounting. The row total
+exceeds the 48 declared checks because several checks can fail in more than one way.
+
+Read that as narrowly as it is written. Every row was watched going red under its own mutation and
+green again after restore, on that commit. It is not a claim about any later commit, and it says
+nothing about whether a check that goes red on cue is measuring the thing its label names.
 
 ## Who should and should not use this
 
