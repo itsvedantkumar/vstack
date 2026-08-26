@@ -66,6 +66,27 @@ cd ~/Projects/vstack && ./install.sh
 ./bin/doctor            # confirm it landed
 ```
 
+Bare `./install.sh` installs everything above — that is the `opinionated` profile, and it is the
+default. `--profile=NAME` (or `VSTACK_PROFILE=NAME`; the flag wins if both are given) narrows what
+lands, and `uninstall.sh` only ever removes what the profile it ran under actually installed —
+never more:
+
+| Profile | Adds over `core` | Skips |
+|---|---|---|
+| `core` | — | roster, routing policy, taste-only skills |
+| `team` | `/team`, the roster, dispatch-count logging (`dispatch-counter.sh`, `skill-mandate.sh`) | UI lane, `CLAUDE.md` |
+| `ui` | the UI lane (`ui-engineer`, `design-reviewer`, `accessibility-auditor`, UI-only skills) | roster/routing, `CLAUDE.md` |
+| `opinionated` (default) | everything `team` and `ui` add, plus `CLAUDE.md` | nothing |
+
+`core` alone is the safety/lifecycle machinery — hooks, wrappers, `doctor`, `vstack trust`, the
+Stop gate — with no opinion about how you work: no roster, no routing policy, no skill that only
+encodes taste. `CLAUDE.md` (the routing policy itself) ships with `opinionated` only; installing
+it under a profile that ships none of the roster or skills it routes to would be a claim about a
+payload that profile does not carry. `--dry-run` works per profile and changes nothing on disk.
+`VSTACK_PROFILE=skills` is a different, unrelated axis — a hook-runtime value read by
+`inject-session-context.sh`, not an install profile — and `install.sh` rejects it by name rather
+than silently treating it as unknown.
+
 Pin a release rather than tracking `main`:
 
 ```bash
@@ -96,6 +117,18 @@ Removing it restores what was there before: `./uninstall.sh --yes` puts every fi
 back byte for byte, unpicks the hook entries, MCP servers and policy keys it merged into
 `settings.json` and `~/.claude.json`, and leaves anything you added alone.
 
+Which files were "it" — the set `uninstall.sh` is allowed to touch — is decided by
+`~/.config/agents/vstack-installed`, a plain-text, unsigned list of paths `install.sh` wrote,
+one per line. It is **not** a cryptographic attestation: anything running as you can edit it, and
+nothing checks a signature before trusting it. What it buys is narrower than that — it is
+"`install.sh` wrote this path" bookkeeping, so a `--profile=core` install's uninstall does not
+also delete the skills a later `team` install added, and so uninstall never deletes a file this
+repo never shipped just because its bytes happen to match. It is not proof the file is
+unmodified, and it is not proof nothing else forged an entry. A machine installed before 1.46.0
+(before this file existed) has no ownership record at all; `uninstall.sh` treats that absence as
+"assume everything below `~/.claude` is ours," which was every release's behavior before profiles
+existed, so upgrading an old install and then uninstalling still removes the whole thing.
+
 **Confirm it worked:** inside Claude Code, run `/doctor`. It detects which of the two lanes
 above actually landed and checks that one — skill, subagent and command counts for the plugin
 lane; the full hook, wrapper and MCP breakdown for the full install — rather than printing a
@@ -116,7 +149,7 @@ checks the right one; see [Day to day](#day-to-day)).
 | Skills | 28 | `~/.claude/skills/` |
 | Subagents | 14 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
-| Hooks | 7 | `~/.claude/hooks/` |
+| Hooks | 8 | `~/.claude/hooks/` |
 | CLI wrappers | 6 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 
