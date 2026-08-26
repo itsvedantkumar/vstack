@@ -51,6 +51,60 @@ resolve_vstack_repo() {
   return 1
 }
 
+# --- local run log -------------------------------------------------------------------------
+# NOT an attestation and NOT a receipt. It is unsigned plaintext, appended to by whatever ran
+# as this user, and readable and editable by anything else running as this user -- it proves
+# nothing to anyone it did not come from. It exists so a later command on THIS machine can see
+# what a run measured, not to vouch for that run to anyone else. See
+# docs/checks-that-inherit-their-answer.md for why a record that can silently claim more than
+# it measured is worse than no record: every field below either carries a real value or the
+# literal string "UNKNOWN" -- never a fabricated 0, false, or empty string standing in for "I
+# don't know." Local only. No network call is made to produce or ship this file.
+RUNLOG="$HOME/.config/agents/vstack-runlog.jsonl"
+runlog_write() { # <command> <outcome:VERIFIED|FAILED> <declared> <ran> <skipped> <exitCode>
+  _rl_cmd="$1"; _rl_outcome="$2"; _rl_decl="${3:-}"; _rl_ran="${4:-}"; _rl_skip="${5:-}"; _rl_rc="${6:-}"
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "run log: not written -- jq not installed (would have recorded: $_rl_cmd $_rl_outcome)" >&2
+    return 0
+  fi
+  mkdir -p "$(dirname "$RUNLOG")" 2>/dev/null || {
+    echo "run log: not written -- cannot create $(dirname "$RUNLOG")" >&2; return 0; }
+  # The SHA and dirty flag are read from $REPO, which self-test/explain resolve on a
+  # best-effort basis and may leave empty (plugin-only lane, or no repo findable at all). An
+  # absent or unresolvable repo must serialise as UNKNOWN, not as the SHA of whatever repo
+  # happened to be lying around, and not as "clean" by default.
+  _rl_sha="UNKNOWN"; _rl_dirty="UNKNOWN"
+  if [ -n "${REPO:-}" ] && command -v git >/dev/null 2>&1 && git -C "$REPO" rev-parse HEAD >/dev/null 2>&1; then
+    _rl_sha=$(git -C "$REPO" rev-parse HEAD 2>/dev/null)
+    if git -C "$REPO" diff --quiet 2>/dev/null && git -C "$REPO" diff --cached --quiet 2>/dev/null; then
+      _rl_dirty=false
+    else
+      _rl_dirty=true
+    fi
+  fi
+  _rl_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo UNKNOWN)
+  jq -nc \
+    --arg kind "local-run-log-entry" \
+    --arg schemaNote "unsigned plaintext, local only -- not an attestation, not a receipt, editable by anything running as this user" \
+    --arg command "$_rl_cmd" \
+    --arg outcome "$_rl_outcome" \
+    --arg timestamp "$_rl_ts" \
+    --arg sha "$_rl_sha" \
+    --arg dirty "$_rl_dirty" \
+    --arg declared "$_rl_decl" --arg ran "$_rl_ran" --arg skipped "$_rl_skip" \
+    --arg exitCode "$_rl_rc" \
+    '{
+      kind: $kind, schemaNote: $schemaNote, command: $command, outcome: $outcome,
+      timestamp: (if $timestamp == "" then "UNKNOWN" else $timestamp end),
+      sha: (if $sha == "" then "UNKNOWN" else $sha end),
+      repoDirty: (if $dirty == "true" then true elif $dirty == "false" then false else "UNKNOWN" end),
+      declared: (if ($declared|test("^[0-9]+$")) then ($declared|tonumber) else "UNKNOWN" end),
+      ran:      (if ($ran|test("^[0-9]+$"))      then ($ran|tonumber)      else "UNKNOWN" end),
+      skipped:  (if ($skipped|test("^[0-9]+$"))  then ($skipped|tonumber)  else "UNKNOWN" end),
+      exitCode: (if ($exitCode|test("^[0-9]+$"))  then ($exitCode|tonumber) else "UNKNOWN" end)
+    }' >> "$RUNLOG" 2>/dev/null
+}
+
 # --- self-test -------------------------------------------------------------------------------
 # The offline, zero-model checks that answer "is THIS machine's install working?" -- as
 # opposed to .claude/verify.sh (proves a repo CHECKOUT is installable/portable) and
@@ -166,6 +220,9 @@ $(basename "$st_f"): $st_out"
     echo "FAIL  self-test ran nothing -- a self-test that ran nothing must not report success"
     ST_FAIL=1
   fi
+
+  if [ "$ST_FAIL" -eq 0 ]; then ST_OUTCOME=VERIFIED; else ST_OUTCOME=FAILED; fi
+  runlog_write "self-test" "$ST_OUTCOME" "$ST_TOTAL" "$ST_RAN" "$ST_SKIPPED" "$ST_FAIL"
 
   [ "$ST_FAIL" -eq 0 ] && echo "SELF-TEST OK" || echo "SELF-TEST FAILED"
   return "$ST_FAIL"
@@ -313,7 +370,23 @@ case "$CMD" in
     "$REPO/overlay.sh" "$@"
     ;;
   verify)
-    "$REPO/.claude/verify.sh"
+    # Wrapped rather than exec'd so a structured local run-log entry can be written after --
+    # verify.sh's own stdout/stderr/exit code pass through unchanged (PIPESTATUS[0], not the
+    # pipeline's own status, so `set -o pipefail` never substitutes tee's exit code for it).
+    # Parsed from the printed footer ("checks: N declared, M ran, K skipped"), not
+    # recomputed -- if that line's shape ever changes, the parse fails closed to UNKNOWN
+    # rather than silently emitting a stale N/M/K that no longer matches what actually ran.
+    VERIFY_OUT=$(mktemp)
+    "$REPO/.claude/verify.sh" 2>&1 | tee "$VERIFY_OUT"
+    VERIFY_RC=${PIPESTATUS[0]}
+    VERIFY_FOOTER=$(grep -m1 '^checks: [0-9]* declared, [0-9]* ran, [0-9]* skipped$' "$VERIFY_OUT")
+    VERIFY_DECL=$(printf '%s' "$VERIFY_FOOTER" | sed -n 's/^checks: \([0-9]*\) declared.*/\1/p')
+    VERIFY_RAN=$(printf '%s' "$VERIFY_FOOTER" | sed -n 's/.* \([0-9]*\) ran,.*/\1/p')
+    VERIFY_SKIP=$(printf '%s' "$VERIFY_FOOTER" | sed -n 's/.* \([0-9]*\) skipped$/\1/p')
+    rm -f "$VERIFY_OUT"
+    [ "$VERIFY_RC" -eq 0 ] && VERIFY_OUTCOME=VERIFIED || VERIFY_OUTCOME=FAILED
+    runlog_write "verify" "$VERIFY_OUTCOME" "$VERIFY_DECL" "$VERIFY_RAN" "$VERIFY_SKIP" "$VERIFY_RC"
+    exit "$VERIFY_RC"
     ;;
   self-test)
     cmd_self_test

@@ -147,7 +147,106 @@ $out"
   fi
 }
 
-cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others"
+# --- local run log: real value or the literal string "UNKNOWN", never a fabricated one -----
+
+# self-test writes one JSONL record per run, tagged as what it is (not an attestation, not a
+# receipt), with a real SHA/dirty flag when a repo is resolvable.
+case_runlog_written_on_self_test() {
+  if ! command -v jq >/dev/null 2>&1; then skip "run log written by self-test" "jq not installed"; return; fi
+  h="$ROOT/home-runlog-written"
+  mkdir -p "$h"
+  env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" self-test >/dev/null 2>&1
+  f="$h/.config/agents/vstack-runlog.jsonl"
+  [ -f "$f" ] || { bad "run log written by self-test" "no file at $f"; return; }
+  row=$(tail -1 "$f")
+  kind=$(printf '%s' "$row" | jq -r '.kind')
+  note=$(printf '%s' "$row" | jq -r '.schemaNote')
+  cmd=$(printf '%s' "$row" | jq -r '.command')
+  decl=$(printf '%s' "$row" | jq -r '.declared')
+  sha=$(printf '%s' "$row" | jq -r '.sha')
+  if [ "$kind" = "local-run-log-entry" ] && [ "$cmd" = "self-test" ] && [ "$decl" = 5 ] \
+     && printf '%s' "$note" | grep -qi 'not an attestation' \
+     && printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then
+    ok "run log written by self-test (tagged, real SHA, matching accounting)"
+  else
+    bad "run log written by self-test" "row: $row"
+  fi
+}
+
+# No resolvable repo -> sha and repoDirty must serialise as the literal string "UNKNOWN", never
+# as an empty string, a fabricated SHA of an unrelated repo, or `false` standing in for "don't
+# know." This is the check 24 / dirty-tree failure mode from docs/checks-that-inherit-their-
+# answer.md, aimed at this file's own record instead of at someone else's.
+case_runlog_unknown_when_no_repo() {
+  if ! command -v jq >/dev/null 2>&1; then skip "run log UNKNOWN with no repo" "jq not installed"; return; fi
+  v=$(standalone_vstack runlog-unknown)
+  h="$ROOT/home-runlog-unknown"
+  mkdir -p "$h"
+  env -i HOME="$h" PATH="$MINPATH" "$v" self-test >/dev/null 2>&1
+  row=$(tail -1 "$h/.config/agents/vstack-runlog.jsonl" 2>/dev/null)
+  sha=$(printf '%s' "$row" | jq -r '.sha' 2>/dev/null)
+  dirty=$(printf '%s' "$row" | jq -r '.repoDirty' 2>/dev/null)
+  if [ "$sha" = "UNKNOWN" ] && [ "$dirty" = "UNKNOWN" ]; then
+    ok "run log UNKNOWN when no repo is resolvable (sha, repoDirty)"
+  else
+    bad "run log UNKNOWN when no repo is resolvable" "sha='$sha' repoDirty='$dirty' row: $row"
+  fi
+}
+
+# jq missing must fail VISIBLY -- a note on stderr naming the missing dependency -- and must not
+# fabricate a directory or a partial record. Silence here would be exactly the shape check 29 in
+# docs/checks-that-inherit-their-answer.md warns about: a tool that is absent producing the same
+# nothing as a tool that ran clean.
+case_runlog_visible_skip_without_jq() {
+  d="$ROOT/nobins-runlog"
+  mkdir -p "$d"
+  for f in /usr/bin/* /bin/*; do
+    b=$(basename "$f")
+    [ "$b" = jq ] && continue
+    ln -s "$f" "$d/$b" 2>/dev/null
+  done
+  h="$ROOT/home-runlog-nojq"
+  mkdir -p "$h"
+  out=$(env -i HOME="$h" PATH="$d" VSTACK_DIR="$SRC" "$VSTACK_BIN" self-test 2>&1)
+  if printf '%s\n' "$out" | grep -qF 'run log: not written -- jq not installed' \
+     && [ ! -e "$h/.config/agents/vstack-runlog.jsonl" ]; then
+    ok "run log skip is visible and creates nothing without jq"
+  else
+    bad "run log skip is visible and creates nothing without jq" "output:
+$out"
+  fi
+}
+
+# `vstack verify` wraps the real .claude/verify.sh, parsing its printed footer rather than
+# recomputing the count. This is the join: the wrapper's declared/ran/skipped must equal what
+# verify.sh itself printed on the very same run, read independently here rather than trusted.
+# Slow (runs the real gate) and left in the default set anyway, because a parser that was never
+# run against its real source is exactly the kind of check this repo has shipped broken before.
+case_verify_runlog_matches_own_footer() {
+  if ! command -v jq >/dev/null 2>&1; then skip "vstack verify run-log matches its own footer" "jq not installed"; return; fi
+  [ -x "$SRC/.claude/verify.sh" ] || { skip "vstack verify run-log matches its own footer" "no .claude/verify.sh here"; return; }
+  h="$ROOT/home-verify-runlog"
+  mkdir -p "$h"
+  out=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" verify 2>&1)
+  footer=$(printf '%s\n' "$out" | grep -m1 '^checks: [0-9]* declared, [0-9]* ran, [0-9]* skipped$')
+  want_decl=$(printf '%s' "$footer" | sed -n 's/^checks: \([0-9]*\) declared.*/\1/p')
+  want_ran=$(printf '%s' "$footer" | sed -n 's/.* \([0-9]*\) ran,.*/\1/p')
+  want_skip=$(printf '%s' "$footer" | sed -n 's/.* \([0-9]*\) skipped$/\1/p')
+  row=$(tail -1 "$h/.config/agents/vstack-runlog.jsonl" 2>/dev/null)
+  got_decl=$(printf '%s' "$row" | jq -r '.declared' 2>/dev/null)
+  got_ran=$(printf '%s' "$row" | jq -r '.ran' 2>/dev/null)
+  got_skip=$(printf '%s' "$row" | jq -r '.skipped' 2>/dev/null)
+  got_cmd=$(printf '%s' "$row" | jq -r '.command' 2>/dev/null)
+  if [ -n "$want_decl" ] && [ "$got_cmd" = "verify" ] \
+     && [ "$got_decl" = "$want_decl" ] && [ "$got_ran" = "$want_ran" ] && [ "$got_skip" = "$want_skip" ]; then
+    ok "vstack verify run-log matches its own printed footer ($want_decl/$want_ran/$want_skip)"
+  else
+    bad "vstack verify run-log matches its own printed footer" \
+        "footer='$footer' row='$row'"
+  fi
+}
+
+cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer"
 if [ $# -gt 0 ]; then cases="$*"; fi
 for c in $cases; do
   "case_$c"
