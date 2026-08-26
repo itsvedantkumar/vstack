@@ -22,8 +22,9 @@ A number exists, sourced, dated.
 
 | Claim | Evidence | Source, date |
 |---|---|---|
-| The gate is 48 checks, all currently green. | `./.claude/verify.sh` prints `checks: 44 declared, 44 ran, 0 skipped` and `VERIFIED`, run against this tree at v1.41.0. | Run 2026-08-23 |
-| Every one of those 48 checks has a falsifiability row that has been watched going red. `tests/gate-falsifiability.sh` breaks exactly what each check watches, requires the gate to name it, and restores the file byte for byte. Check 16 fails the gate if a check has no such row. | `tests/gate-falsifiability.sh`, `tests/README.md`, README.md "Checks that can fail" | Mechanism as of v1.41.0. Suite not re-run for this document; rows 40 and 44 verified by the scoped-row method only, see note below |
+| The gate was 44 checks, all green, at v1.41.0. | `./.claude/verify.sh` prints `checks: 44 declared, 44 ran, 0 skipped` and `VERIFIED`. | Run 2026-08-23 |
+| As of 2026-08-26 the gate declares 48 and is **red**: `checks: 48 declared, 47 ran, 1 skipped` and `VERIFICATION FAILED`. Three checks fail (`referenced install paths exist`, `inventory contract matches the tree`, `payload_digest`) and check 24 skips because 1.46.0 is declared by the manifests and not yet tagged. | `./.claude/verify.sh`, unpiped, on this branch | Run 2026-08-26 |
+| Every one of those 44 checks has a falsifiability row that has been watched going red. `tests/gate-falsifiability.sh` breaks exactly what each check watches, requires the gate to name it, and restores the file byte for byte. Check 16 fails the gate if a check has no such row. | `tests/gate-falsifiability.sh`, `tests/README.md`, README.md "Checks that can fail" | Mechanism as of v1.41.0. Suite not re-run for this document; rows 40 and 44 verified by the scoped-row method only, see note below |
 | `principle-type-system-discipline` almost never fired: 1/10 at n=10. Rewriting its description around the literal nouns a user types ("a struct, enum, or type can hold an invalid combination of fields") moved it to 9/10, matching the control. The identical rewrite method applied to `principle-build-the-lever` did not move it. That skill scored 2/10 before and after, exactly at the pre-registered falsification floor, and the rewrite was reverted rather than shipped. | CHANGELOG.md, "1.38.0" | 2026-08-23 |
 | `principle-prove-it-works` scored 0/10 on its own fixture prompt, because its trigger condition is about the assistant's own closing claim, not anything a skill matcher can see in the user's prompt. Replaced with a direct Stop-hook check (`prove-it-works`) rather than a rewritten description. | CHANGELOG.md, "1.37.0" | 2026-08-23 |
 | The container matrix's first run against published GitHub tags found two shipped defects. `bin/doctor` exited 1 on a clean Alpine install because its 45-day-cutoff `date` fallback chain covered BSD and GNU but BusyBox understands neither `date -v-45d` nor `date -d '45 days ago'`. And `vstack update`, run by anyone following the README's own documented pin quickstart (`VSTACK_REF=vX.Y.Z bash bootstrap.sh`), reported "already up to date" forever regardless of how far behind `main` the pinned checkout had drifted, because the shallow clone's refspec never fetches `origin/main` and the comparison failed silently with stderr discarded. | CHANGELOG.md, "1.33.0", and `tests/container-matrix.sh` | 2026-08-23 |
@@ -71,7 +72,9 @@ Three `principle-*` skills fire at or near 0/10 and are named here rather than o
   was reverted rather than shipped, and the failure is recorded rather than retried silently.
 
 **Six checks were found in one day printing `ok` while measuring nothing they controlled.** On
-2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six:
+2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents ten now;
+the four added since are not restated here, because this section is dated and the catalogue is the
+place that stays current:
 
 - An anchor a prose edit silently moved (check 18, blind for eleven commits).
 - A commit-boundary check that only goes red once it is too late to fix before committing (check
@@ -84,9 +87,10 @@ Three `principle-*` skills fire at or near 0/10 and are named here rather than o
 - A check whose own fake-green detector inherited an environment variable it neither set nor
   cleared (check 14b).
 
-This is the closest thing this repository has to a stress test of the "48 checks, all
-falsifiable" claim in category 1. It found the claim true only after finding six ways it had
-quietly stopped being true.
+This is the closest thing this repository has to a stress test of the "all checks falsifiable"
+claim in category 1. It found the claim true only after finding six ways it had quietly stopped
+being true. The catalogue has since reached ten; four more were found on 2026-08-26 alone, so the
+rate that document predicted at roughly one a month is understated by about an order of magnitude.
 
 ## What was expected here and not found
 
@@ -97,6 +101,11 @@ for this document, per the constraints under which it was written. The same appl
 falsifiability rows still go red on cue, is asserted from `tests/README.md`'s description of the
 mechanism and README.md's stated check-16 guarantee, not from executing it again today.
 
+That row count is 57 as of 2026-08-26, and the same caveat still applies: the suite has not been
+run against the current tree. It cannot be. It refuses to mutate a tree the gate did not pass
+first, and the gate is red, which is the refusal working. Nothing in this document should be
+read as a claim that the current rows have been watched going red.
+
 ## Who should and should not use this
 
 **The value here is safety and reversibility, not output quality.** Nothing measured shows this
@@ -104,8 +113,9 @@ configuration makes a frontier model write better code, review more accurately, 
 issues. Three separate benchmarks looked and found ties or nulls, mostly because the tasks tested
 left no headroom to find anything. What is real and checkable is narrower: a destructive-command
 guard that denies a fixed, tested set of catastrophic commands, a Stop-hook gate that blocks
-completion when the repository's own gate is red, and a gate of 48 checks with a documented, if
-imperfect, history of catching its own false greens.
+completion when the repository's own gate is red, and a gate with a documented, if imperfect,
+history of catching its own false greens. The check count moves too often to state here; read it
+from a run.
 
 If the goal is a frontier model that produces measurably better output, this will not deliver it
 and nothing here claims otherwise. If the goal is bounding blast radius and getting an honest
