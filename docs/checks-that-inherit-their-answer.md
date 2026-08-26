@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The eleven
+## The twelve
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -103,6 +103,22 @@ carries the same porcelain-based invariant at :191 and :836 and is not known to 
 because its mutations happen to edit files that already exist, which is a property nothing in it
 enforces. Inherited from: what git chooses to report, standing in for what is on disk.
 
+**The refusal that ends without a verdict.** `.claude/verify.sh` refuses to run while another
+process holds the falsifiability lock: it prints `REFUSED`, explains why, and exits 2. Correct on
+every count, and it still produced a false green on 2026-08-27. The refusal's last line was "Wait
+for it to finish", so the output ended with no verdict at all. Read the way people actually read
+gate output -- tail the last lines, count the `FAIL` lines -- a refusal is indistinguishable from a
+clean run: zero failures, no complaint. That reading went into a commit message as "Gate: 48
+declared, 47 ran, 1 skipped, VERIFIED", in a commit whose subject was about labels overstating what
+they assert, written by the person who had spent the day fixing exactly this. The exit code was
+right the whole time; nothing read it. The fix is a `NOT RUN` terminator in the position a real run
+puts `VERIFIED`, and an assertion on the refusal's LAST line, not just its first (row 14c). Note
+what this one costs to find: no check was wrong, no mutation would have caught it, and the
+falsifiability suite was green throughout. What failed was the human protocol around a correct
+program. **A discipline that has to be remembered is not a control**, and this catalogue now has
+two entries -- this and the empty-directory one -- where the defect was in how a true statement
+was read rather than in whether it was true.
+
 ## The test
 
 Before believing any check, ask: **what in the environment could make this print `ok` without
@@ -136,8 +152,8 @@ either.
 The generalisation is worth more than any individual fix: the fixes are six lines of shell, and the
 shape will produce a seventh instance next month in a check nobody has written yet.
 
-It produced four, in a single day, five weeks early. The last four entries above were all found on
-2026-08-26, in an audit looking for something else. One of them had been inert since the guard was
+It produced five, in two days, five weeks early. Four of the last five were found on 2026-08-26, in
+an audit looking for something else, and the fifth on 2026-08-27 by committing it. One of them had been inert since the guard was
 written, and the last of the four was found by a positive control rather than by the check written
 for that exact purpose, which passed. Reread this page before trusting a check you did not watch
 fail.

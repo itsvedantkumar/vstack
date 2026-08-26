@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -264,6 +264,7 @@ files_for(){ case "$1" in
   13)  printf 'claude/.claude-plugin/plugin.json' ;;
   14)  printf 'claude/hooks/verify-gate.sh' ;;
   14b) printf '.claude/verify.sh' ;;
+  14c) printf '.claude/verify.sh' ;;
   15)  printf 'claude/settings.json' ;;
   16)  printf 'tests/gate-falsifiability.sh' ;;
   17)  printf 'overlay.sh' ;;
@@ -332,6 +333,7 @@ label_for(){ case "$1" in
   13)  printf 'plugin manifest versions' ;;
   14)  printf 'stop-hook gate blocks' ;;
   14b) printf 'the gate refuses a tree under mutation' ;;
+  14c) printf 'the gate refuses a tree under mutation' ;;
   15)  printf 'skillOverrides' ;;
   16)  printf 'falsifiability coverage' ;;
   17)  printf 'overlay ships project keys only' ;;
@@ -476,6 +478,14 @@ exit 0
       # one silently disarmed row, caught only by this suite's own no-op detector. `kill -0`
       # through the end of the condition is the decision; the pid's spelling is not.
       sed -i.t 's/ && kill -0 .*2>\/dev\/null;/;/' \
+        .claude/verify.sh && rm -f .claude/verify.sh.t ;;
+
+  14c) # Take away the refusal's terminator. The exit code stays 2 and the REFUSED line stays
+      # first, so every assertion this check had before 2026-08-27 still passes -- and the output
+      # now ends on "Wait for it to finish", which is what a reader tailing the last lines, or
+      # counting FAIL lines, will call green. That reading is not hypothetical; it is how this
+      # row came to exist.
+      sed -i.t "s/^    printf 'NOT RUN  (refused;/    : 'NOT RUN  (refused;/" \
         .claude/verify.sh && rm -f .claude/verify.sh.t ;;
   16) sed -i.t 's/^CHECKS="0 /CHECKS="/' tests/gate-falsifiability.sh \
         && rm -f tests/gate-falsifiability.sh.t ;;

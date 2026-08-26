@@ -47,6 +47,14 @@ if [ -z "${VSTACK_FALSIFY:-}" ]; then
     fi
     printf '         Any result now would name a defect that process planted somewhere. Wait for it to finish.
 '
+    # A terminator, in the same position a real run puts VERIFIED. Without one, a refusal ends
+    # with no verdict line at all, and anyone reading the output the way people actually read it
+    # -- tail the last lines, or count FAIL lines -- sees zero failures and calls that green.
+    # That is not hypothetical: it happened on 2026-08-27, in this repo, to the person adding
+    # this line, in a commit message about labels overstating what they assert. The exit code
+    # was always right. Nothing that has to be remembered is a control.
+    printf 'NOT RUN  (refused; nothing was measured, so this is neither a pass nor a failure)
+'
     exit 2
   fi
 fi
@@ -880,12 +888,21 @@ if command -v git >/dev/null 2>&1; then
         _o=$(env -u VSTACK_FALSIFY VSTACK_GUARD_PROBE=1 bash "$SELF" 2>&1); _r=$?
       fi
       rm -f "$_gd/vstack-falsifiability.lock"
-      printf '%s:%s' "$_r" "$(printf '%s' "$_o" | head -1)"
+      # rc, first line and LAST line, in one string: _probe runs in a command substitution, so
+      # anything it assigns to a variable dies with the subshell. Learned the hard way, one
+      # `unbound variable` ago.
+      printf '%s:%s~~%s' "$_r" "$(printf '%s' "$_o" | head -1)" "$(printf '%s' "$_o" | tail -1)"
     }
     _live=$(_probe "$$" "")
     case "$_live" in
       2:REFUSED*) ;;
       *) g_errs="$g_errs\n  a live lock did not stop the gate: got [$_live], want rc 2 and REFUSED" ;;
+    esac
+    # The refusal's LAST line, not just its first. A reader who tails the output has to meet a
+    # verdict there or the absence of one reads as success.
+    case "$_live" in
+      *'~~NOT RUN'*) ;;
+      *) g_errs="$g_errs\n  a refusal does not end with a NOT RUN terminator: got [${_live#*~~}]. Output with no verdict on its last line reads as green to anyone who tails it" ;;
     esac
     # 999999 is chosen to be dead, and asserted dead rather than assumed -- a pid that happens to
     # exist would turn this direction into a silent duplicate of the one above.
