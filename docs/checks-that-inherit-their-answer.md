@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The six
+## The nine
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -44,6 +44,33 @@ into three copies of the same one. It passed by hand, because the hand running i
 `VSTACK_FALSIFY` set, and failed the first time the harness ran it. Inherited from: an environment
 variable the check neither set nor cleared.
 
+**The decision nothing downstream honoured.** The destructive guard returns `ask` for the commands
+that destroy uncommitted work, and check 23 verifies it returns exactly that, thirty commands
+across three tiers, both directions. Under `bypassPermissions` — the mode every unattended agent
+runs in — an `ask` decision is auto-approved. Measured: `git clean -fd` ran unprompted and deleted
+an untracked file with the guard live and returning `ask`; a `deny` for a force-push to main, in
+the same session, blocked the whole tool call. Both halves were correct for months and the join
+was never tested. The cost was not hypothetical: on the day this was found, a bare stash took four
+agents' uncommitted files and a hard reset from another process wiped a fifth agent's work, and the
+guard had answered `ask` for both. Inherited from: a permission mode the decider never read.
+
+**The cap that was clearing by one byte.** Check 18 asserts the session hook's output stays under
+4096 bytes. It measured 4095 in the operator's checkout and 4103 in a worktree of the same commit,
+because the injected block embeds the absolute repository path twice and the branch name once. The
+check was green on one machine, in one directory, on one branch. Anyone cloning to a longer path
+got a red gate on a clean tree, and the falsifiability suite could not run at all — it correctly
+refuses to mutate a tree that was not green first, which is the only reason this surfaced.
+Note the check's own comment already knew the measurement was environment-dependent and applied a
+tolerance to the README comparison beside it. The half that was reasoned about was right; the half
+next to it inherited the operator's directory name.
+
+**The control that inverted when its fix landed.** `tests/repro/formatter-config.sh` proved it was
+not vacuous by reverting to `HEAD:claude/hooks/format.sh` and requiring the attack to reproduce.
+The moment the fix was committed, HEAD became the fixed hook, the attack stopped reproducing, and
+the repro reported the hole OPEN because its own control had gone green. A no-op detector that
+reads `HEAD` measures the tree's history, not the fix, and every fix moves the thing it reads.
+Inherited from: which commit happened to be checked out.
+
 ## The test
 
 Before believing any check, ask: **what in the environment could make this print `ok` without
@@ -64,7 +91,7 @@ Skips are counted here for exactly this reason.
 everything and a validator that rejects everything are each indistinguishable from a healthy repo
 unless you hand it a known-good and a known-bad and require the right answer on both.
 
-**Does it pass when run by hand?** That is not evidence. Five of the six above passed by hand. Run
+**Does it pass when run by hand?** That is not evidence. Five of the nine above passed by hand. Run
 it the way the harness runs it, with the environment the harness has.
 
 ## Why this repo keeps finding it
@@ -76,6 +103,10 @@ either.
 
 The generalisation is worth more than any individual fix: the fixes are six lines of shell, and the
 shape will produce a seventh instance next month in a check nobody has written yet.
+
+It produced three, in a single day, five weeks early. The last three entries above were all found on
+2026-08-26, in an audit looking for something else. One of them had been inert since the guard was
+written. Reread this page before trusting a check you did not watch fail.
 
 ## Related
 
