@@ -253,6 +253,100 @@ if want uninstall; then
   [ "$rc" = 0 ] && [ -z "$e" ] && ok "uninstall restores and preserves" || bad "uninstall restores and preserves" "exit=$rc$e"
 fi
 
+# --- install -> install -> uninstall (P0-1) -------------------------------------------------------
+# The defect this repo shipped: install.sh's back() copied a file into the CURRENT run's backup
+# dir unconditionally, even when the new content was vstack's own previous payload. So a second
+# install backed up the FIRST install's copy of e.g. verify-gate.sh, not the pre-vstack original
+# (there wasn't one). uninstall.sh restores the latest backup with no --from, so it restored
+# vstack's own file and left it in place -- vstack never actually left the machine. Fixed by
+# e26bbc2/e66544e: an ownership receipt at ~/.config/agents/vstack-installed that back() checks
+# before ever recording a path as "the user's".
+#
+# This case is the regression test for that fix, run from the matrix rather than only from
+# tests/repro/lifecycle.sh, so the coverage does not live in a script nobody runs by default.
+if want reinstall-uninstall; then
+  H="$ROOT/reinst"; mkdir -p "$H/.claude/hooks" "$H/.claude/skills/my-own-skill"
+  printf '{\n  "foreignVendorKey": "acme-widgets-prod-42"\n}\n' > "$H/.claude/settings.json"
+  printf '#!/bin/sh\necho "operator'"'"'s own hook, not vstack'"'"'s"\n' > "$H/.claude/hooks/user-own-hook.sh"
+  chmod +x "$H/.claude/hooks/user-own-hook.sh"
+  printf '# my own skill, predates vstack\n' > "$H/.claude/skills/my-own-skill/SKILL.md"
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1; i1=$?
+  # BK_BASE has second resolution; without this the second install lands in the FIRST install's
+  # own backup dir (mkdir -p happily reuses it) and this case would exercise a different bug
+  # (backup-collision, covered separately) instead of the one it names.
+  sleep 1.1
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1; i2=$?
+  out=$(HOME="$H" "$SRC/uninstall.sh" --yes 2>&1); u=$?
+  e=""
+  [ "$i1" = 0 ] && [ "$i2" = 0 ] || e="$e; install exit codes i1=$i1 i2=$i2"
+  [ "$(count_dirs "$H/.claude/skills")" = 1 ] || e="$e; skills not cleaned to just the user's ($(count_dirs "$H/.claude/skills")/1)"
+  [ -e "$H/.claude/hooks/verify-gate.sh" ] && e="$e; vstack's own hook survived a second install+uninstall"
+  grep -q 'foreignVendorKey' "$H/.claude/settings.json" 2>/dev/null || e="$e; user's settings key lost"
+  grep -q 'statusline.sh' "$H/.claude/settings.json" 2>/dev/null && e="$e; settings.json still points at vstack's statusline"
+  [ -f "$H/.claude/hooks/user-own-hook.sh" ] || e="$e; user's own hook was deleted"
+  grep -q "operator's own hook" "$H/.claude/hooks/user-own-hook.sh" 2>/dev/null || e="$e; user's own hook was overwritten"
+  [ -f "$H/.claude/skills/my-own-skill/SKILL.md" ] || e="$e; user's own skill was deleted"
+  [ "$u" = 0 ] && [ -z "$e" ] && ok "install -> install -> uninstall restores the pre-vstack state" \
+    || bad "install -> install -> uninstall restores the pre-vstack state" "uninstall exit=$u$e (out: $(printf '%s' "$out" | tail -3 | tr '\n' ' '))"
+fi
+
+# --- install vA -> install vB -> uninstall (upgrade across the same defect) -------------------------
+# Same claim, harder case: vA and vB are two different commits, so vstack's own files differ byte
+# for byte between the two installs and a content-comparison guard (cmp -s) cannot tell "this is
+# vstack's own previous payload" from "this is the user's file that happens to match". Only the
+# receipt survives a version change; seed_receipt() in install.sh exists for the machines that
+# upgraded before the receipt itself existed.
+#
+# vA runs from a disposable git worktree pinned to the newest tag strictly older than HEAD, never
+# by moving this checkout's own branch and never via `git fetch` (fetch.prune/fetch.pruneTags
+# nuke local tags in this environment).
+if want version-upgrade-uninstall; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "install vA -> install vB -> uninstall restores pre-vA state" "git not installed"
+  else
+    VA_TAG=""
+    HEAD_TAG=$(git -C "$SRC" describe --tags --exact-match 2>/dev/null || true)
+    for t in $(git -C "$SRC" tag --sort=v:refname 2>/dev/null); do
+      [ "$t" = "$HEAD_TAG" ] && continue
+      VA_TAG="$t"
+    done
+    if [ -z "$VA_TAG" ]; then
+      skip "install vA -> install vB -> uninstall restores pre-vA state" "no tag older than HEAD found"
+    else
+      WT="$ROOT/vupg-wt"
+      if ! git -C "$SRC" worktree add --detach --quiet "$WT" "$VA_TAG" >/dev/null 2>&1; then
+        skip "install vA -> install vB -> uninstall restores pre-vA state" "could not create a worktree for $VA_TAG"
+      else
+        H="$ROOT/vupg"; mkdir -p "$H/.claude/hooks" "$H/.claude/skills/my-own-skill"
+        printf '{\n  "foreignVendorKey": "acme-widgets-prod-42"\n}\n' > "$H/.claude/settings.json"
+        printf '#!/bin/sh\necho "operator'"'"'s own hook, not vstack'"'"'s"\n' > "$H/.claude/hooks/user-own-hook.sh"
+        chmod +x "$H/.claude/hooks/user-own-hook.sh"
+        printf '# my own skill, predates vstack\n' > "$H/.claude/skills/my-own-skill/SKILL.md"
+        HOME="$H" "$WT/install.sh" >/dev/null 2>&1; iva=$?
+        sleep 1.1
+        HOME="$H" "$SRC/install.sh" >/dev/null 2>&1; ivb=$?
+        out=$(HOME="$H" "$SRC/uninstall.sh" --yes 2>&1); u=$?
+        e=""
+        [ "$iva" = 0 ] && [ "$ivb" = 0 ] || e="$e; install exit codes vA($VA_TAG)=$iva vB(HEAD)=$ivb"
+        [ "$(count_dirs "$H/.claude/skills")" = 1 ] || e="$e; skills not cleaned to just the user's ($(count_dirs "$H/.claude/skills")/1)"
+        [ -e "$H/.claude/hooks/verify-gate.sh" ] && e="$e; vstack's own hook survived an upgrade+uninstall"
+        grep -q 'foreignVendorKey' "$H/.claude/settings.json" 2>/dev/null || e="$e; user's settings key lost"
+        grep -q 'statusline.sh' "$H/.claude/settings.json" 2>/dev/null && e="$e; settings.json still points at vstack's statusline"
+        [ -f "$H/.claude/hooks/user-own-hook.sh" ] || e="$e; user's own hook was deleted"
+        grep -q "operator's own hook" "$H/.claude/hooks/user-own-hook.sh" 2>/dev/null || e="$e; user's own hook was overwritten"
+        [ -f "$H/.claude/skills/my-own-skill/SKILL.md" ] || e="$e; user's own skill was deleted"
+        # uninstall must remove vB's payload outright, not quietly leave vA's version behind as
+        # a substitute -- there is no rollback command in this repo, and none is implied here.
+        [ -e "$H/.config/agents/vstack-installed" ] && e="$e; the ownership receipt itself survived uninstall"
+        git -C "$SRC" worktree remove --force "$WT" >/dev/null 2>&1
+        [ "$u" = 0 ] && [ -z "$e" ] && ok "install $VA_TAG -> install HEAD -> uninstall restores the pre-vA state" \
+          || bad "install $VA_TAG -> install HEAD -> uninstall restores the pre-vA state" \
+                 "uninstall exit=$u$e (out: $(printf '%s' "$out" | tail -3 | tr '\n' ' '))"
+      fi
+    fi
+  fi
+fi
+
 # --- refusing to act without --yes --------------------------------------------------------------------
 # Read the exit status directly. Piping this to anything returns the pipe's status, which is how
 # this was measured wrong the first time.

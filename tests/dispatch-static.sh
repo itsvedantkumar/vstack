@@ -159,11 +159,22 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# (c) Every fixture file a setup_* function writes is syntactically parseable, for the
-# languages a free parser is available for (python3 -m py_compile, node --check, jq empty,
-# bash -n). Everything else (this file's fixtures also include .ts, .css, .html, .md, .go,
-# .txt, .log, .bak) has no free parser wired up here and is counted as skipped, not passed --
-# a skip is not evidence the file is fine.
+# (c) Every fixture file a setup_* function writes is syntactically parseable, using a
+# deterministic validator for each of the eight extensions today's fixtures actually use that
+# are executable/structured rather than prose: .sh (bash -n), .py (python3 -m py_compile), .js/
+# .mjs/.cjs (node --check), .json (jq empty), .ts (tsc --noEmit), .go (gofmt -l), .html
+# (xmllint --html --noout), .css (csslint). Prose/data fixtures (.md, .txt, .log, .bak) have
+# nothing to parse and are skipped on purpose.
+#
+# A missing validator for one of the eight is now a FAIL naming the missing binary, never a
+# silent SKIP. It used to be a SKIP, and that is precisely the fake green this script existed
+# to prevent: run with a PATH that hides `node` (`PATH=/usr/bin:/bin tests/dispatch-static.sh`)
+# and the old code left 28 of 35 fixtures across ts/go/html/css/js entirely unexamined -- every
+# .ts, .go, .html and .css fixture had no case at all, and every .js fixture skipped silently
+# the moment node was not on PATH -- while still printing "ok fixtures parseable" and
+# "FIXTURES INTACT". A skip is not evidence the file is fine, and the summary line must not
+# claim it is. CI installs the missing tool (tsc, gofmt, xmllint, csslint are the four this
+# host previously lacked wiring for); a local run without one now fails and says which.
 # ---------------------------------------------------------------------------
 echo "--- (c) fixture files setup_* functions write are syntactically valid ---"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-static.XXXXXX")"
@@ -235,7 +246,7 @@ else
               echo "FAIL  $fn -> ${f#"$fixdir"/} (python3 -m py_compile): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
             fi
           else
-            echo "SKIP  $fn -> ${f#"$fixdir"/} (python3 not on PATH)"; c_skip=$((c_skip+1))
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: python3"; c_fail=$((c_fail+1))
           fi ;;
         *.js|*.mjs|*.cjs)
           if command -v node >/dev/null 2>&1; then
@@ -245,7 +256,7 @@ else
               echo "FAIL  $fn -> ${f#"$fixdir"/} (node --check): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
             fi
           else
-            echo "SKIP  $fn -> ${f#"$fixdir"/} (node not on PATH)"; c_skip=$((c_skip+1))
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: node"; c_fail=$((c_fail+1))
           fi ;;
         *.json)
           if command -v jq >/dev/null 2>&1; then
@@ -255,19 +266,78 @@ else
               echo "FAIL  $fn -> ${f#"$fixdir"/} (jq empty): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
             fi
           else
-            echo "SKIP  $fn -> ${f#"$fixdir"/} (jq not on PATH)"; c_skip=$((c_skip+1))
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: jq"; c_fail=$((c_fail+1))
           fi ;;
+        *.ts)
+          # tsc reads a single file standalone (no tsconfig.json in a synthetic fixdir);
+          # --skipLibCheck keeps it from pulling in lib.d.ts noise unrelated to the fixture,
+          # and --noEmit means this never writes a .js file next to the fixture it is checking.
+          if command -v tsc >/dev/null 2>&1; then
+            if tsc --noEmit --skipLibCheck "$f" 2>"$WORK/p.err"; then
+              echo "PASS  $fn -> ${f#"$fixdir"/} (tsc --noEmit)"; c_ok=$((c_ok+1))
+            else
+              echo "FAIL  $fn -> ${f#"$fixdir"/} (tsc --noEmit): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
+            fi
+          else
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: tsc (npm install -g typescript)"; c_fail=$((c_fail+1))
+          fi ;;
+        *.go)
+          # gofmt -l is a real parse: a syntax error prints to stderr and exits non-zero. A
+          # file that parses fine but needs reformatting also exits 0 (just lists itself on
+          # stdout), which is deliberate -- this checks the fixture parses, not that it is
+          # already gofmt-clean.
+          if command -v gofmt >/dev/null 2>&1; then
+            if gofmt -l "$f" >/dev/null 2>"$WORK/p.err"; then
+              echo "PASS  $fn -> ${f#"$fixdir"/} (gofmt -l)"; c_ok=$((c_ok+1))
+            else
+              echo "FAIL  $fn -> ${f#"$fixdir"/} (gofmt -l): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
+            fi
+          else
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: gofmt (install the Go toolchain)"; c_fail=$((c_fail+1))
+          fi ;;
+        *.html)
+          # libxml2's HTML parser is deliberately permissive -- it recovers from broken markup
+          # rather than refusing it, so --html --noout always exits 0. It still reports genuine
+          # parse errors ("HTML parser error :") to stderr while doing so; that text, not the
+          # exit code, is the signal.
+          if command -v xmllint >/dev/null 2>&1; then
+            xmllint --html --noout "$f" >/dev/null 2>"$WORK/p.err"
+            if ! grep -qi 'parser error' "$WORK/p.err" 2>/dev/null; then
+              echo "PASS  $fn -> ${f#"$fixdir"/} (xmllint --html)"; c_ok=$((c_ok+1))
+            else
+              echo "FAIL  $fn -> ${f#"$fixdir"/} (xmllint --html): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
+            fi
+          else
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: xmllint (libxml2-utils on Debian/Alpine)"; c_fail=$((c_fail+1))
+          fi ;;
+        *.css)
+          # csslint's exit code already isolates real parse errors from style opinion: it
+          # exits non-zero only when the file has an `error`-level problem (a genuine syntax
+          # break), and exits 0 when everything reported is a `warning` (property ordering,
+          # box-model opinions, etc.) -- verified against both a hand-broken fixture and every
+          # real .css fixture in this file before wiring this in.
+          if command -v csslint >/dev/null 2>&1; then
+            if csslint --quiet "$f" >"$WORK/p.err" 2>&1; then
+              echo "PASS  $fn -> ${f#"$fixdir"/} (csslint)"; c_ok=$((c_ok+1))
+            else
+              echo "FAIL  $fn -> ${f#"$fixdir"/} (csslint): $(cat "$WORK/p.err")"; c_fail=$((c_fail+1))
+            fi
+          else
+            echo "FAIL  $fn -> ${f#"$fixdir"/}: missing validator: csslint (npm install -g csslint)"; c_fail=$((c_fail+1))
+          fi ;;
+        *.md|*.txt|*.log|*.bak)
+          echo "SKIP  $fn -> ${f#"$fixdir"/} (prose/data fixture, nothing to parse)"; c_skip=$((c_skip+1)) ;;
         *)
-          echo "SKIP  $fn -> ${f#"$fixdir"/} (no free parser wired up for this extension)"; c_skip=$((c_skip+1)) ;;
+          echo "FAIL  $fn -> ${f#"$fixdir"/}: no validator wired up for this extension (add one to tests/dispatch-static.sh rather than let it skip silently)"; c_fail=$((c_fail+1)) ;;
       esac
     done < <(find "$fixdir" -type f | sort)
   done
   rm -f "$WORK/p.err" "$WORK/setup.err"
 
   if (( c_fail == 0 )); then
-    ok "fixtures parseable ($c_ok parsed clean, $c_skip skipped: no free parser or tool missing, 0 fail)"
+    ok "fixtures parseable ($c_ok parsed clean, $c_skip skipped as prose/data, 0 fail -- every executable fixture was actually run through a validator)"
   else
-    bad "fixtures parseable" "$c_fail fixture file(s) failed to parse ($c_ok clean, $c_skip skipped)"
+    bad "fixtures parseable" "$c_fail fixture file(s) failed to parse or had no validator available ($c_ok clean, $c_skip skipped as prose/data)"
   fi
 fi
 echo
