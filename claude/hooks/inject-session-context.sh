@@ -68,6 +68,26 @@ if [ "${VSTACK_DUPE_SUPPRESS:-1}" = "1" ] && [ "$is_overlay" = 1 ] && [ "$global
   exit 0
 fi
 
+# Compatibility canary: SessionStart only (not every prompt) -- a version/payload-shape check is
+# a once-per-session concern, and this is the copy that actually speaks for this session (the
+# dupe-suppressed overlay returned above without reaching here). VSTACK_NO_COMPAT_CANARY=1 turns
+# it off. Never blocks and NEVER touches this hook's own stdout: check 18 (.claude/verify.sh)
+# measures the SessionStart hook's total stdout byte count and the real baseline sits 4 bytes
+# under its 4096-byte cap, so anything appended to hookSpecificOutput here -- additionalContext
+# OR a sibling systemMessage field, both live in the same JSON line -- would push the gate red on
+# exactly the occasion the canary is doing its job (a real Claude Code version bump). The
+# durable, visible record is compat-canary.sh's own state file
+# (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-compat-canary.json, one JSON object, overwritten
+# per check) plus this stderr line, which check 18's probe explicitly discards (`2>/dev/null`)
+# and which a real Claude Code session does not fold into model context either.
+if [ "$event" = "SessionStart" ] && [ "${VSTACK_NO_COMPAT_CANARY:-0}" != "1" ]; then
+  _cc="$(dirname "$self")/compat-canary.sh"
+  if [ -x "$_cc" ]; then
+    _cc_out=$(printf '%s' "$in" | "$_cc" 2>/dev/null)
+    [ $? -eq 2 ] && printf 'vstack compat canary: %s\n' "$_cc_out" >&2
+  fi
+fi
+
 # Per-prompt digest: must stay tiny and fast (no git work) — it runs on every prompt.
 # The skills profile re-pins nothing per prompt; one session-start block is the
 # least a skill pack can inject and still work.
