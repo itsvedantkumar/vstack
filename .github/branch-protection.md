@@ -39,6 +39,16 @@ creating a second one, look up its id with `gh api repos/itsvedantkumar/vstack/r
 ## 2. Release tags cannot be force-moved
 
 `.github/tag-protection-ruleset.json` — blocks `update` (force-move) on any `refs/tags/v*` ref.
+**Before applying the branch ruleset, know what it costs you.** `bypass_actors` is empty, so it
+applies to the repository owner too. Today this repository is worked by committing straight to
+`main`; with this ruleset active, a direct push to `main` is refused until the four required jobs
+have reported success for that commit, which for a local commit means pushing a branch and opening
+a pull request. That is the point of the ruleset, and it is a real change to how this repository is
+worked. Decide it deliberately rather than discovering it on the next push. If you want the
+protection without the workflow change, add yourself to `bypass_actors` — and note that a bypass
+you always use is a check that measures nothing, which is the defect this repository exists to
+catalogue.
+
 Deletion is deliberately left unrestricted: `release.yml`'s `cleanup-on-failed-gate` job deletes
 the candidate tag it just watched fail required checks, and release-manager's own rollback path
 (cut a new version rather than force-push) also deletes a bad tag rather than moving one. Blocking

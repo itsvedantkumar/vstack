@@ -1,15 +1,19 @@
 {
-  "name": "release tags: no force-move, no delete",
+  "name": "release tags: no force-move",
   "target": "tag",
   "enforcement": "active",
   "conditions": {
     "ref_name": {
-      "include": ["refs/tags/v*"],
+      "include": [
+        "refs/tags/v*"
+      ],
       "exclude": []
     }
   },
   "rules": [
-    { "type": "update" }
+    {
+      "type": "update"
+    }
   ],
   "bypass_actors": []
 }
