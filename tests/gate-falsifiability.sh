@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -235,6 +235,7 @@ files_for(){ case "$1" in
   4|5|6) printf 'README.md' ;;
   7)   printf 'claude/CLAUDE.md' ;;
   8|9|11) printf 'install.sh' ;;
+  47)  printf 'claude/hooks/hooks.json' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   12)  printf 'README.md' ;;
@@ -288,6 +289,7 @@ label_for(){ case "$1" in
   7)   printf 'referenced skills exist' ;;
   8)   printf 'settings merge program' ;;
   9)   printf 'install.sh --dry-run' ;;
+  47)  printf 'plugin-lane hooks run standalone' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   11)  printf 'hook wiring' ;;
@@ -365,6 +367,11 @@ exit 7
   # `exit 4` only proved the check notices overlay crashing. The assertions that matter are the
   # merge ones, so mutate the merge: go back to the wholesale array replace this check exists to
   # catch, and the target repo's own Stop hook disappears.
+  # Put verify-gate.sh back in the plugin lane. It tells the operator to run `vstack trust`,
+  # a command this lane never installs, which is exactly what shipped for three releases while
+  # README said the lane installed no hooks at all.
+  47) jq '.hooks.Stop[0].hooks = ([{type:"command",shell:"bash",command:"\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""}] + .hooks.Stop[0].hooks)' \
+        claude/hooks/hooks.json > /tmp/c47row.$$ && cat /tmp/c47row.$$ > claude/hooks/hooks.json && rm -f /tmp/c47row.$$ ;;
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
   11) # drop the PostToolUse key while PostToolUseFailure stays: the exact shape the old

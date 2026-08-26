@@ -1,5 +1,5 @@
 {
-  "description": "Routes situations to skills so they fire without a slash command, and runs the repo's .claude/verify.sh gate before the agent is allowed to finish.",
+  "description": "Routes situations to skills so they fire without a slash command, and holds the agent to the routing it was given. The .claude/verify.sh Stop gate is NOT in this lane: it refuses to run an untrusted gate and tells the operator to run `vstack trust`, a command only the full install provides. A hook whose only outcome is naming a command you do not have is not a feature of this lane.",
   "hooks": {
     "SessionStart": [
       {
@@ -16,11 +16,6 @@
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""
-          },
           {
             "type": "command",
             "shell": "bash",

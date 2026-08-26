@@ -2769,6 +2769,84 @@ fi
   && ok "no accidental agents under claude/agents (references ship as .ref)" \
   || bad "no accidental agents under claude/agents (references ship as .ref)" "$(printf '%b' "$c46_errs")"
 
+# --- 47. every hook the plugin lane ships runs in the plugin lane ------------------------------
+# The marketplace lane installs skills, agents, commands and claude/hooks/hooks.json into the
+# plugin cache. It installs no CLI wrappers, no ~/.config/agents, and merges nothing into
+# ~/.claude/settings.json. A hook wired into hooks.json therefore has to work with the plugin
+# cache and nothing else.
+#
+# verify-gate.sh did not. It refuses to run an untrusted .claude/verify.sh and tells the operator
+# to run `vstack trust` -- a command only the full install provides -- so in this lane its only
+# reachable outcome was naming a command the user does not have. It shipped that way while
+# README's component table said the lane installed 0 hooks. Two lanes, two contracts, neither
+# checked against the other.
+#
+# So: run every hooks.json script the way the plugin lane runs it. HOME is an empty sandbox with
+# no ~/.config/agents, and PATH is scrubbed of this repo's own wrappers, which is the difference
+# between "works here because the developer has the full install" and "works for a stranger".
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  c47_errs=""
+  c47_root=$(mktemp -d); c47_home=$(mktemp -d)
+  cp -R claude/hooks "$c47_root/hooks" 2>/dev/null
+  chmod 755 "$c47_root"/hooks/*.sh 2>/dev/null
+  # The sandbox cwd must LOOK like a repo with a gate in it, or a Stop hook that only speaks when
+  # it finds a .claude/verify.sh stays silent and this check passes over it without measuring
+  # anything. That silence is what a thin fixture buys: the hook does nothing, nothing is wrong.
+  mkdir -p "$c47_home/.claude"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$c47_home/.claude/verify.sh"
+  chmod 755 "$c47_home/.claude/verify.sh"
+  # PATH without the vstack wrappers: a stranger's machine, not this one.
+  c47_path=$(printf '%s' "$PATH" | tr ':' '\n' \
+             | grep -v "$HOME/.config/agents/bin" | grep -v "$PWD/bin" | tr '\n' ':')
+  c47_run(){ # <script> <event-json>  -> prints "rc|stdout"
+    _o=$(printf '%s' "$2" | env -i HOME="$c47_home" PATH="$c47_path" \
+           CLAUDE_PLUGIN_ROOT="$c47_root" VSTACK_PROFILE=skills \
+           TMPDIR="$c47_home" bash "$1" 2>/dev/null); printf '%s|%s' "$?" "$_o"; }
+
+  c47_scripts=$(jq -r '.hooks[][]?.hooks[]?.command' claude/hooks/hooks.json 2>/dev/null \
+                | grep -oE 'hooks/[A-Za-z0-9_.-]+\.sh' | sed 's|hooks/||' | sort -u)
+  if [ -z "$c47_scripts" ]; then
+    c47_errs="$c47_errs\ncould not extract any hook script from claude/hooks/hooks.json"
+  fi
+  for c47_s in $c47_scripts; do
+    [ -f "$c47_root/hooks/$c47_s" ] || { c47_errs="$c47_errs\n$c47_s: named by hooks.json, not shipped"; continue; }
+    case "$c47_s" in
+      inject-session-context.sh) c47_ev='{"hook_event_name":"SessionStart","session_id":"c47","cwd":"'"$c47_home"'","source":"startup"}' ;;
+      *)                         c47_ev='{"hook_event_name":"Stop","session_id":"c47","cwd":"'"$c47_home"'","stop_hook_active":false}' ;;
+    esac
+    c47_res=$(c47_run "$c47_root/hooks/$c47_s" "$c47_ev")
+    c47_rc=${c47_res%%|*}; c47_out=${c47_res#*|}
+    [ "$c47_rc" = "0" ] || c47_errs="$c47_errs\n$c47_s: exit $c47_rc in a plugin-only lane"
+    # Empty is fine (a hook with nothing to say). Non-empty must be JSON Claude Code can read.
+    if [ -n "$c47_out" ] && ! printf '%s' "$c47_out" | jq -e . >/dev/null 2>&1; then
+      c47_errs="$c47_errs\n$c47_s: emitted non-JSON in a plugin-only lane"
+    fi
+    # The real defect: telling the operator to run something this lane never installed.
+    for c47_w in vstack doctor; do
+      if printf '%s' "$c47_out" | grep -qE "(run|Run) [\`']?$c47_w " 2>/dev/null; then
+        c47_errs="$c47_errs\n$c47_s: tells the operator to run '$c47_w', which the plugin lane does not install"
+      fi
+    done
+  done
+
+  # Positive control. The scan above is a grep over hook output, and a grep that has stopped
+  # matching reports the same clean result as a lane with nothing wrong in it. Plant a hook that
+  # commits the exact defect and require the scan to see it.
+  printf '#!/usr/bin/env bash\nprintf %%s "{\\"x\\":\\"run vstack trust to arm this\\"}"\n' \
+    > "$c47_root/hooks/c47-probe.sh"
+  chmod 755 "$c47_root/hooks/c47-probe.sh"
+  c47_p=$(c47_run "$c47_root/hooks/c47-probe.sh" '{"hook_event_name":"Stop"}')
+  printf '%s' "${c47_p#*|}" | grep -qE "(run|Run) [\`']?vstack " 2>/dev/null \
+    || c47_errs="$c47_errs\npositive control: the planted 'run vstack trust' hook was NOT caught — this scan measures nothing"
+  rm -rf "$c47_root" "$c47_home"
+
+  [ -z "$c47_errs" ] \
+    && ok "plugin-lane hooks run standalone ($(printf '%s' "$c47_scripts" | grep -c .) script(s), no full-install dependency)" \
+    || bad "plugin-lane hooks run standalone" "$(printf '%b' "$c47_errs")"
+else
+  skip "plugin-lane hooks run standalone" "jq or git not installed"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

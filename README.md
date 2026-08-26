@@ -23,7 +23,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 46 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 47 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -46,9 +46,17 @@ claude plugin marketplace add itsvedantkumar/vstack
 claude plugin install vstack@vstack
 ```
 
-That is the whole plugin lane: skills, subagents and commands, nothing else touched on the
-machine. Remove it with `claude plugin uninstall vstack@vstack` — there is no `uninstall.sh` to
-run, because there is no checkout.
+That is the plugin lane: skills, subagents, commands, and the two routing hooks that make skills
+fire — one on SessionStart, one on Stop. Nothing else on the machine is touched: no CLI wrappers,
+no shell lane, no MCP servers, no settings merged into `~/.claude`. Remove it with
+`claude plugin uninstall vstack@vstack` — there is no `uninstall.sh` to run, because there is no
+checkout.
+
+The `.claude/verify.sh` Stop gate is deliberately **not** in this lane. It refuses to run an
+untrusted gate and tells you to run `vstack trust`, which only the full install provides, so in
+the plugin lane its only possible outcome was naming a command you do not have. Until 1.46.0 it
+shipped here anyway while this page said the lane installed no hooks at all — the manifest and the
+documentation each described a different product.
 
 For the hooks, the CLI wrappers and the shell lane, take the full install:
 
@@ -123,7 +131,7 @@ recognise alone. Check 21 fails if it deletes a key this repository never shippe
 | Skills | 28 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
 | Subagents | 14 | `~/.claude/plugins/cache/vstack/vstack/<version>/agents/` |
 | Commands | 15 | `~/.claude/plugins/cache/vstack/vstack/<version>/commands/` |
-| Hooks | 0 (not this lane) | full install only |
+| Hooks | 2 (routing only) | `claude/hooks/hooks.json`, run from the plugin cache |
 | CLI wrappers | 0 (not this lane) | full install only |
 | MCP servers | 0 — `claude/.claude-plugin/plugin.json` declares none | full install only |
 
@@ -151,14 +159,14 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 46 checks. `tests/gate-falsifiability.sh` breaks the repository once per check, at
+The gate is 47 checks. `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
 naming that check, restores the tree byte for byte, and fails if anything was left behind.
 **Check 16 fails if any check has no mutation row**, so a check cannot be added without proof it
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 46 checks
+./.claude/verify.sh                  # 47 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
@@ -198,6 +206,10 @@ A gate you cannot turn off gets deleted by the first person it inconveniences, s
 gate is per repository and opt-in: `vstack trust` arms it, and an untrusted `.claude/verify.sh` is
 never executed. `tests/compare-baseline.sh` produces the table above by firing the real hooks, and
 every row carries the value it is supposed to produce.
+
+Formatting skips a project's `plugins`-declaring Prettier config until you run `vstack trust` in
+that repo, and the hook says why in its output rather than failing quietly. `SECURITY.md` has the
+full boundary.
 
 The gate re-runs `.claude/verify.sh` on every Stop while it is failing. After 3 real failures in a
 session it throttles re-checks to once per `VSTACK_VERIFY_RESET_SECS` (default 300s) to bound the
