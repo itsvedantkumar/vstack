@@ -13,10 +13,11 @@ gate.
 | Script | Defect | Status |
 |---|---|---|
 | `tests/repro/lifecycle.sh` | `uninstall.sh` could not return a machine to its pre-vstack state. Two causes: `install.sh` backed up its own payload so the next uninstall restored it, and `uninstall.sh` derived hook basenames from `claude/settings.json`, whose commands are quoted `$CLAUDE_PROJECT_DIR` strings, so both ownership branches were dead code. | fixed 1.46.0 |
-| `tests/repro/overlay-ownership.sh` | `overlay.sh` deep-merges with `($dest * $ship)`, which replaces whole arrays. Every hook event vstack also populates loses the project's own entries, and `skillOverrides` is overwritten outright. | open |
-| `tests/repro/bootstrap-safety.sh` | `bootstrap.sh` checks `git status --porcelain` and nothing else, so a clean-but-ahead or diverged checkout is `reset --hard FETCH_HEAD` and the unpushed commit is dropped with no warning and no named ref. | open |
-| `tests/repro/stop-gate.sh` | The Stop gate stops blocking after 3 refusals and never re-arms for that session, even after a green run. The counter is a plain file at a path computable from the hook's own source, so one `echo 3 >` disables it on the first try. | open |
-| `tests/repro/trust-closure.sh` | `vstack trust` hashes `.claude/verify.sh` and the `*.sh` paths it names literally. The generated gate also runs `npm run typecheck`, `uv run pytest` and `cargo test`, none of which the hash covers. | open |
+| `tests/repro/overlay-ownership.sh` | `overlay.sh` deep-merges with `($dest * $ship)`, which replaces whole arrays. Every hook event vstack also populates loses the project's own entries, and `skillOverrides` is overwritten outright. | fixed 1.46.0 |
+| `tests/repro/bootstrap-safety.sh` | `bootstrap.sh` checks `git status --porcelain` and nothing else, so a clean-but-ahead or diverged checkout is `reset --hard FETCH_HEAD` and the unpushed commit is dropped with no warning and no named ref. | fixed 1.46.0 |
+| `tests/repro/stop-gate.sh` | The Stop gate stops blocking after 3 refusals and never re-arms for that session, even after a green run. The counter is a plain file at a path computable from the hook's own source, so one `echo 3 >` disables it on the first try. | fixed 1.46.0 |
+| `tests/repro/trust-closure.sh` | `vstack trust` hashes `.claude/verify.sh` and the `*.sh` paths it names literally. The generated gate also runs `npm run typecheck`, `uv run pytest` and `cargo test`, none of which the hash covers. | fixed 1.46.0 |
+| `tests/repro/formatter-config.sh` | `format.sh` fires on every `Edit`/`Write`/`MultiEdit`, and Prettier `require()`s any `.js` named in a static `.prettierrc.json` `plugins` array. Cloning a repo and editing one file ran that repo's JS, with the Stop gate's trust record never consulted. | fixed 1.46.0 |
 
 Run one directly. There are no arguments and no fixtures to prepare:
 

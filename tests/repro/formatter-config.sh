@@ -14,8 +14,16 @@
 # trusted. It fires format.sh against each, plus a positive control (baseline formatting with no
 # plugins, in neither repo) to prove the harness exercises the hook at all rather than passing
 # by accident. It then re-runs the untrusted attack against the pre-fix committed blob of
-# format.sh (via `git show HEAD`) in a scratch copy, to prove this test is not a no-op: the
-# reverted hook must let the attack through, or nothing here is measuring anything.
+# format.sh in a scratch copy, to prove this test is not a no-op: the reverted hook must let the
+# attack through, or nothing here is measuring anything.
+#
+# That blob is NOT `HEAD:claude/hooks/format.sh`. It was, while the fix sat uncommitted, and the
+# no-op proof inverted the day the fix landed -- HEAD became the fixed hook, the attack stopped
+# reproducing, and the repro reported the hole OPEN because its control had gone green. The
+# baseline is now derived: walk this file's history newest-first and take the first blob that
+# does not carry the guard. That answer cannot rot when the fix is committed, rebased, or
+# reverted, and it fails loudly if no such commit exists rather than silently comparing the fix
+# against itself.
 #
 # Exit 0 -- hole closed: untrusted repo's plugin never ran, trusted repo's plugin still does,
 #           baseline formatting still works, and the reverted copy demonstrably lets it through.
@@ -124,8 +132,22 @@ fi
 
 # --- no-op proof: same attack against the pre-fix committed blob of format.sh ----------------
 PREFIX_HOOK="$FMT_SANDBOX/format-prefix.sh"
-if ! git -C "$REPO_ROOT" show HEAD:claude/hooks/format.sh > "$PREFIX_HOOK" 2>/dev/null; then
-  bad "could not read HEAD:claude/hooks/format.sh to build the no-op proof"
+# The guard's own name is the discriminator. Anchored on the function rather than on a SHA: a
+# pinned SHA is a second place to remember, and the one that goes stale first.
+GUARD_MARK='is_project_trusted'
+PREFIX_SHA=''
+for _c in $(git -C "$REPO_ROOT" log --format=%H -- claude/hooks/format.sh); do
+  if ! git -C "$REPO_ROOT" show "$_c:claude/hooks/format.sh" 2>/dev/null | grep -q "$GUARD_MARK"; then
+    PREFIX_SHA="$_c"
+    break
+  fi
+done
+if [ -z "$PREFIX_SHA" ]; then
+  bad "no commit of claude/hooks/format.sh predates the $GUARD_MARK guard -- the no-op proof has no baseline to revert to, so this test cannot show it measures anything"
+  exit 1
+fi
+if ! git -C "$REPO_ROOT" show "$PREFIX_SHA:claude/hooks/format.sh" > "$PREFIX_HOOK" 2>/dev/null; then
+  bad "could not read $PREFIX_SHA:claude/hooks/format.sh to build the no-op proof"
   exit 1
 fi
 chmod +x "$PREFIX_HOOK"
@@ -133,9 +155,9 @@ REPO_REVERT="$FMT_SANDBOX/revert-repo"
 make_repo "$REPO_REVERT" "marker-revert-proof"
 run_hook "$PREFIX_HOOK" "$REPO_REVERT" "$FAKE_HOME_UNTRUSTED"
 if [ -f "$MARKER_DIR/marker-revert-proof" ]; then
-  ok "no-op proof: the pre-fix committed format.sh does let this exact attack through -- this test is not vacuous"
+  ok "no-op proof: format.sh at $PREFIX_SHA does let this exact attack through -- this test is not vacuous"
 else
-  bad "no-op proof failed: reverting to HEAD's format.sh did NOT reproduce the attack -- either HEAD already closed this, or this test cannot detect the hole it claims to"
+  bad "no-op proof failed: reverting to $PREFIX_SHA (the newest format.sh without $GUARD_MARK) did NOT reproduce the attack -- this test cannot detect the hole it claims to"
 fi
 
 real_ts_after=$( [ -f "$REAL_TS" ] && wc -l < "$REAL_TS" | tr -d ' ' || echo 0 )
