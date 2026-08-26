@@ -41,7 +41,7 @@ SRC=$(pwd)
 # shellcheck source=tests/lib-collision-guard.sh
 . "$SRC/tests/lib-collision-guard.sh"
 
-PASS=0; FAIL=0; STALE=0
+PASS=0; FAIL=0; STALE=0; UNKNOWN=0
 ok(){   printf 'ok    %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){  printf 'FAIL  %s\n      %s\n' "$1" "${2:-}"; FAIL=$((FAIL+1)); }
 noticed(){ printf '  notice  %-24s %s\n' "$1" "$2"; }
@@ -49,6 +49,19 @@ stale(){   printf '  STALE   %-24s %s\n' "$1" "$2"
   STALE_LINES="$STALE_LINES
 STALE CONSUMER: $1 did not notice $3/$4 ($2)"
   STALE=$((STALE+1))
+}
+# A consumer that exited non-zero but never mentioned this family's plant is NOT the same claim
+# as STALE ("ran clean, structurally could not have noticed") -- it may have failed for a real,
+# unrelated reason, and folding the two together hides that reason behind a label that reads as
+# reassuring. Found the hard way: do_unplant's own directory-leak bug (see its comment) made
+# plugin-manifests.sh exit non-zero on every family after skills in one run, and the first cut of
+# this predicate recorded all of them as STALE because none mentioned that run's own family name
+# -- which was true and also not what "STALE" is supposed to claim. unknown() prints the
+# consumer's own FAIL line(s) so the reader can attribute it instead of the harness guessing.
+unknown(){ printf '  UNKNOWN %-24s %s\n' "$1" "$2"
+  STALE_LINES="$STALE_LINES
+UNKNOWN CONSUMER: $1 exited non-zero for $3/$4 without mentioning it -- attribute by hand ($2)"
+  UNKNOWN=$((UNKNOWN+1))
 }
 skip_row(){ printf '  n/a     %-24s %s\n' "$1" "$2"; }
 STALE_LINES=""
@@ -203,6 +216,22 @@ do_unplant(){ # family
   # `rmdir` only ever removes a directory that is actually empty, so this is safe to run
   # unconditionally for every family: claude/commands, claude/hooks, claude/agents/reference and
   # bin/ all have other files in them already and rmdir silently no-ops on all four.
+  #
+  # Why this matters beyond skills' own row: before this fix, one run of this file (log timestamp
+  # 22:18, the run this repo's history calls "run #2") left the orphaned skills directory behind
+  # after the skills family's own window closed, and every family iteration AFTER skills in that
+  # same run shared this one live tree -- so plugin-manifests.sh's "every claude/skills/*/
+  # directory carries a SKILL.md" check kept failing on that leftover for the rest of the run,
+  # regardless of which family was actually under test at the time. Reproduced in isolation with
+  # no other plant present: `mkdir -p claude/skills/vstack-fixture-skill && ./tests/
+  # plugin-manifests.sh` fails the same two checks every time (`loader vs disk: > vstack-fixture-
+  # skill`, `missing SKILL.md in: claude/skills/vstack-fixture-skill/`), confirming the six
+  # exit=1s that run recorded for agents/agent_references/commands/hooks/wrappers/mcp_servers were
+  # this leak, not those families' own plants -- their own FAIL text never named their own token,
+  # which is exactly why the predicate at plugin-manifests.sh's call site (below) correctly did
+  # not call it "noticed" for those families. It was mis-labeled STALE, not mis-labeled noticed;
+  # see unknown() for why that distinction gets its own state now, and rmdir above for the fix
+  # that makes the leak (and therefore the whole question) stop recurring.
   rmdir "$(dirname "$pp")" 2>/dev/null || true
 }
 
@@ -358,7 +387,7 @@ for fam in $FAMILIES; do
     if [ "$drift_rc" -eq 0 ] && [ "$drift_compared" = "$BASE_COMPARED" ]; then
       stale "bin/doctor --drift" "exit=0, compared=$drift_compared (identical to the no-plant baseline of $BASE_COMPARED) -- run_drift() never reads mcp/servers.json" "$fam" "$name"
     else
-      noticed "bin/doctor --drift" "unexpectedly changed (exit=$drift_rc compared=$drift_compared) -- re-check the STALE prediction for mcp_servers"
+      unknown "bin/doctor --drift" "exit=$drift_rc compared=$drift_compared -- does not match the STALE prediction for mcp_servers, attribute by hand" "$fam" "$name"
     fi
   else
     # A drift-found run prints only the missing/differs lines plus "DRIFT (word)", no
@@ -377,10 +406,12 @@ for fam in $FAMILIES; do
   #    rather than assumed, because that is exactly the kind of claim this file exists to check
   #    empirically rather than take on trust.
   im_out=$(./tests/install-matrix.sh default 2>&1); im_rc=$?
-  if [ "$im_rc" -ne 0 ] && printf '%s\n' "$im_out" | grep -qi "$name\|FAIL"; then
-    noticed "install-matrix.sh default" "$(printf '%s\n' "$im_out" | grep -i 'FAIL' | head -1)"
+  if [ "$im_rc" -ne 0 ] && printf '%s\n' "$im_out" | grep -qi "$name"; then
+    noticed "install-matrix.sh default" "$(printf '%s\n' "$im_out" | grep -i "$name" | head -1)"
+  elif [ "$im_rc" -eq 0 ]; then
+    stale "install-matrix.sh default" "exit=0, ok -- counts are derived from this same tree on both sides of every comparison" "$fam" "$name"
   else
-    stale "install-matrix.sh default" "exit=$im_rc, ok -- counts are derived from this same tree on both sides of every comparison" "$fam" "$name"
+    unknown "install-matrix.sh default" "exit=$im_rc, FAIL line(s): $(printf '%s\n' "$im_out" | grep -i 'FAIL' | tr '\n' ';')" "$fam" "$name"
   fi
 
   # 8. tests/plugin-manifests.sh -- the loader-vs-disk diffs (checks 3-4) derive BOTH sides from
@@ -391,8 +422,10 @@ for fam in $FAMILIES; do
     pm_out=$(./tests/plugin-manifests.sh 2>&1); pm_rc=$?
     if [ "$pm_rc" -ne 0 ] && printf '%s\n' "$pm_out" | grep -q "$name"; then
       noticed "plugin-manifests.sh" "$(printf '%s\n' "$pm_out" | grep "$name" | head -1)"
+    elif [ "$pm_rc" -eq 0 ]; then
+      stale "plugin-manifests.sh" "exit=0 -- loader and disk inventories are both derived from this tree, or the family is not covered at all" "$fam" "$name"
     else
-      stale "plugin-manifests.sh" "exit=$pm_rc -- loader and disk inventories are both derived from this tree, or the family is not covered at all" "$fam" "$name"
+      unknown "plugin-manifests.sh" "exit=$pm_rc, FAIL line(s): $(printf '%s\n' "$pm_out" | grep '^FAIL' | tr '\n' ';')" "$fam" "$name"
     fi
   else
     skip_row "plugin-manifests.sh" "claude CLI not installed"
@@ -479,7 +512,7 @@ fi
 
 echo
 if [ -n "$STALE_LINES" ]; then
-  echo "== STALE CONSUMER findings ================================================================"
+  echo "== STALE CONSUMER / UNKNOWN findings ======================================================"
   printf '%s\n' "$STALE_LINES" | grep -v '^$'
 fi
 
@@ -493,6 +526,6 @@ else
 fi
 
 echo
-printf 'inventory-fixture: %d ok, %d FAIL, %d STALE CONSUMER finding(s)\n' "$PASS" "$FAIL" "$STALE"
+printf 'inventory-fixture: %d ok, %d FAIL, %d STALE CONSUMER finding(s), %d UNKNOWN finding(s)\n' "$PASS" "$FAIL" "$STALE" "$UNKNOWN"
 release_lock
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1
