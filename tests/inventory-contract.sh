@@ -25,6 +25,34 @@ pass(){ printf 'ok    %s\n' "$1"; RAN=$((RAN+1)); }
 SKIPPED=0
 skipc(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
+PAYLOAD_PATHS='claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh :(exclude)claude/inventory.json'
+
+payload_digest_compute(){
+  # -c -o --exclude-standard: tracked entries AND untracked-but-not-ignored files, so a new hook
+  # dropped into claude/hooks/ counts as payload movement. A tracked file deleted from the working
+  # tree still appears in the -c list and hashes as `absent`, which is how a deletion registers.
+  # NUL-delimited throughout: no quoting, no filename that can split a field.
+  # shellcheck disable=SC2086
+  git ls-files -z -co --exclude-standard -- $PAYLOAD_PATHS \
+    | LC_ALL=C sort -z -u \
+    | while IFS= read -r -d '' f; do
+        if [ -L "$f" ]; then
+          printf 'symlink %s -> %s\n' "$f" "$(readlink "$f")"
+        elif [ -f "$f" ]; then
+          printf '%s %s %s\n' "$(shasum -a 256 < "$f" | cut -d' ' -f1)" \
+                               "$([ -x "$f" ] && printf 'x' || printf -- '-')" "$f"
+        else
+          printf 'absent - %s\n' "$f"
+        fi
+      done \
+    | shasum -a 256 | cut -d' ' -f1
+}
+
+# `tests/inventory-contract.sh --print-digest` is the ONLY supported way to recompute the value
+# that goes into the file. Anyone typing the recipe by hand into a shell is running a second
+# implementation, which is how the old one drifted from what it claimed to measure.
+if [ "${1:-}" = "--print-digest" ]; then payload_digest_compute; exit 0; fi
+
 command -v jq >/dev/null 2>&1 || { echo "FAIL  jq is required to validate $INV" >&2; exit 1; }
 [ -f "$INV" ] || { echo "FAIL  $INV not found" >&2; exit 1; }
 jq empty "$INV" >/dev/null 2>&1 || { echo "FAIL  $INV does not parse as JSON" >&2; exit 1; }
@@ -39,24 +67,51 @@ case "$SUPPORTED_CONTRACT_VERSIONS" in
   (*) fail "contract_version" "claude/inventory.json declares contract_version $cv, which this validator does not recognise (known:$SUPPORTED_CONTRACT_VERSIONS). The schema may have changed under it -- update tests/inventory-contract.sh before trusting anything else in this file, do not proceed past this line." ;;
 esac
 
-# --- payload digest: recompute the EXACT recipe the file documents (derived_at.digest_recipe),
-# by eval'ing that string rather than a copy of it kept here, so the recipe this script runs and
-# the recipe the file claims to be reporting can never drift apart from each other. A mismatch
-# means the tree moved since this snapshot was taken and every derived field below needs
-# re-checking -- the file calls this out itself (derived_at.staleness_is_the_signal): "the
-# intended failure, not a maintenance chore".
+# --- payload digest -----------------------------------------------------------------------------
+# This block used to `eval` the recipe string out of claude/inventory.json, on the stated reasoning
+# that "the recipe this script runs and the recipe the file claims can never drift apart". That is
+# the defect, not the safeguard: it made the artifact its own oracle. Editing digest_recipe and
+# payload_digest together passed the check while measuring nothing, and eval'ing a string out of
+# the file under test is arbitrary code execution from the artifact. The recipe now lives here, in
+# the independent half, and the file merely names where it lives.
 #
-# The recipe excludes claude/inventory.json's own path on purpose (derived_at.self_reference_note):
-# the file lives inside claude/, which the recipe scans, so without the exclusion the digest could
-# never match itself -- committing the file changes its own blob hash, which changes the digest
-# it is trying to record, a fixed point editing the file cannot reach.
-digest_cmd=$(jq -r '.derived_at.digest_recipe' "$INV")
-computed_digest=$(eval "$digest_cmd" 2>/dev/null | awk '{print $1}')
+# The old recipe was also content-blind. It hashed `git ls-files -s` (INDEX blob ids) plus
+# `git status --porcelain` (status letters and paths, never bytes), so two different unstaged
+# edits to the same file produced the same digest, and so did two different untracked payload
+# files at the same path. Both confirmed by running it. This one hashes the working-tree bytes.
+#
+# claude/inventory.json's own path is excluded on purpose (derived_at.self_reference_note): the
+# file lives inside claude/, which this scans, so without the exclusion the digest could never
+# match itself -- writing the file changes its own bytes, which changes the digest it is trying to
+# record, a fixed point editing the file cannot reach.
+
+computed_digest=$(payload_digest_compute)
 stated_digest=$(jq -r '.derived_at.payload_digest' "$INV")
 if [ "$computed_digest" = "$stated_digest" ]; then
   pass "payload_digest matches the tree ($computed_digest)"
 else
   fail "payload_digest" "claude/inventory.json's derived_at.payload_digest is $stated_digest; the tree's is $computed_digest. The snapshot is stale."
+fi
+
+# The file no longer carries an executable recipe, so nothing here can be tricked into running
+# it. What it carries instead is a pointer, and a pointer nobody checks is how prose goes stale:
+# derived_at.digest_recipe_source must name a function this script actually defines.
+recipe_src=$(jq -r '.derived_at.digest_recipe_source // empty' "$INV")
+if [ -z "$recipe_src" ]; then
+  fail "digest_recipe_source" "claude/inventory.json does not say where payload_digest's recipe lives; a digest with no named implementation cannot be reproduced"
+elif jq -e '.derived_at | has("digest_recipe")' "$INV" >/dev/null 2>&1; then
+  fail "digest_recipe_source" "claude/inventory.json still carries an executable derived_at.digest_recipe. That field was the oracle supplying its own recipe; it must not come back"
+else
+  _rs_file=${recipe_src%%:*}
+  _rs_fn=${recipe_src#*:}
+  _rs_fn=${_rs_fn%%(*}
+  if [ ! -f "$_rs_file" ]; then
+    fail "digest_recipe_source" "digest_recipe_source names $_rs_file, which does not exist"
+  elif ! grep -q "^${_rs_fn}()" "$_rs_file"; then
+    fail "digest_recipe_source" "digest_recipe_source names $_rs_fn in $_rs_file, but no such function is defined there"
+  else
+    pass "digest_recipe_source names a live implementation ($recipe_src)"
+  fi
 fi
 
 # --- derived_at.head names a real commit this checkout can see, and one HEAD descends from -----
