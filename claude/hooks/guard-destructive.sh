@@ -55,6 +55,31 @@ emit() { # <allow|ask|deny> <reason>
 }
 allow() { _guard_emitted=1; printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}\n'; exit 0; }
 
+# emit_unattended_ask <reason> — for the subset of the ask tier that has no legitimate
+# unattended-agent use: destroying another session's uncommitted work. `ask` only means anything
+# if a human is there to see it. Measured live, twice, in this session under bypassPermissions
+# (this bundle's shipped default — install.sh --bypass-permissions, README recommends it):
+# `git reset --hard` got `ask` and ran anyway, rc=0, no prompt, no block; `git push --force`
+# got `deny` and was actually blocked. `ask` is decoration under bypass; `deny` bites.
+#
+# permission_mode arrives on the PreToolUse payload (confirmed against the live installed hook
+# this session, not assumed from docs — see docs/guard-enforcement-gap.md). Its observed/known
+# values are default, acceptEdits, plan (a human can see and act on a prompt in all three) and
+# bypassPermissions (nothing prompts, ever). Only bypassPermissions escalates. An absent or
+# unrecognized value is not treated as "safe to escalate" or "safe to leave as ask" by
+# assumption — it stays exactly today's ask decision, with the reason saying plainly that
+# enforceability could not be confirmed, rather than silently guessing either way.
+emit_unattended_ask() { # <reason>
+  case "${PMODE:-}" in
+    bypassPermissions)
+      emit deny "[guard] $1 This session is in bypassPermissions mode, where an 'ask' decision is auto-approved with nobody to see it — for this command that is the same as allow. Denied instead. If you mean this, run it yourself outside the agent session." ;;
+    default|acceptEdits|plan)
+      emit ask "[guard] $1" ;;
+    *)
+      emit ask "[guard] $1 (permission_mode was not present on this payload, so whether a human will see this ask could not be confirmed; treating it as visible rather than guessing)" ;;
+  esac
+}
+
 payload=$(cat 2>/dev/null || true)
 [ -n "$payload" ] || emit ask "[guard] no tool payload to inspect — approve only if you know what this does"
 
@@ -64,6 +89,7 @@ command -v jq >/dev/null 2>&1 \
   || emit ask "[guard] jq is not installed, so this command could not be inspected — approve only if you know what it does"
 
 CMD=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null) || CMD=""
+PMODE=$(printf '%s' "$payload" | jq -r '.permission_mode // empty' 2>/dev/null) || PMODE=""
 # A payload that does not parse is not an allow. It is an unknown.
 printf '%s' "$payload" | jq -e . >/dev/null 2>&1 \
   || emit ask "[guard] the tool payload did not parse, so this command could not be inspected"
@@ -179,17 +205,33 @@ _check_ask_segment() {
       if [ -n "${CONDUCTOR_WORKSPACE_PATH:-}" ]; then
         case "$PWD/" in
           "${CONDUCTOR_WORKSPACE_PATH%/}"/*) : ;;
-          *) emit ask "[guard] wildcard staging in $PWD, outside this session's workspace (${CONDUCTOR_WORKSPACE_PATH}). Another session may have uncommitted work here, and -A would commit it under your message. Stage explicit paths." ;;
+          *) emit_unattended_ask "wildcard staging in $PWD, outside this session's workspace (${CONDUCTOR_WORKSPACE_PATH}). Another session may have uncommitted work here, and -A would commit it under your message. Stage explicit paths." ;;
         esac
       fi ;;
+  esac
+
+  # Bare `git stash` (no explicit pathspec): stashes every uncommitted change in the working
+  # tree, including another session's. This is the exact command that scooped up four agents'
+  # uncommitted files in this checkout on 2026-08-26 (docs/worktree-collision-detection.md).
+  # `git stash push -- <path>` / `git stash save -- <path>` with an explicit pathspec is left
+  # alone, same reasoning as explicit-path `git add`. Read-only or apply-only subcommands
+  # (pop/apply/list/show/branch) are not stashing anything new and are not matched here.
+  case "$seg" in
+    git\ stash|git\ stash\ push|git\ stash\ save|\
+    git\ stash\ -u|git\ stash\ --include-untracked|\
+    git\ stash\ push\ *|git\ stash\ save\ *)
+      case "$seg" in
+        *\ --\ *) : ;; # explicit pathspec after `--`: scoped, not a bare stash-everything
+        *) emit_unattended_ask "bare git stash stashes every uncommitted change in the working tree, including anything another session has not committed yet." ;;
+      esac ;;
   esac
 
   # SCM operations
   case "$seg" in
     git\ reset\ *--hard*)
-      emit ask "[guard] git reset --hard discards uncommitted work in the working tree." ;;
+      emit_unattended_ask "git reset --hard discards uncommitted work in the working tree." ;;
     git\ clean\ *-*[dD]*[fF]*|git\ clean\ *-*[fF]*[dD]*)
-      emit ask "[guard] git clean -fd deletes untracked files, including ones never committed anywhere." ;;
+      emit_unattended_ask "git clean -fd deletes untracked files, including ones never committed anywhere." ;;
   esac
 
   # Infrastructure
