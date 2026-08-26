@@ -1489,13 +1489,55 @@ if command -v jq >/dev/null; then
     [ "$pd" = "$pw" ] || errs="$errs\nwith a stripped environment, '$pc' -> ${pd:-<no output>}, expected $pw"
   done
 
+  # The decider's permission-mode axis. docs/guard-enforcement-gap.md's seventh fake green: the
+  # guard returns `ask` for commands that destroy uncommitted work, but under bypassPermissions
+  # -- the mode every unattended agent runs in -- an `ask` decision auto-approves, so the tier
+  # that matters is what the guard decides ONCE permission_mode is in the payload, not what it
+  # decides in the payload shape above (which never sets the key at all). This is that join,
+  # tested directly against the real hook rather than reasoned about from the two halves
+  # separately, which is exactly how the join went untested the first time.
+  g_pm(){ # <command> <permission_mode> <expected>
+    G_N=$((G_N+1))
+    got=$(printf '{"tool_input":{"command":%s},"permission_mode":%s}' \
+            "$(jq -Rn --arg c "$1" '$c')" "$(jq -Rn --arg m "$2" '$m')" \
+            | bash claude/hooks/guard-destructive.sh 2>/dev/null \
+            | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
+    [ "$got" = "$3" ] || errs="$errs\n'$1' under permission_mode=$2 -> $got, expected $3"
+  }
+  g_pm 'git stash'                 bypassPermissions deny
+  g_pm 'git reset --hard HEAD~3'   bypassPermissions deny
+  g_pm 'git clean -fd'             bypassPermissions deny
+  g_pm 'git reset --hard HEAD~3'   default           ask
+  g_pm 'git stash pop'             bypassPermissions allow
+  # An ask-tier command OUTSIDE the escalation set must stay ask under bypassPermissions.
+  # Escalating every ask-tier command to deny under bypass would be the lazy fix -- it would
+  # pass the five rows above and still be wrong, because it stops distinguishing "destroys
+  # uncommitted work" from "merely needs a human."
+  g_pm 'terraform destroy'         bypassPermissions ask
+  # permission_mode absent from the payload entirely -- not "bypassPermissions", not "default",
+  # simply not there, which is what every other row in this check (g_want, g_ws, the hostile-
+  # environment loop above) already sends. An escalation-set command must resolve to exactly
+  # today's tier here: not silently escalated as if bypass were assumed, and not silently
+  # treated as safe because the field was missing. Unknown must not read as either extreme.
+  G_N=$((G_N+1))
+  got=$(printf '{"tool_input":{"command":%s}}' "$(jq -Rn --arg c 'git reset --hard HEAD~3' '$c')" \
+          | bash claude/hooks/guard-destructive.sh 2>/dev/null \
+          | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
+  [ "$got" = ask ] || errs="$errs\n'git reset --hard HEAD~3' with permission_mode absent from the payload -> $got, expected ask"
+
   # Unparseable or absent input must never reach allow. A guard that opens on malformed input
   # has inverted its own purpose, and malformed input is exactly what an attacker sends.
   for bad in 'not json' ''; do
     d=$(printf '%s' "$bad" | bash claude/hooks/guard-destructive.sh 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null)
     [ "$d" = ask ] || errs="$errs\nmalformed payload -> $d, expected ask"
   done
-  [ -z "$errs" ] && ok "destructive guard decides correctly ($G_N commands, 3 tiers)" \
+  # The label used to claim only "decides correctly, 3 tiers", which reads as coverage this
+  # check does not have: it verifies the DECIDER in isolation, every time, against a real hook
+  # invocation -- it does not re-run the runtime join (does bypassPermissions actually
+  # auto-approve an `ask` the way the platform is documented to) on every gate run. That join was
+  # proven once, by hand, measured in docs/guard-enforcement-gap.md, and is not re-checked here.
+  # A label claiming coverage the check does not have is the same defect under a different name.
+  [ -z "$errs" ] && ok "destructive guard decides correctly ($G_N commands, 3 tiers) (decider only, not runtime enforcement -- see docs/guard-enforcement-gap.md)" \
     || bad "destructive guard decides correctly" "$(printf '%b' "$errs")"
 else
   skip "destructive guard decides correctly" "jq not installed"

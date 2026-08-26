@@ -476,6 +476,18 @@ exit 0
       # ask/allow tiers below it exactly as if the deny tier were absent, in both the function and
       # its inline duplicate, in one edit. Anchored on leading whitespace so the prose comment
       # above line 81 ("If so, emit deny immediately.") is not also mangled.
+      #
+      # Widens to the permission-mode lane for free, not by a second edit: `emit_unattended_ask`'s
+      # `bypassPermissions)` case arm (the g_pm assertions added alongside docs/guard-
+      # enforcement-gap.md's fix) is itself a call to `emit deny`, so this one sed also no-ops it.
+      # Confirmed empirically rather than assumed -- run against a tree with the g_pm rows landed,
+      # this row's single mutation prints both `'rm -rf /' -> ask, expected deny` (the pre-
+      # existing tier) and `'git stash' under permission_mode=bypassPermissions -> allow,
+      # expected deny` (the new one) in the same FAIL block, from the one sed above. A second,
+      # narrower sed targeting only the bypassPermissions arm was tried and rejected: applied
+      # after this one it matches nothing (the line already reads `: emit deny`), and applied
+      # before it, this blanket pattern immediately reprocesses the same line anyway -- there is
+      # no ordering in which both add independent signal, only one in which the second is inert.
       sed -i.t 's/^\( *\)emit deny /\1: emit deny /' claude/hooks/guard-destructive.sh \
         && rm -f claude/hooks/guard-destructive.sh.t ;;
   24) # claim an already-tagged version while the payload has moved on — the exact state that
