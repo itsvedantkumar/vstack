@@ -30,9 +30,9 @@
       "settings_keys": "jq -r 'keys[]' claude/settings.json",
       "project_keys": "grep -vE '^[[:space:]]*#|^[[:space:]]*$' claude/settings.project-keys",
       "skill_overrides": "jq -r '.skillOverrides|keys[]' claude/settings.json",
-      "checks": "grep -oE '^# --- [0-9]+[a-z]?\\.' .claude/verify.sh",
+      "checks": "grep -oE '^# --- [0-9]+[a-z]?\\.' .claude/verify.sh | sed -E 's/^# --- ([0-9]+[a-z]?)\\..*/\\1/'",
       "falsifiability_rows": "sed -n 's/^CHECKS=\"\\(.*\\)\"/\\1/p' tests/gate-falsifiability.sh",
-      "ci_runners": "grep -oE '(runs-on|container): *[A-Za-z0-9:._-]+' .github/workflows/verify.yml"
+      "ci_runners": "grep -oE '(runs-on|container): *[A-Za-z0-9:._-]+' .github/workflows/verify.yml | sed -E 's/^(runs-on|container): *//'"
     }
   },
   "profiles": {
