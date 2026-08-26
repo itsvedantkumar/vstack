@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"selftest-2"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"selftest.py"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"# selftest.py source, echoed back verbatim by the Read tool -- it names FOO and BAR right\n# here because it IS the planted-defect source file, not because the assistant found anything.\ndef broken(): return FOO + BAR"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I read the file and did not find any defects. The code looks correct as written."}]}}
+{"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":140,"output_tokens":25}}

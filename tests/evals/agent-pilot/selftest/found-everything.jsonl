@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"selftest-1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"selftest.py"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"# selftest.py source, echoed back by the Read tool\ndef broken(): pass  # no FOO or BAR here"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"This file has both a FOO problem and a BAR problem; both are genuine defects that should be fixed before it ships."}]}}
+{"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":120,"output_tokens":40}}

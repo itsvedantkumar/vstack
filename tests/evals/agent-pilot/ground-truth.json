@@ -1,0 +1,120 @@
+{
+  "_read_me": "Ground truth for tests/evals/agent-pilot. Each fixture carries exactly one planted defect and a deterministic detect_all list: extended regexes (grep -Ei, case-insensitive) that must ALL match somewhere in the arm's own assistant-authored output (never a tool_result -- see scorer.sh) for the verdict to be FOUND. AND-of-substrings, not a full semantic check: see PREREGISTRATION.md 'What could still produce a confident wrong answer' for the false-positive risk this trades for determinism.",
+
+  "fixtures": [
+    {
+      "id": "code-reviewer-1",
+      "role": "code-reviewer",
+      "file": "fixtures/code-reviewer-1.py",
+      "delivered_as": "code-reviewer-1.py",
+      "task": "Review the file code-reviewer-1.py in the current directory for a correctness bug before it ships. Name the specific bug and the line it is on.",
+      "planted_defect": "total_pages() floor-divides (len(items) // page_size), so a list whose length is not an exact multiple of page_size loses its last, partial page -- paginate() can never return those items because callers stop at total_pages().",
+      "detect_all": [
+        "total_pages",
+        "(ceil|floor|off-by-one|off by one|drops? the (last|final)|truncat|integer division|last (item|page|record|row)[a-z '\"]*(missing|lost|dropped|unreachable|never returned))"
+      ]
+    },
+    {
+      "id": "code-reviewer-2",
+      "role": "code-reviewer",
+      "file": "fixtures/code-reviewer-2.py",
+      "delivered_as": "code-reviewer-2.py",
+      "task": "Review the file code-reviewer-2.py in the current directory for a correctness bug before it ships. Name the specific bug and the line it is on.",
+      "planted_defect": "load_config() opens the file, then calls json.load() and may raise (bad JSON, or the explicit ValueError for a missing 'version' key) before reaching f.close() -- the file handle leaks on every error path.",
+      "detect_all": [
+        "load_config",
+        "(leak|not closed|never closed|isn.t closed|is not closed|unclosed|doesn.t close|does not close|missing (a )?finally|context manager|use .with.|f\\.close\\(\\)[a-z '\"]*(never|not)[a-z '\"]*(called|reached|run))"
+      ]
+    },
+    {
+      "id": "security-auditor-1",
+      "role": "security-auditor",
+      "file": "fixtures/security-auditor-1.py",
+      "delivered_as": "security-auditor-1.py",
+      "task": "Security review of security-auditor-1.py in the current directory before it ships to the admin panel. Name the specific vulnerability and the line it is on.",
+      "planted_defect": "find_user() builds a SQL string with Python %-formatting of an untrusted `username` straight into the query text -- classic SQL injection, no parameterization.",
+      "detect_all": [
+        "find_user",
+        "(sql injection|sqli|injection)"
+      ]
+    },
+    {
+      "id": "security-auditor-2",
+      "role": "security-auditor",
+      "file": "fixtures/security-auditor-2.py",
+      "delivered_as": "security-auditor-2.py",
+      "task": "Security review of security-auditor-2.py in the current directory before it ships. Name the specific vulnerability and the line it is on.",
+      "planted_defect": "convert_image() interpolates input_path and output_fmt directly into a shell string and runs it with subprocess.run(..., shell=True) -- command injection via either argument.",
+      "detect_all": [
+        "convert_image",
+        "(command injection|shell injection|shell=true|arbitrary command|inject[a-z]* (a )?(shell )?command)"
+      ]
+    },
+    {
+      "id": "qa-1",
+      "role": "qa",
+      "file": "fixtures/qa-1.py",
+      "delivered_as": "qa-1.py",
+      "task": "qa-1.py converts Fahrenheit to Celsius. Acceptance criterion: `python3 qa-1.py 100` must print 37.78. Run it and verify the acceptance criterion actually holds. Report the exact value it prints and whether that matches the criterion.",
+      "planted_defect": "fahrenheit_to_celsius() uses floor division (// 9), so `python3 qa-1.py 100` prints 37.0 instead of the specified 37.78 -- silently wrong for any input that is not an exact multiple of 9 after scaling.",
+      "detect_all": [
+        "37\\.78",
+        "37\\.0"
+      ]
+    },
+    {
+      "id": "qa-2",
+      "role": "qa",
+      "file": "fixtures/qa-2.py",
+      "delivered_as": "qa-2.py",
+      "task": "qa-2.py applies a percentage discount. Acceptance criterion: `python3 qa-2.py 50 10` (price=$50, 10 percent off) must print 45.0. Run it and verify the acceptance criterion actually holds. Report the exact value it prints and whether that matches the criterion.",
+      "planted_defect": "apply_discount() never divides percent_off by 100, so `python3 qa-2.py 50 10` prints -450.0 instead of the specified 45.0.",
+      "detect_all": [
+        "45\\.0",
+        "-450"
+      ]
+    },
+    {
+      "id": "test-writer-1",
+      "role": "test-writer",
+      "file": "fixtures/test-writer-1.py",
+      "delivered_as": "test-writer-1.py",
+      "task": "safe_divide() in test-writer-1.py had a bug that was just fixed (see its docstring). Write a regression test for the fixed behavior, using this project's test framework conventions (pytest is available).",
+      "planted_defect": "n/a -- this fixture is not a defect-finding task. The bug is already fixed; the task is to write the regression test for it. Ground truth checks that a test targeting the zero-denominator case, asserting the documented ValueError, was actually produced.",
+      "detect_all": [
+        "safe_divide\\(",
+        "ValueError",
+        "raises"
+      ]
+    },
+    {
+      "id": "test-writer-2",
+      "role": "test-writer",
+      "file": "fixtures/test-writer-2.py",
+      "delivered_as": "test-writer-2.py",
+      "task": "parse_csv_row() in test-writer-2.py had a bug that was just fixed (see its docstring). Write a regression test for the fixed behavior, using this project's test framework conventions (pytest is available).",
+      "planted_defect": "n/a -- this fixture is not a defect-finding task. The bug is already fixed; the task is to write the regression test for it. Ground truth checks that a test targeting a quoted field containing a comma was actually produced.",
+      "detect_all": [
+        "parse_csv_row\\(",
+        "quot",
+        "comma"
+      ]
+    }
+  ],
+
+  "canary": {
+    "id": "canary-security-auditor-specialist",
+    "role": "security-auditor",
+    "arm": "specialist",
+    "file": "canary/canary.py",
+    "delivered_as": "canary.py",
+    "task": "Security review of canary.py in the current directory before it ships. Name the specific vulnerability and the line it is on.",
+    "planted_defect": "A hardcoded AWS secret access key at module scope (AWS_SECRET_ACCESS_KEY = \"AKIA...\"). Chosen as the canary defect because it is the single most obvious, least model-dependent finding this pilot could plant -- see PREREGISTRATION.md for why an obvious defect is the correct choice for a plumbing check rather than a hard one.",
+    "detect_all": [
+      "AKIA",
+      "(secret|hardcod|credential)"
+    ],
+    "expected_verdict": "FOUND",
+    "if_not_found_it_means": "See PREREGISTRATION.md, 'The canary'. In summary: NOT_FOUND on a defect this obvious means the harness, not the model, failed -- wrong arm activated, fixture not delivered, or the scorer's regex is broken. NOT_RUN means the call never completed (crash, timeout, wrong arm name rejected by the CLI). NOT_CAPTURED means the call completed but the capture pipeline lost the output."
+  }
+}
