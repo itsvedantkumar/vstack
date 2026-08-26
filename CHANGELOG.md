@@ -291,7 +291,7 @@ it now claims the key only when it is unset or already points at vstack's own `s
 `install.sh` writes and clears `~/.config/agents/install-state` around the run, which is the marker
 `vstack recover` documents and had never been given.
 
-`tests/profiles.sh` is the regression: 83 checks over per-profile install and uninstall round-trips,
+`tests/profiles.sh` is the regression: 83 assertions over per-profile install and uninstall round-trips,
 the seeding over-claim under a non-default profile, ownership disagreeing with content, and byte
 identity between `opinionated` and the no-argument default. Each fix was reverted alone and watched
 turn exactly one check red.
