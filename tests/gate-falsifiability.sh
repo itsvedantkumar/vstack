@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 1b 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -246,7 +246,8 @@ esac }
 # here: this has to be safe to run on a dirty tree.
 files_for(){ case "$1" in
   0)   printf '' ;;
-  1)   printf 'claude/hooks/format.sh ui-gate/rules/tokens.sh' ;;
+  1)   printf 'claude/hooks/format.sh' ;;
+  1b)  printf 'ui-gate/rules/tokens.sh' ;;
   2)   printf 'mcp/servers.json' ;;
   3)   printf 'claude/skills/unslop/SKILL.md' ;;
   4|5|6) printf 'README.md' ;;
@@ -267,7 +268,8 @@ files_for(){ case "$1" in
   18b) printf 'README.md' ;;
   18c) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
-  20)  printf 'claude/commands/test.md install.sh' ;;
+  20)  printf 'claude/commands/test.md' ;;
+  20c) printf 'install.sh' ;;
   20b) printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
@@ -277,7 +279,8 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
-  29)  printf 'bin/cloudflare-mcp ui-gate/rules/browser.sh' ;;
+  29)  printf 'bin/cloudflare-mcp' ;;
+  29b) printf 'ui-gate/rules/browser.sh' ;;
   30)  printf 'claude/hooks/format.sh' ;;
   31)  printf '' ;;   # plants a new file rather than editing one
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
@@ -303,6 +306,7 @@ esac }
 label_for(){ case "$1" in
   0)   printf 'toolchain' ;;
   1)   printf 'shell syntax' ;;
+  1b)  printf 'shell syntax' ;;
   2)   printf 'json valid' ;;
   3)   printf 'skills loadable' ;;
   4)   printf 'no hardcoded home paths' ;;
@@ -329,6 +333,7 @@ label_for(){ case "$1" in
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   20b) printf 'referenced install paths exist' ;;
+  20c) printf 'referenced install paths exist' ;;
   21)  printf 'RETIRED names only retired keys' ;;
   22)  printf 'skills disclose what they do not ship' ;;
   23)  printf 'destructive guard decides correctly' ;;
@@ -338,6 +343,7 @@ label_for(){ case "$1" in
   27)  printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
+  29b) printf 'shellcheck clean' ;;
   30)  printf 'shellcheck suppressions carry a reason' ;;
   31)  printf 'every shipped file has a referrer' ;;
   32)  printf 'grill trigger decides correctly' ;;
@@ -367,12 +373,16 @@ esac }
 # Break exactly what the check watches, and nothing else. Surgical matters: a mutation that
 # trips four checks proves far less than one that trips the intended one.
 break_it(){ case "$1" in
-  1)  # Both lanes of the file selector. format.sh has a shebang; ui-gate/rules/tokens.sh has
-      # none, only a `# shellcheck shell=` directive, and for four versions nothing in this gate
-      # parsed it. Mutating one leaves the other exactly as unproven as it was.
-      for _f in claude/hooks/format.sh ui-gate/rules/tokens.sh; do
-        printf '\nif [ -z\n' >> "$_f"
-      done ;;
+  1)  # The shebang lane of the file selector: format.sh names bash on its first line.
+      # This row and 1b were one row until 2026-08-27. Two mutations under one oracle means
+      # either alone turns the check red and carries the row, so the other lane stays exactly as
+      # unproven as it was before anyone widened anything -- the defect the widening was for.
+      printf '\nif [ -z\n' >> claude/hooks/format.sh ;;
+
+  1b) # The directive lane: ui-gate/rules/tokens.sh has no shebang and no .sh dispatch of its
+      # own, only a `# shellcheck shell=` line, and for four versions nothing in this gate
+      # parsed it.
+      printf '\nif [ -z\n' >> ui-gate/rules/tokens.sh ;;
   2)  printf '{' >> mcp/servers.json ;;
   3)  # a description past the 200-char listing cap, which silently stops the skill triggering
       awk 'BEGIN{d="x"; for(i=0;i<209;i++) d=d "y"}
@@ -466,15 +476,15 @@ exit 0
         && mv /tmp/fx19.$$ claude/.claude-plugin/plugin.json ;;
   20) # a command telling the model to run something no lane ever installs — exactly the
       # shape of the /bootstrap defect this check was written for
-      printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md
-      # A second, independent lane in the same row rather than a new id (check 16 counts
-      # declared checks, not falsifiability rows, but CHECKS= is one id per check and this stays
-      # 20): install_generated()'s floor names the literal path install.sh must still contain
-      # for ~/.config/agents/vstack-installed to stay a legitimate exemption rather than a stale
-      # allow-list entry. Renaming the string OWNED_PATHS assigns is a defect the prose mutation
-      # above cannot reach -- one edits claude/commands/test.md, the other install.sh, and
-      # neither mutation's pattern matches the other file, so this is genuinely two lanes under
-      # one label rather than one mutation doing double duty.
+      printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
+
+  20c) # install_generated()'s floor: the literal path install.sh must still contain for
+      # ~/.config/agents/vstack-installed to stay a legitimate exemption rather than a stale
+      # allow-list entry. Renaming the string OWNED_PATHS assigns is a defect no prose mutation
+      # can reach. This lived inside row 20 until 2026-08-27, with a comment arguing that two
+      # files and two non-overlapping patterns made it "genuinely two lanes under one label".
+      # They are two lanes; one label is the problem. Either mutation alone satisfied the row's
+      # single oracle, so neither lane was ever proven on its own.
       sed -i.t 's#\$HOME/\.config/agents/vstack-installed#$HOME/.config/agents/renamed-installed-record#' install.sh \
         && rm -f install.sh.t ;;
   20b) # The same promise, one namespace over. `/push` shipped `~/.100xprompt/hooks/pre-push.sh`
@@ -528,13 +538,14 @@ exit 0
       # the old `git ls-files '*.sh' bin/doctor bin/vstack` selector never linted it and this
       # exact mutation left the check green. Mutating a file the selector already covered would
       # prove the linter runs; mutating this one proves it runs over everything.
-      # Both lanes, since 1.14.0 folded four copies of the selector into one sh_files().
-      # cloudflare-mcp is the shebang-without-suffix lane; ui-gate/rules/browser.sh is the
-      # directive-only lane, a sourced fragment with no shebang at all that the shebang scan
-      # could not see. One mutation per lane, or half the selector stays unproven.
-      for _f in bin/cloudflare-mcp ui-gate/rules/browser.sh; do
-        printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' >> "$_f"
-      done ;;
+      # This row's own comment already said "one mutation per lane, or half the selector stays
+      # unproven", and then ran both lanes in one row, which is the same thing as not splitting
+      # them: one oracle, either mutation carries it. Split on 2026-08-27; 29b is the other lane.
+      printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' >> bin/cloudflare-mcp ;;
+
+  29b) # The directive-only lane: a sourced fragment with no shebang at all, which the shebang
+      # scan could not see until sh_files() folded four copies of the selector into one.
+      printf '\nsc_probe=$HOME/some path\nls $sc_probe >/dev/null 2>&1 || true\n' >> ui-gate/rules/browser.sh ;;
   30) # A bare disable, no reason on the line and none above it. This is the shape bootstrap.sh
       # carried for several versions while check 29's own header claimed the rule was kept.
       printf '\n# shellcheck disable=SC2086\nsup_probe=$HOME/x\nls $sup_probe >/dev/null 2>&1 || true\n' \
