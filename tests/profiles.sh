@@ -214,6 +214,98 @@ check "compat: zero leftovers with no ownership record (assume-everything fallba
 rm -rf "$SBOX"
 
 hr
+say "=== migration seeding x non-default profile: a name collision must not delete a directory ==="
+hr
+say "(the untested join a real adversarial review found: seed_owned_paths()'s fingerprint loop"
+say " tested the destination but its five seeding loops tested only whether the REPO ships a"
+say " path, which is always true -- so a --profile=core install on a machine with >= 3 of"
+say " vstack's own hook basenames sitting in ~/.claude/hooks (satisfied by every pre-1.46.0"
+say " machine, which kept no ownership record at all) claimed every agent, command, reference"
+say " file and skill in the repository, none of which core actually put on disk. A user"
+say " directory later created under a colliding skill name -- ordinary names like"
+say " \"brainstorming\" are exactly what someone would pick unprompted -- then had its owns_path()"
+say " check pass on nothing but that name match, and the skills-removal loop rm -rfd it: no"
+say " content comparison guarded a directory the way plan_file_removal already guards a file.)"
+
+new_sandbox
+mkdir -p "$HOME/.claude/hooks"
+# The exact fingerprint seed_owned_paths() looks for: >= 3 of vstack's own hook basenames
+# already sitting at the destination, with no ownership record present -- what every genuine
+# pre-1.46.0 machine looks like the first time it meets a version that writes one.
+cp "$SRC/claude/hooks/compat-canary.sh" "$SRC/claude/hooks/failure-diagnose.sh" \
+   "$SRC/claude/hooks/format.sh" "$HOME/.claude/hooks/"
+install_out=$(HOME="$HOME" VSTACK_PROFILE=core "$SRC/install.sh" 2>&1)
+ic=$?
+check "migration+core: install exits 0" "0" "$ic" "$([ "$ic" = 0 ] && echo 0 || echo 1)"
+[ "$ic" = 0 ] || say "      install.sh output: $install_out"
+
+check "migration+core: seeder did not over-claim (agents dir has no vstack agent files)" \
+  "0 agent files" \
+  "$(find "$HOME/.claude/agents" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ') agent files" \
+  "$([ -z "$(find "$HOME/.claude/agents" -mindepth 1 -maxdepth 1 -type f 2>/dev/null)" ] && echo 0 || echo 1)"
+check "migration+core: seeder did not over-claim (no skill directories)" "0 skill dirs" \
+  "$(find "$HOME/.claude/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ') skill dirs" \
+  "$([ -z "$(find "$HOME/.claude/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ] && echo 0 || echo 1)"
+# Directly on the record, not just on-disk state -- the over-claim bug pollutes OWNED_PATHS
+# without copying any file, so a check that only looks at the filesystem cannot see it: the
+# seeder called own() for every agent/command/skill the repo ships, whether or not this core
+# install actually put it at $CDIR. A record entry for something core never installs is the
+# defect itself, independent of whether uninstall.sh separately catches the consequence below.
+# grep -c prints a count of 0 and still exits 1 on no match -- a `|| echo 0` fallback after it
+# double-prints ("0" from grep, then "0" from the fallback, since the nonzero exit trips ||
+# regardless of what grep already wrote), so the count is read from stdout alone, unguarded.
+claim_count=$(grep -c "agents/qa.md\|commands/team.md\|skills/swarm" "$HOME/.config/agents/vstack-installed" 2>/dev/null)
+claim_count=${claim_count:-0}
+check "migration+core: ownership record does not claim agents/commands/skills core never installed" \
+  "no agents/qa.md, no commands/team.md, no skills/swarm in the record" \
+  "$claim_count matching line(s)" "$([ "$claim_count" = 0 ] && echo 0 || echo 1)"
+
+# Plant a user's own directory under a name this repo also uses for a skill, with content that
+# does not match what vstack would install (the exact repro).
+mkdir -p "$HOME/.claude/skills/brainstorming"
+printf 'my own private notes\n' > "$HOME/.claude/skills/brainstorming/notes.md"
+
+uninstall_out=$(HOME="$HOME" bash "$SRC/uninstall.sh" --yes 2>&1)
+uc=$?
+check "migration+core: uninstall exits 0" "0" "$uc" "$([ "$uc" = 0 ] && echo 0 || echo 1)"
+check "migration+core: the colliding user directory survives" "directory + file both present" \
+  "$([ -f "$HOME/.claude/skills/brainstorming/notes.md" ] && echo present || echo GONE)" \
+  "$([ -f "$HOME/.claude/skills/brainstorming/notes.md" ] && echo 0 || echo 1)"
+check "migration+core: the colliding directory's content is untouched" "my own private notes" \
+  "$(cat "$HOME/.claude/skills/brainstorming/notes.md" 2>/dev/null || echo MISSING)" \
+  "$([ "$(cat "$HOME/.claude/skills/brainstorming/notes.md" 2>/dev/null)" = "my own private notes" ] && echo 0 || echo 1)"
+rm -rf "$SBOX"
+
+hr
+say "=== a genuinely-owned skill whose content changed after install must not be rm -rf'd ==="
+hr
+say "(defense in depth, independent of the migration-seeding case above: even a correctly-"
+say " seeded/recorded ownership entry must not be trusted alone once content has diverged --"
+say " the record says a path was OURS at install time, not that it still is now. Directories"
+say " get the same byte-for-byte discipline plan_file_removal() already gives single files.)"
+
+new_sandbox
+HOME="$HOME" VSTACK_PROFILE=opinionated "$SRC/install.sh" >/dev/null 2>&1
+grep -qxF "$HOME/.claude/skills/brainstorming" "$HOME/.config/agents/vstack-installed" \
+  && seeded_ok=0 || seeded_ok=1
+check "content-divergence: brainstorming is genuinely recorded as ours before the edit" "recorded" \
+  "$([ "$seeded_ok" = 0 ] && echo recorded || echo "not recorded")" "$seeded_ok"
+
+# The user repurposes vstack's own directory in place -- the same shape as editing a file
+# plan_file_removal already protects, just on a directory uninstall.sh has to walk instead.
+rm -rf "$HOME/.claude/skills/brainstorming"
+mkdir -p "$HOME/.claude/skills/brainstorming"
+printf 'repurposed after install, not vstack content anymore\n' > "$HOME/.claude/skills/brainstorming/SKILL.md"
+
+uninstall_out=$(HOME="$HOME" bash "$SRC/uninstall.sh" --yes 2>&1)
+uc=$?
+check "content-divergence: uninstall exits 0" "0" "$uc" "$([ "$uc" = 0 ] && echo 0 || echo 1)"
+check "content-divergence: the edited directory survives uninstall" "directory present, edited content intact" \
+  "$([ -f "$HOME/.claude/skills/brainstorming/SKILL.md" ] && cat "$HOME/.claude/skills/brainstorming/SKILL.md" || echo GONE)" \
+  "$([ -f "$HOME/.claude/skills/brainstorming/SKILL.md" ] && grep -qxF "repurposed after install, not vstack content anymore" "$HOME/.claude/skills/brainstorming/SKILL.md" && echo 0 || echo 1)"
+rm -rf "$SBOX"
+
+hr
 say "=== --dry-run changes nothing, per profile ==="
 hr
 for P in core team ui opinionated; do
