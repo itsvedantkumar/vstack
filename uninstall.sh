@@ -404,13 +404,24 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CJSON" ] && [ -f "$SRC/mcp/servers.js
   rm -f "$mship" "$morig"
 fi
 
-# --- claude-mem hooks.json: undo setup-machine.sh's UserPromptSubmit async edit, if it made one -
+# --- the install receipt ----------------------------------------------------------------------
+# install.sh appends every path it owns here so the NEXT install can tell its own previous
+# payload from the user's files. Once vstack is removed the record is a liability: a user who
+# later writes their own ~/.claude/hooks/format.sh would have it silently claimed by a reinstall.
+RECEIPT="$HOME/.config/agents/vstack-installed"
+if [ -f "$RECEIPT" ]; then
+  rm -f "$RECEIPT"
+  echo "removed  $RECEIPT  (install receipt; a fresh install starts with no ownership claims)"
+fi
+
+# --- claude-mem hooks.json: undo the async edit older vstack versions made ---------------------
 #
-# setup-machine.sh --with-plugins flips claude-mem's own hooks.json from sync to async and, on
-# the first edit of each claude-mem plugin version directory, leaves what was there before next
-# to it as hooks.json.vstack-orig. This is the other half of that disclosure: a removed vstack
-# undoes the one line it changed in a file it does not ship, and nothing else -- claude-mem
-# itself is untouched, installed or not.
+# vstack up to 1.45.1 flipped claude-mem's own hooks.json from sync to async and left the prior
+# contents beside it as hooks.json.vstack-orig. 1.46.0 removed that edit entirely -- claude-mem
+# was measured injecting nothing, so there was no work to keep off the critical path. This block
+# stays because a machine that ran an older vstack still carries the sidecar, and a version that
+# stopped making an edit is not a version that gets to stop undoing it. It is a no-op on any
+# machine that never had claude-mem installed.
 if command -v jq >/dev/null 2>&1 && [ -d "$CDIR/plugins/cache/thedotmack/claude-mem" ]; then
   for cm_orig in "$CDIR"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json.vstack-orig; do
     [ -f "$cm_orig" ] || continue

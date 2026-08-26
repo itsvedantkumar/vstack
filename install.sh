@@ -37,6 +37,44 @@ if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then CJSON="$CDIR/.claude.json"; else CJSON=
 # the user had before. Automation, retries and CI hit this easily. Claim the directory
 # exclusively and step to a suffix when it is taken.
 BK_BASE="$HOME/.config/agents/backups/install-$(date +%Y%m%d-%H%M%S)"
+# Every path this install owns, appended as it is written, and read by the NEXT install to tell
+# its own previous payload from the user's files. Ownership by receipt beats ownership by content
+# because it survives a version change: v1.45.1's verify-gate.sh and HEAD's differ byte for byte
+# and are both ours. Lives outside $CDIR so uninstalling the config does not destroy the record
+# of what the config was.
+RECEIPT="$HOME/.config/agents/vstack-installed"
+own(){ [ "$DRY" = 1 ] && return 0
+  mkdir -p "$(dirname "$RECEIPT")" 2>/dev/null || return 0
+  grep -qxF "$1" "$RECEIPT" 2>/dev/null || printf '%s\n' "$1" >> "$RECEIPT"
+  return 0
+}
+
+# One-time migration for machines installed by vstack <= 1.45.1, which kept no receipt. Without
+# this, upgrading from an older version launders exactly one payload: the old file and the new
+# one differ byte for byte -- both are ours, but content comparison cannot see that -- so back()
+# records the old one as the user's and the next uninstall restores it. seq3 of
+# tests/repro/lifecycle.sh is that case.
+#
+# The fingerprint is >= 3 of vstack's own hook basenames sitting in $CDIR/hooks. Those names
+# (dispatch-counter.sh, skill-mandate.sh, guard-destructive.sh, ...) are this repo's; a user
+# who happens to keep three of them under those exact names, having never installed vstack, is
+# not a case worth trading the uninstall guarantee for. One or two matches seeds nothing.
+seed_receipt(){ [ "$DRY" = 1 ] && return 0
+  [ -f "$RECEIPT" ] && return 0
+  _hits=0
+  for _h in "$SRC"/claude/hooks/*.sh; do
+    [ -e "$_h" ] || continue
+    [ -f "$CDIR/hooks/$(basename "$_h")" ] && _hits=$((_hits+1))
+  done
+  [ "$_hits" -ge 3 ] || return 0
+  for _h in "$SRC"/claude/hooks/*.sh;            do [ -e "$_h" ] && own "$CDIR/hooks/$(basename "$_h")"; done
+  for _a in "$SRC"/claude/agents/*.md;           do [ -e "$_a" ] && own "$CDIR/agents/$(basename "$_a")"; done
+  for _r in "$SRC"/claude/agents/reference/*.ref; do [ -e "$_r" ] && own "$CDIR/agents/reference/$(basename "$_r")"; done
+  for _c in "$SRC"/claude/commands/*.md;         do [ -e "$_c" ] && own "$CDIR/commands/$(basename "$_c")"; done
+  for _d in "$SRC"/claude/skills/*/;             do [ -d "$_d" ] && own "$CDIR/skills/$(basename "$_d")"; done
+  own "$CDIR/CLAUDE.md"; own "$CDIR/statusline.sh"
+  say "adopted    an existing vstack install into $RECEIPT ($_hits hook(s) matched; pre-1.46.0 had no receipt)"
+}
 BK="$BK_BASE"
 # Set only once `mkdir "$BK"` has actually succeeded below. BK itself is assigned unconditionally
 # right above, so guarding abort_note on `[ "${BK:-}" = "" ]` never fired -- BK is never empty --
@@ -129,17 +167,24 @@ fi
 # Backups preserve the real path under files/ — the old flat `tr / _` names were a lossy
 # encoding that misparsed any future filename containing an underscore on restore.
 back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] || return 0
-  # $2, when given, is the repo file about to overwrite $1. If the two are already byte-identical
-  # then $1 is vstack's own previous install, not something the user had, and recording it as a
-  # backup makes the second install launder the payload into "pre-existing" -- after which
-  # uninstall.sh restores it and the machine can never be returned to its pre-vstack state. This
-  # is why install -> install -> uninstall left every hook and skill behind while printing that
-  # it had removed them.
+  # Two independent ways to know $1 is vstack's own and must NOT be recorded as pre-existing
+  # user content. Recording it there is what let a second install launder the payload into
+  # "the user had this", after which uninstall.sh restored it and the machine could never be
+  # returned to its pre-vstack state.
+  #
+  # (a) A receipt from an earlier install already claims this path. This is the authority --
+  #     it survives across versions, so a file installed by v1.45.1 and overwritten by a newer
+  #     vstack is still recognised as ours even though the bytes differ. Content comparison
+  #     alone could not see that, and seq3 of tests/repro/lifecycle.sh is exactly that case.
+  # (b) $2, when given, is the repo file about to overwrite $1, and the two are already
+  #     byte-identical. Covers a first uninstall on a machine with no receipt yet.
   #
   # The trade, stated: a user file whose bytes exactly equal vstack's is indistinguishable from
   # vstack's and is treated as vstack's, so uninstall deletes it. What is lost is content this
   # repo still ships verbatim. The alternative loses the ability to uninstall at all.
-  if [ -n "${2:-}" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
+  if [ -f "$RECEIPT" ] && grep -qxF "$1" "$RECEIPT"; then own "$1"; return 0; fi
+  if [ -n "${2:-}" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then own "$1"; return 0; fi
+  own "$1"
   # Paths under $HOME are stored HOME-relative so uninstall can map them back. A config dir
   # moved outside $HOME by CLAUDE_CONFIG_DIR has no such relative form, so it is stored under
   # files_abs/ with its full path and restored to exactly where it came from.
@@ -170,6 +215,7 @@ if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
 fi
 
 # --- hooks / agents / commands ------------------------------------------------------------
+seed_receipt
 for f in "$SRC"/claude/hooks/*.sh;    do back "$CDIR/hooks/$(basename "$f")" "$f"; run cp "$f" "$CDIR/hooks/"; done
 for f in "$SRC"/claude/agents/*.md;   do back "$CDIR/agents/$(basename "$f")" "$f";   run cp "$f" "$CDIR/agents/";   done
 # Reference material the agents are pointed at. Deliberately *.ref, not *.md: Claude Code walks
@@ -221,11 +267,15 @@ fi
 for d in "$SRC"/claude/skills/*/; do
   s=$(basename "$d")
   [ "$DRY" = 1 ] && { say "would: install skill $s"; continue; }
-  # Same provenance rule as back(): a skill dir already identical to the one being installed is
-  # vstack's own previous copy, and backing it up would let the next uninstall restore it.
-  if [ -d "$CDIR/skills/$s" ] && ! diff -rq "$CDIR/skills/$s" "${d%/}" >/dev/null 2>&1; then
+  # Same provenance rule as back(), receipt first: a skill dir this repo has installed before is
+  # ours even when its contents have since changed with a version, and backing it up would let
+  # the next uninstall restore it.
+  if [ -d "$CDIR/skills/$s" ] \
+     && ! grep -qxF "$CDIR/skills/$s" "$RECEIPT" 2>/dev/null \
+     && ! diff -rq "$CDIR/skills/$s" "${d%/}" >/dev/null 2>&1; then
     cp -R "$CDIR/skills/$s" "$BK/skills_$s"
   fi
+  own "$CDIR/skills/$s"
   rm -rf "${CDIR:?}/skills/$s"
   # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src CONTENTS into dest,
   # not src itself, which would scatter SKILL.md and references/ across the skills root.
@@ -336,21 +386,17 @@ if [ "$DRY" = 0 ] && [ "$HAVE_JQ" = 0 ]; then
   fi
 elif [ "$DRY" = 0 ]; then
   tmp=$(mktemp)
-  # Which of the third-party/opt-in plugin enabledPlugins entries are real. Both claude-mem and
-  # typescript-lsp are stripped from enabledPlugins below when the plugin is not actually
-  # installed (see the del() calls), because an entry claiming enablement for a plugin the
-  # toolchain never installed is the defect CHANGELOG.md's claude-mem entry describes and
-  # typescript-lsp reproduced once setup-machine.sh made it opt-in too. Stripping it
-  # unconditionally on every run was itself a bug: a user who opted in with
-  # --with-plugins/VSTACK_PLUGINS=1 had their own explicit choice undone on the next
-  # `./install.sh`, because install.sh cannot see a flag passed to a different script in an
-  # earlier run. `claude plugin list` is the same detection setup-machine.sh already uses to
-  # decide presence, so a plugin actually on disk keeps its entry and only a stale claim (no
-  # matching install) gets deleted.
-  CM_PRESENT=false; TSL_PRESENT=false
+  # typescript-lsp is stripped from enabledPlugins below when the plugin is not actually
+  # installed (see the del() call), because an entry claiming enablement for a plugin the
+  # toolchain never installed is a claim nothing backs. Stripping it unconditionally on every
+  # run was itself a bug: a user who opted in with --with-plugins/VSTACK_PLUGINS=1 had their own
+  # explicit choice undone on the next `./install.sh`, because install.sh cannot see a flag
+  # passed to a different script in an earlier run. `claude plugin list` is the same detection
+  # setup-machine.sh already uses to decide presence, so a plugin actually on disk keeps its
+  # entry and only a stale claim (no matching install) gets deleted.
+  TSL_PRESENT=false
   if command -v claude >/dev/null 2>&1; then
     PL_LIST=$(claude plugin list 2>/dev/null)
-    echo "$PL_LIST" | grep -qi claude-mem && CM_PRESENT=true
     echo "$PL_LIST" | grep -qi typescript-lsp && TSL_PRESENT=true
   fi
   # Hooks and skillOverrides are merged by ownership, not replaced wholesale.
@@ -367,7 +413,7 @@ elif [ "$DRY" = 0 ]; then
   #
   # skillOverrides merge with ours winning on collision. A stale entry naming a skill nobody
   # ships is inert — Claude Code ignores it — and losing a user's override is not.
-  jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" --argjson cm_present "$CM_PRESENT" --argjson tsl_present "$TSL_PRESENT" '
+  jq -s --arg h "$CDIR/hooks" --argjson retired "$RETIRED" --argjson tsl_present "$TSL_PRESENT" '
     ((.[1] | del(.hooks)) as $portable
       | (.[0].hooks // {}) as $userhooks
       | (.[0].skillOverrides // {}) as $userso
@@ -417,7 +463,7 @@ elif [ "$DRY" = 0 ]; then
           | with_entries(select(.value | length > 0))) as $theirs
       | (.[0] * $portable)
       | .skillOverrides = ($userso + ($portable.skillOverrides // {}))
-      | (if $cm_present then . else del(.enabledPlugins["claude-mem@thedotmack"]?) end)
+      | del(.enabledPlugins["claude-mem@thedotmack"]?)
       | (if $tsl_present then . else del(.enabledPlugins["typescript-lsp@claude-plugins-official"]?) end)
       | delpaths([$retired[] | [.]])
       | .hooks = (reduce ($ours | to_entries[]) as $e
