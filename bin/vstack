@@ -3,6 +3,7 @@
 #
 # Usage: vstack <update|install|doctor|overlay|verify|uninstall|help> [args...]
 set -uo pipefail
+SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 
 usage() {
   cat <<'EOF'
@@ -19,6 +20,9 @@ commands:
                         trust a repo's .claude/verify.sh so the Stop-hook gate runs it unattended;
                         refuses without a terminal to confirm on unless --yes is given
   uninstall [args...]  run the repo's uninstall.sh (args passed through)
+  self-test             offline, zero-model checks against THIS machine's installed state
+                         (not the repo checkout -- see 'verify' for that). Single verdict,
+                         declared/ran/skipped accounting; a run that ran nothing cannot pass.
   help                 show this message
 
 The repo is resolved the same way as `doctor --drift`: $VSTACK_DIR, else ~/.vstack, else the
@@ -47,6 +51,126 @@ resolve_vstack_repo() {
   return 1
 }
 
+# --- self-test -------------------------------------------------------------------------------
+# The offline, zero-model checks that answer "is THIS machine's install working?" -- as
+# opposed to .claude/verify.sh (proves a repo CHECKOUT is installable/portable) and
+# tests/install-matrix.sh / tests/bin-scripts.sh (dev tests that install into throwaway HOMEs
+# or lint the checkout's own copies). Before this, a user with a broken install had to already
+# know which of those four to reach for.
+#
+# Same bar as verify.sh's footer, deliberately: a check that could not run SKIPs and names the
+# missing dependency, ran+skipped must equal declared, and a run that ran nothing must not
+# report success -- that last one is not implied by the accounting line, so it is asserted
+# separately. TOTAL is counted from this function's own `# --- self-test N.` markers so a check
+# added later cannot silently drop out of the count the way check 18 in docs/checks-that-
+# inherit-their-answer.md dropped out of a hand-maintained one.
+cmd_self_test() {
+  ST_CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  ST_FAIL=0; ST_RAN=0; ST_SKIPPED=0
+  ST_TOTAL=$(grep -c '^  # --- self-test [0-9]' "$SELF")
+  st_ok(){   printf 'ok    %s\n' "$1"; ST_RAN=$((ST_RAN+1)); }
+  st_bad(){  printf 'FAIL  %s\n%s\n' "$1" "${2:-}"; ST_FAIL=1; ST_RAN=$((ST_RAN+1)); }
+  st_skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; ST_SKIPPED=$((ST_SKIPPED+1)); }
+
+  echo "vstack self-test: offline, zero-model checks against this machine's installed state"
+  echo "(not the repo checkout -- 'vstack verify' proves that)"
+  echo
+
+  ST_DOC="$HOME/.config/agents/bin/doctor"
+  [ -x "$ST_DOC" ] || ST_DOC="${REPO:-}/bin/doctor"
+
+  # --- self-test 1. doctor audit (installed state) -------------------------------------------
+  if [ -x "$ST_DOC" ]; then
+    st_doc_out=$("$ST_DOC" 2>&1); st_doc_rc=$?
+    if [ "$st_doc_rc" -eq 0 ]; then
+      st_ok "doctor audit (installed state)"
+    else
+      st_bad "doctor audit (installed state)" "$(printf '%s\n' "$st_doc_out" | grep '✖' | head -10)"
+    fi
+  else
+    st_skip "doctor audit (installed state)" "no doctor executable at \$HOME/.config/agents/bin/doctor or \$REPO/bin/doctor"
+  fi
+
+  # --- self-test 2. doctor --drift (installed state vs the source repo) ----------------------
+  if [ -x "$ST_DOC" ]; then
+    st_drift_out=$("$ST_DOC" --drift 2>&1); st_drift_rc=$?
+    if printf '%s\n' "$st_drift_out" | grep -q 'no vstack repo found'; then
+      st_skip "doctor --drift (installed vs source repo)" "no vstack repo resolvable from this machine"
+    elif [ "$st_drift_rc" -eq 0 ]; then
+      st_ok "doctor --drift (installed vs source repo)"
+    else
+      st_bad "doctor --drift (installed vs source repo)" "$(printf '%s\n' "$st_drift_out" | grep -E 'missing|differs|error' | head -10)"
+    fi
+  else
+    st_skip "doctor --drift (installed vs source repo)" "no doctor executable found"
+  fi
+
+  # --- self-test 3. installed hook scripts parse as valid bash --------------------------------
+  # doctor --drift (above) proves a full-lane install matches the repo byte for byte when a
+  # repo is resolvable. This is what still catches a corrupted deploy (a truncated copy, a
+  # partial write) on a machine where no repo is around to diff against at all.
+  if [ -d "$ST_CDIR/hooks" ] && [ -n "$(ls -A "$ST_CDIR/hooks" 2>/dev/null)" ]; then
+    st_errs=""
+    for st_f in "$ST_CDIR"/hooks/*.sh; do
+      [ -e "$st_f" ] || continue
+      st_out=$(bash -n "$st_f" 2>&1) || st_errs="$st_errs
+$(basename "$st_f"): $st_out"
+    done
+    if [ -z "$st_errs" ]; then st_ok "installed hook scripts parse ($ST_CDIR/hooks)"
+    else st_bad "installed hook scripts parse" "$st_errs"; fi
+  else
+    st_skip "installed hook scripts parse" "$ST_CDIR/hooks missing or empty -- plugin lane, or no full install here"
+  fi
+
+  # --- self-test 4. installed bin scripts parse as valid bash ---------------------------------
+  ST_BINDIR="$HOME/.config/agents/bin"
+  if [ -d "$ST_BINDIR" ] && [ -n "$(ls -A "$ST_BINDIR" 2>/dev/null)" ]; then
+    st_errs=""
+    for st_f in "$ST_BINDIR"/*; do
+      [ -f "$st_f" ] || continue
+      head -c 64 "$st_f" 2>/dev/null | grep -q '^#!.*sh' || continue
+      st_out=$(bash -n "$st_f" 2>&1) || st_errs="$st_errs
+$(basename "$st_f"): $st_out"
+    done
+    if [ -z "$st_errs" ]; then st_ok "installed bin scripts parse ($ST_BINDIR)"
+    else st_bad "installed bin scripts parse" "$st_errs"; fi
+  else
+    st_skip "installed bin scripts parse" "$ST_BINDIR missing or empty"
+  fi
+
+  # --- self-test 5. installed settings.json is valid JSON -------------------------------------
+  if ! command -v jq >/dev/null 2>&1; then
+    st_skip "settings.json valid JSON" "jq not installed"
+  elif [ ! -f "$ST_CDIR/settings.json" ]; then
+    st_skip "settings.json valid JSON" "$ST_CDIR/settings.json does not exist"
+  elif jq -e . "$ST_CDIR/settings.json" >/dev/null 2>&1; then
+    st_ok "settings.json valid JSON ($ST_CDIR/settings.json)"
+  else
+    st_bad "settings.json valid JSON" "$ST_CDIR/settings.json does not parse"
+  fi
+
+  echo
+  printf 'self-test: %d declared, %d ran, %d skipped\n' "$ST_TOTAL" "$ST_RAN" "$ST_SKIPPED"
+  if [ "$((ST_RAN + ST_SKIPPED))" -ne "$ST_TOTAL" ]; then
+    echo "FAIL  self-test accounting"
+    echo "      $((ST_TOTAL - ST_RAN - ST_SKIPPED)) declared check(s) reported nothing"
+    ST_FAIL=1
+  fi
+  # The bar this file's checks are held to, held right back: a run that ran nothing is not a
+  # pass just because nothing it ran came back FAIL. All five checks skip in the same run only
+  # when doctor is entirely absent, which cannot happen on a real vstack install (doctor ships
+  # in bin/*, installed to $HOME/.config/agents/bin) -- so ST_RAN==0 here means something is
+  # badly wrong (no doctor, no hooks dir, no bin dir, no settings.json, no jq), not that the
+  # machine is healthy.
+  if [ "$ST_RAN" -eq 0 ]; then
+    echo "FAIL  self-test ran nothing -- a self-test that ran nothing must not report success"
+    ST_FAIL=1
+  fi
+
+  [ "$ST_FAIL" -eq 0 ] && echo "SELF-TEST OK" || echo "SELF-TEST FAILED"
+  return "$ST_FAIL"
+}
+
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
 
@@ -57,11 +181,22 @@ case "$CMD" in
     ;;
 esac
 
-REPO=$(resolve_vstack_repo) || {
-  echo "vstack: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root)" >&2
-  echo "vstack: set \$VSTACK_DIR to your checkout, or clone one to ~/.vstack" >&2
-  exit 1
-}
+# self-test exists specifically to work on a machine where no repo checkout is around at all
+# -- a plugin-only install, or a full install whose original clone was deleted after
+# ./install.sh ran. Every other command still needs $REPO to find the script it runs
+# (install.sh, overlay.sh, uninstall.sh, .claude/verify.sh), so this stays a hard failure for
+# them; self-test says UNKNOWN for whatever specifically needed a repo (see checks 1/2).
+REPO=$(resolve_vstack_repo) || REPO=""
+if [ -z "$REPO" ]; then
+  case "$CMD" in
+    self-test) : ;;
+    *)
+      echo "vstack: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root)" >&2
+      echo "vstack: set \$VSTACK_DIR to your checkout, or clone one to ~/.vstack" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 case "$CMD" in
   update)
@@ -179,6 +314,10 @@ case "$CMD" in
     ;;
   verify)
     "$REPO/.claude/verify.sh"
+    ;;
+  self-test)
+    cmd_self_test
+    exit $?
     ;;
   test)
     "$REPO/tests/auto-trigger.sh" "$@"
