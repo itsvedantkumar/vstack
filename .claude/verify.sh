@@ -123,17 +123,45 @@ done <<<"$(sh_files)"   # not a pipe: SIGPIPE + pipefail = 141
 [ -z "$errs" ] && ok "shell syntax" || bad "shell syntax" "$(printf '%b' "$errs")"
 
 # --- 2. every JSON file parses --------------------------------------------------------------
-if command -v jq >/dev/null; then
-  errs=""
-  for f in claude/settings.json mcp/servers.json claude/hooks/hooks.json \
-           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json; do
-    [ -f "$f" ] || { errs="$errs\n$f: missing"; continue; }
+# The list used to be five hardcoded paths under a label that said every JSON file. The tree
+# carries 12: the two .github protection rulesets, brand.schema.json, claude/inventory.json and
+# three ground-truth.json fixtures were all outside it, and a malformed ruleset would have shipped
+# green. Derived now, with a floor -- a derived list that silently shrinks to nothing is the exact
+# failure this check exists for, so an empty or short selector is itself a failure.
+#
+# .jsonl is deliberately NOT swept: tests/evals/agent-pilot/selftest/truncated.jsonl is a fixture
+# that is invalid on purpose, and a check that forced it to parse would delete the thing it tests.
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  errs=""; njson=0
+  for f in $(git ls-files '*.json'); do
+    njson=$((njson + 1))
+    [ -f "$f" ] || { errs="$errs\n$f: tracked but not on disk"; continue; }
     jq -e . "$f" >/dev/null 2>&1 || errs="$errs\n$f: invalid JSON"
   done
-  [ -z "$errs" ] && ok "json valid" || bad "json valid" "$(printf '%b' "$errs")"
+  [ "$njson" -ge 10 ] \
+    || errs="$errs\nonly $njson tracked .json file(s) found; the selector has stopped matching the tree"
+  for f in claude/settings.json mcp/servers.json claude/hooks/hooks.json \
+           .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json; do
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 \
+      || errs="$errs\n$f is not in the derived set; the selector no longer covers what installs"
+  done
+  [ -z "$errs" ] && ok "json valid ($njson tracked .json files, derived; .jsonl excluded on purpose)" \
+                 || bad "json valid" "$(printf '%b' "$errs")"
 else
-  skip "json valid" "jq not installed"
+  skip "json valid" "jq or git not installed"
 fi
+
+# Frontmatter, parsed rather than grepped. Checks 3 and 10 both used to ask only whether SOME line
+# in the file started with name: or description:, which passes a file with no frontmatter, one
+# whose block is never closed, and one whose only description: sits in a fenced example halfway
+# down. None of those load. The block is what the loader reads, so the block is what this reads.
+fm_block(){ # <file>  -> the frontmatter body, empty if the file has no closed block at line 1
+  awk 'NR==1 && $0 != "---" { exit 1 }
+       NR==1 { next }
+       $0 == "---" { closed=1; exit }
+       { print }
+       END { if (!closed) exit 1 }' "$1" 2>/dev/null
+}
 
 # --- 3. skills are loadable ------------------------------------------------------------------
 # A skill with no description, or one longer than the configured listing cap, gets truncated
@@ -146,13 +174,20 @@ errs=""; n=0
 for s in claude/skills/*/SKILL.md; do
   [ -e "$s" ] || continue
   n=$((n+1))
-  name=$(awk -F': *' '/^name:/{print $2; exit}' "$s" | tr -d '"')
-  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$s" | tr -d '"')
   dir=$(basename "$(dirname "$s")")
+  if ! fm=$(fm_block "$s"); then
+    errs="$errs\n$dir: no closed YAML frontmatter block at the top of SKILL.md"
+    continue
+  fi
+  name=$(printf '%s\n' "$fm" | awk -F': *' '/^name:/{print $2; exit}' | tr -d '"')
+  desc=$(printf '%s\n' "$fm" | awk '/^description:/{sub(/^description: */,""); print; exit}' | tr -d '"')
   [ -n "$name" ] || errs="$errs\n$dir: no name in frontmatter"
   [ "$name" = "$dir" ] || errs="$errs\n$dir: name ($name) does not match directory"
   [ -n "$desc" ] || errs="$errs\n$dir: no description"
-  grep -q 'disable-model-invocation' "$s" && errs="$errs\n$dir: disable-model-invocation blocks auto-trigger"
+  # In the frontmatter only. A skill whose prose DISCUSSES disable-model-invocation -- this repo
+  # ships one that does -- is not a skill that sets it.
+  printf '%s\n' "$fm" | grep -q 'disable-model-invocation' \
+    && errs="$errs\n$dir: disable-model-invocation blocks auto-trigger"
   # The length cap only bites skills whose description actually reaches the listing.
   # skillOverrides "off" hides the skill and "name-only" drops its description, so a long
   # description on those costs nothing and is not a defect.
@@ -165,7 +200,7 @@ for s in claude/skills/*/SKILL.md; do
   fi
 done
 [ "$n" -gt 0 ] || errs="$errs\nno skills found"
-[ -z "$errs" ] && ok "skills ($n) loadable" || bad "skills loadable" "$(printf '%b' "$errs")"
+[ -z "$errs" ] && ok "skills ($n) loadable (frontmatter block parsed, not grepped)" || bad "skills loadable" "$(printf '%b' "$errs")"
 
 # Content scanner shared by checks 4-6.
 #
@@ -330,26 +365,39 @@ fi
 # Same failure class as check 3: frontmatter drift silently breaks discovery.
 # The n>0 guards mirror check 3: an empty directory makes the glob expand to itself, and
 # without a count this check would report green on a tree that had lost every agent.
+# "Loadable" used to mean: somewhere in the file, a line starts with name: or description:. That
+# passes a file with no frontmatter at all, one whose block is never closed, and one whose only
+# `description:` sits in a fenced example halfway down -- none of which Claude Code will load.
+# fm_block() (defined above check 3) takes the real thing: the file must OPEN with --- on line 1,
+# and the block ends at the next --- line. Everything read below comes out of that block.
 errs=""; na=0; nc=0
 for f in claude/agents/*.md; do
   [ -e "$f" ] || continue
   na=$((na+1))
   b=$(basename "$f" .md)
-  name=$(awk -F': *' '/^name:/{print $2; exit}' "$f" | tr -d '"')
-  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
-  [ "$name" = "$b" ] || errs="$errs\nagents/$b: name ($name) does not match filename"
-  [ -n "$desc" ] || errs="$errs\nagents/$b: no description"
+  if ! fm=$(fm_block "$f"); then
+    errs="$errs\nagents/$b: no closed YAML frontmatter block at the top of the file"
+    continue
+  fi
+  name=$(printf '%s\n' "$fm" | awk -F': *' '/^name:/{print $2; exit}' | tr -d '"')
+  desc=$(printf '%s\n' "$fm" | awk '/^description:/{sub(/^description: */,""); print; exit}')
+  [ "$name" = "$b" ] || errs="$errs\nagents/$b: frontmatter name ($name) does not match filename"
+  [ -n "$desc" ] || errs="$errs\nagents/$b: no description in frontmatter"
 done
 for f in claude/commands/*.md; do
   [ -e "$f" ] || continue
   nc=$((nc+1))
   b=$(basename "$f" .md)
-  desc=$(awk -F': *' '/^description:/{sub(/^description: */,""); print; exit}' "$f")
-  [ -n "$desc" ] || errs="$errs\ncommands/$b: no description"
+  if ! fm=$(fm_block "$f"); then
+    errs="$errs\ncommands/$b: no closed YAML frontmatter block at the top of the file"
+    continue
+  fi
+  desc=$(printf '%s\n' "$fm" | awk '/^description:/{sub(/^description: */,""); print; exit}')
+  [ -n "$desc" ] || errs="$errs\ncommands/$b: no description in frontmatter"
 done
 [ "$na" -gt 0 ] || errs="$errs\nno agents found"
 [ "$nc" -gt 0 ] || errs="$errs\nno commands found"
-[ -z "$errs" ] && ok "agents ($na) + commands ($nc) loadable" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
+[ -z "$errs" ] && ok "agents ($na) + commands ($nc) loadable (frontmatter block parsed, not grepped)" || bad "agents + commands loadable" "$(printf '%b' "$errs")"
 
 # --- 11. hook wiring is complete in all three lanes --------------------------------------------
 # There are three wiring surfaces, and this check used to read two of them while its own label

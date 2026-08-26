@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -249,7 +249,9 @@ files_for(){ case "$1" in
   1)   printf 'claude/hooks/format.sh' ;;
   1b)  printf 'ui-gate/rules/tokens.sh' ;;
   2)   printf 'mcp/servers.json' ;;
+  2b)  printf '.github/branch-protection-ruleset.json' ;;
   3)   printf 'claude/skills/unslop/SKILL.md' ;;
+  3b)  printf 'claude/skills/unslop/SKILL.md' ;;
   4|5|6) printf 'README.md' ;;
   7)   printf 'claude/CLAUDE.md' ;;
   8|9|11) printf 'install.sh' ;;
@@ -257,6 +259,7 @@ files_for(){ case "$1" in
   48)  printf 'claude/inventory.json' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
+  10b) printf 'claude/agents/debugger.md' ;;
   12)  printf 'README.md' ;;
   13)  printf 'claude/.claude-plugin/plugin.json' ;;
   14)  printf 'claude/hooks/verify-gate.sh' ;;
@@ -308,7 +311,9 @@ label_for(){ case "$1" in
   1)   printf 'shell syntax' ;;
   1b)  printf 'shell syntax' ;;
   2)   printf 'json valid' ;;
+  2b)  printf 'json valid' ;;
   3)   printf 'skills loadable' ;;
+  3b)  printf 'skills loadable' ;;
   4)   printf 'no hardcoded home paths' ;;
   5)   printf 'no committed secrets' ;;
   6)   printf 'no infrastructure ids' ;;
@@ -319,6 +324,7 @@ label_for(){ case "$1" in
   48)  printf 'inventory contract matches the tree' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
+  10b) printf 'agents + commands loadable' ;;
   11)  printf 'hook wiring' ;;
   12)  printf 'doc counts match tree' ;;
   13)  printf 'plugin manifest versions' ;;
@@ -384,10 +390,20 @@ break_it(){ case "$1" in
       # parsed it.
       printf '\nif [ -z\n' >> ui-gate/rules/tokens.sh ;;
   2)  printf '{' >> mcp/servers.json ;;
+
+  2b) # A file the hardcoded five-path list never covered. Until 2026-08-27 check 2's label said
+      # every JSON file and its body named five, so a malformed protection ruleset, a broken
+      # brand.schema.json or a corrupt ground-truth fixture all shipped green.
+      printf '{' >> .github/branch-protection-ruleset.json ;;
   3)  # a description past the 200-char listing cap, which silently stops the skill triggering
       awk 'BEGIN{d="x"; for(i=0;i<209;i++) d=d "y"}
            /^description:/{print "description: " d; next} {print}' \
           claude/skills/unslop/SKILL.md > /tmp/fx.$$ && mv /tmp/fx.$$ claude/skills/unslop/SKILL.md ;;
+
+  3b) # The closing --- of the frontmatter, deleted. Every key stays where it was; the block just
+      # never ends, so the loader reads no frontmatter at all and the skill stops being listed.
+      awk 'BEGIN{c=0} /^---$/{c++; if(c==2) next} {print}' claude/skills/unslop/SKILL.md \
+        > /tmp/fx3b.$$ && mv /tmp/fx3b.$$ claude/skills/unslop/SKILL.md ;;
   # Assembled at runtime, never written out whole. Checks 4-6 scan every tracked file, and
   # this is a tracked file: a literal probe here is a real hit on the repo itself, which is
   # how these three rows turned the gate red the moment the suite was committed.
@@ -415,6 +431,12 @@ exit 7
         && cat /tmp/c48row.$$ > claude/inventory.json && rm -f /tmp/c48row.$$ ;;
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
+
+  10b) # The frontmatter block itself, not its contents. Both keys stay present and correct; what
+      # goes is the --- that opens the block, so the loader sees a plain markdown file. Checks 3
+      # and 10 grepped for a line starting with name:/description: anywhere in the file, so this
+      # exact shape passed them both until fm_block() replaced the grep on 2026-08-27.
+      sed -i.t '1{/^---$/d;}' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
   11) # drop the PostToolUse key while PostToolUseFailure stays: the exact shape the old
       # substring grep could not see. Indentation-tolerant on purpose — this row silently
       # stopped mutating anything when the merge program was reindented, and a mutation that
