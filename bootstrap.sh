@@ -50,12 +50,55 @@ if command -v git >/dev/null 2>&1; then
         exit 1
       fi
     fi
-    git -C "$DIR" fetch -q --depth 1 origin "$REF"
-    git -C "$DIR" reset -q --hard FETCH_HEAD
+    # --no-tags/--no-prune: a bare fetch here would otherwise obey the machine-wide
+    # fetch.prune/fetch.pruneTags and delete any local tag no longer on the remote.
+    git -C "$DIR" fetch -q --no-tags --no-prune --depth 1 origin "$REF"
+    # Same principle as the dirty-tree guard above, extended to a clean-but-diverged branch:
+    # a HEAD that carries a commit origin/$REF does not have is exactly as unsafe to reset
+    # over as a dirty tree, just quieter about it. Fast-forward-only resets are safe without
+    # asking; anything else needs either a refusal or a durable backup ref first.
+    #
+    # The check is against refs/vstack/synced-$REF, a watermark this script plants on its own
+    # every time it leaves the checkout in a known-good state (clone, or a safe reset below) --
+    # not `merge-base --is-ancestor HEAD FETCH_HEAD`. Every checkout this script makes is
+    # shallow (--depth 1), and each depth-1 fetch grafts its new tip with the real parent cut
+    # off, so on a clean, untouched checkout that is legitimately just behind, ordinary
+    # ancestry can no longer see past that graft to prove it safe. HEAD == our own watermark
+    # answers the actual question -- "has anything been added since bootstrap last touched
+    # this checkout" -- without depending on how much history git kept. A checkout from before
+    # this watermark existed falls back to that ancestry check once; every run after this one
+    # carries its own watermark.
+    watermark_ref="refs/vstack/synced-$REF"
+    watermark="$(git -C "$DIR" rev-parse -q --verify "$watermark_ref" 2>/dev/null || true)"
+    head_sha="$(git -C "$DIR" rev-parse HEAD)"
+    if [ -n "$watermark" ]; then
+      [ "$head_sha" = "$watermark" ] && safe=1 || safe=0
+    elif git -C "$DIR" merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
+      safe=1
+    else
+      safe=0
+    fi
+    if [ "$safe" = 1 ]; then
+      git -C "$DIR" reset -q --hard FETCH_HEAD
+    elif [ "${VSTACK_FORCE:-0}" = 1 ]; then
+      backup="vstack-backup-$(date +%Y%m%d-%H%M%S)"
+      git -C "$DIR" branch -f "$backup" HEAD >/dev/null
+      echo "bootstrap: $DIR has commits origin/$REF does not have — preserved under branch '$backup' before resetting (VSTACK_FORCE=1)" >&2
+      git -C "$DIR" reset -q --hard FETCH_HEAD
+    else
+      echo "bootstrap: $DIR has commits not on origin/$REF; refusing to reset over them." >&2
+      echo "           push them, or re-run with VSTACK_FORCE=1 to back them up under a branch and discard." >&2
+      exit 1
+    fi
+    git -C "$DIR" update-ref "$watermark_ref" HEAD
   else
     echo "bootstrap: cloning into $DIR"
     git clone -q --depth 1 --branch "$REF" "$REPO" "$DIR" 2>/dev/null \
       || git clone -q --depth 1 "$REPO" "$DIR"
+    # Plant the same watermark a fresh clone would end an update at, so the very next
+    # `bootstrap.sh` run already has one to compare HEAD against instead of falling back to
+    # ancestry.
+    git -C "$DIR" update-ref "refs/vstack/synced-$REF" HEAD
   fi
 elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
   # A previous tarball install leaves a directory that is not a git checkout. Re-running once
