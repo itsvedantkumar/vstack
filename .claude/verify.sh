@@ -1304,18 +1304,32 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   # Agreeing with the manifest is not enough. The quickstart's "pin a release" lane pinned
   # v1.8.0 while the manifests said v1.8.0 and no such tag existed, so the check was satisfied
   # and the URL a stranger copy-pastes returned 404. A pin has to name a tag that is actually
-  # there. Only asserted where the checkout has tags at all -- a shallow clone has none, and the
-  # branch below already declines to measure in that case.
+  # there.
+  #
+  # The right target is the newest tag, not the manifest version. Comparing against the manifest
+  # was this check contradicting its own contract two paragraphs up: "between releases you simply
+  # bump the version, and the check goes quiet until that version is tagged". It did not go quiet.
+  # Bumping the manifest made every README pin wrong on the spot, and pinning the new version
+  # instead made the URL 404, so there was no green state anywhere between the bump and the tag --
+  # a release could only be prepared by leaving the gate red, which is how a red gate becomes
+  # something you learn to walk past.
+  #
+  # Both defects that wrote this rule are still caught, and one more with them: a pin at v1.4.0
+  # while v1.8.0 is the newest tag is stale, a pin at an untagged v1.8.0 is a 404, and now a pin
+  # at any real-but-not-newest tag is stale too. Sorted by git itself (--sort=-v:refname) rather
+  # than by `sort -V`, which busybox does not have. Only asserted where the checkout has tags at
+  # all -- a shallow clone has none, and the branch below already declines to measure in that case.
+  newest_tag=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | head -1)
   pins=""
   for f in README.md docs/*.md; do
     [ -f "$f" ] || continue
     while IFS= read -r pv; do
       [ -n "$pv" ] || continue
-      if [ "$pv" != "$mv_" ]; then
-        pins="$pins\n  $f pins v$pv"
-      elif [ -n "$(git tag -l 2>/dev/null | head -1)" ] \
-           && ! git rev-parse -q --verify "refs/tags/v$pv" >/dev/null 2>&1; then
+      [ -n "$newest_tag" ] || continue
+      if ! git rev-parse -q --verify "refs/tags/v$pv" >/dev/null 2>&1; then
         pins="$pins\n  $f pins v$pv, which is not a tag in this repository (the URL 404s)"
+      elif [ "v$pv" != "$newest_tag" ]; then
+        pins="$pins\n  $f pins v$pv, but the newest release is $newest_tag"
       fi
     done <<PINEOF
 $(grep -oE '(vstack/v|VSTACK_REF=v)[0-9]+\.[0-9]+\.[0-9]+' "$f" 2>/dev/null | sed -E 's/.*v//' | sort -u)
