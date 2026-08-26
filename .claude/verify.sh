@@ -27,9 +27,26 @@ if [ -z "${VSTACK_FALSIFY:-}" ]; then
   # falsifiability harness in one worktree would be invisible to a verify.sh run in another
   # worktree of the same repo. --git-common-dir is the same path from every worktree.
   _lk="$(git rev-parse --git-common-dir 2>/dev/null)/vstack-falsifiability.lock"
-  if [ -f "$_lk" ] && kill -0 "$(cat "$_lk" 2>/dev/null)" 2>/dev/null; then
-    printf 'REFUSED  tests/gate-falsifiability.sh (pid %s) is mutating this working tree.\n' "$(cat "$_lk")"
-    printf '         Any result now would name a defect the harness planted. Wait for it to finish.\n'
+  if [ -f "$_lk" ] && kill -0 "$(head -1 "$_lk" 2>/dev/null)" 2>/dev/null; then
+    # The lock is keyed on --git-common-dir on purpose (shared across every worktree of this
+    # repo, see the comment above), which means the process holding it is not necessarily
+    # working THIS worktree -- a run here once said "this working tree" while the actual
+    # mutator was a harness in an unrelated /tmp worktree, which sends whoever reads it looking
+    # for a planted defect in a tree that has none. Line 2 of the lock (if the writer recorded
+    # one; tests/gate-falsifiability.sh and tests/inventory-fixture.sh both do, verify.sh's own
+    # lock self-test at 14b below deliberately does not) is that process's cwd -- name it when
+    # known instead of asserting a tree.
+    _lk_pid=$(head -1 "$_lk" 2>/dev/null)
+    _lk_cwd=$(sed -n 2p "$_lk" 2>/dev/null)
+    if [ -n "$_lk_cwd" ]; then
+      printf 'REFUSED  a process sharing this repository'"'"'s git directory (pid %s, working %s) is mutating a working tree.
+' "$_lk_pid" "$_lk_cwd"
+    else
+      printf 'REFUSED  a process sharing this repository'"'"'s git directory (pid %s) is mutating a working tree (cwd not recorded).
+' "$_lk_pid"
+    fi
+    printf '         Any result now would name a defect that process planted somewhere. Wait for it to finish.
+'
     exit 2
   fi
 fi

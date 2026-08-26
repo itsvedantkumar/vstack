@@ -89,7 +89,11 @@ CONFLICT_DIR=$(mktemp -d)
 # worktree of the same repo. --git-common-dir resolves to the same path from every worktree.
 # See docs/worktree-collision-detection.md.
 LOCK="$(git rev-parse --git-common-dir 2>/dev/null)/vstack-falsifiability.lock"
-printf '%s\n' "$$" > "$LOCK" 2>/dev/null || LOCK=""
+# Line 2 is this process's cwd, not just its pid -- a reader refusing to run because this lock
+# is live used to say "this working tree" unconditionally, which is false for any lock holder
+# working a *different* worktree of the same repo (the lock is deliberately keyed on
+# --git-common-dir so it spans all of them). Cheap to record, no lsof dependency.
+printf '%s\n%s\n' "$$" "$(pwd)" > "$LOCK" 2>/dev/null || LOCK=""
 # EXIT alone does not fire when the shell is killed, and this suite gets killed: someone restarts
 # it at a later commit, or a wrapper times it out. Both times that happened today it left a
 # mutated file on disk -- install.sh once, README.md once in another worktree -- and the tree
