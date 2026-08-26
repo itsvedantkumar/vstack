@@ -20,6 +20,13 @@ commands:
                         trust a repo's .claude/verify.sh so the Stop-hook gate runs it unattended;
                         refuses without a terminal to confirm on unless --yes is given
   uninstall [args...]  run the repo's uninstall.sh (args passed through)
+  recover [--yes] [--dry-run] [--from <ts>]
+                         if an install died partway, put this machine back the way it found
+                         it. Reads the marker install.sh leaves behind when a run does not
+                         reach its own end (see the contract comment above cmd_recover in
+                         this file); refuses rather than guesses when that marker and the
+                         backups on disk disagree. Delegates the actual restore to
+                         uninstall.sh -- this only decides which backup is the right one.
   self-test             offline, zero-model checks against THIS machine's installed state
                          (not the repo checkout -- see 'verify' for that). Single verdict,
                          declared/ran/skipped accounting; a run that ran nothing cannot pass.
@@ -365,6 +372,130 @@ cmd_explain() {
   fi
 }
 
+# --- recover -----------------------------------------------------------------------------------
+# install.sh backs up to $BK_BASE and, until now, nothing put a half-finished install back. A
+# run that dies partway leaves a half-written ~/.claude and a backup directory the user had to
+# reason about by hand.
+#
+# The restore logic itself is NOT reimplemented here. uninstall.sh already restores every
+# backed-up file and removes what a run newly created that the backup does not contain (see its
+# own header) -- a second blind restore is exactly the shape that has already deleted two
+# agents' uncommitted work in this tree (see tests/README.md, "Before you edit"). recover's own
+# job is narrower: find out WHICH backup corresponds to the install that did not finish, and
+# refuse rather than guess when that is not knowable.
+#
+# The contract this depends on (install.sh's, not this file's -- see this repo's install.sh for
+# whether it has been implemented):
+#   file:    $HOME/.config/agents/install-state
+#   format:  one line, "backup=<absolute path to the $BK this run claimed>"
+#   written: immediately after install.sh claims its backup directory (mkdir "$BK" succeeds,
+#            i.e. right where it already sets BK_CREATED=1), non-dry-run only
+#   removed: `rm -f` as the LAST action before install.sh's own successful exit 0 -- not by
+#            abort_note, not by any error path. A file left behind after the process ends is
+#            the signal recover reads as "this run did not reach its own end."
+#   overwritten unconditionally on every new install.sh start; install.sh does not need to read
+#   or gate on it -- recover is what interprets whatever it finds.
+#
+# Until install.sh writes it, recover always reports "no incomplete install detected," which is
+# the truthful answer on every machine today: there is nothing yet for it to have found.
+INSTALL_STATE_FILE="$HOME/.config/agents/install-state"
+cmd_recover() {
+  RC_YES=0; RC_DRY=0; RC_FROM=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes|-y) RC_YES=1; shift ;;
+      --dry-run) RC_DRY=1; shift ;;
+      --from) [ $# -ge 2 ] || { echo "vstack recover: --from requires a timestamp" >&2; return 2; }
+              RC_FROM="$2"; shift 2 ;;
+      *) echo "vstack recover: unknown argument: $1" >&2; return 2 ;;
+    esac
+  done
+
+  if [ -n "$RC_FROM" ]; then
+    # Explicit escape hatch: the operator already knows which backup they want (e.g. from
+    # `vstack uninstall --list`), so the marker file is not consulted at all. Runs straight
+    # through to uninstall.sh, which owns --from's own validation.
+    echo "recover: --from given explicitly, deferring straight to uninstall.sh --from $RC_FROM"
+    RC_ARGS="--from $RC_FROM"
+    [ "$RC_DRY" -eq 1 ] && RC_ARGS="$RC_ARGS --dry-run"
+    [ "$RC_YES" -eq 1 ] && RC_ARGS="$RC_ARGS --yes"
+    # shellcheck disable=SC2086
+    "$REPO/uninstall.sh" $RC_ARGS
+    return $?
+  fi
+
+  if [ ! -f "$INSTALL_STATE_FILE" ]; then
+    echo "recover: no incomplete install detected (no $INSTALL_STATE_FILE)"
+    echo "         either every install.sh run here has completed, or this checkout's"
+    echo "         install.sh does not write that marker yet -- see the contract comment"
+    echo "         above cmd_recover in bin/vstack."
+    return 0
+  fi
+
+  RC_LINE=$(grep -m1 '^backup=' "$INSTALL_STATE_FILE" 2>/dev/null)
+  RC_BK=${RC_LINE#backup=}
+  if [ -z "$RC_LINE" ] || [ -z "$RC_BK" ]; then
+    echo "recover: $INSTALL_STATE_FILE exists but does not parse (expected one 'backup=<path>' line)" >&2
+    echo "         refusing to guess -- inspect it by hand, or 'vstack uninstall --list'" >&2
+    return 1
+  fi
+
+  RC_BKROOT="$HOME/.config/agents/backups"
+  case "$RC_BK" in
+    "$RC_BKROOT"/install-*) ;;
+    *)
+      echo "recover: $INSTALL_STATE_FILE names '$RC_BK', which is not under $RC_BKROOT/install-*" >&2
+      echo "         refusing to guess -- inspect it by hand" >&2
+      return 1
+      ;;
+  esac
+  if [ ! -d "$RC_BK" ]; then
+    echo "recover: $INSTALL_STATE_FILE names $RC_BK, which does not exist on disk" >&2
+    echo "         refusing to guess -- the marker is stale or the backup was removed;" >&2
+    echo "         'vstack uninstall --list' shows what backups actually exist" >&2
+    return 1
+  fi
+
+  # Refuse rather than clobber: the marker is only trustworthy if it names the NEWEST backup.
+  # If a newer one exists, something has run since the failed install this marker describes --
+  # another install (which should have cleared the marker on success, so its presence here
+  # means that later run failed too), an uninstall, or a hand-edit -- and guessing which of two
+  # backups is the right restore target is exactly the blind-restore shape this file exists to
+  # avoid. Newest by mtime, not by string/version sort: BSD sort has no -V and the timestamp
+  # suffix collision format (install-YYYYMMDD-HHMMSS-N) does not sort correctly as a string.
+  RC_NEWEST=$(ls -dt "$RC_BKROOT"/install-*/ 2>/dev/null | head -1)
+  RC_NEWEST="${RC_NEWEST%/}"
+  if [ -n "$RC_NEWEST" ] && [ "$RC_NEWEST" != "$RC_BK" ]; then
+    echo "recover: $INSTALL_STATE_FILE names $RC_BK, but the newest backup on disk is $RC_NEWEST" >&2
+    echo "         these disagree, so this does not match what the backup expects -- refusing." >&2
+    echo "         run 'vstack uninstall --list' and choose a target explicitly with --from," >&2
+    echo "         or 'vstack recover --from <timestamp>' once you know which one is right." >&2
+    return 1
+  fi
+
+  RC_TS="${RC_BK#"$RC_BKROOT"/install-}"
+  echo "recover: $INSTALL_STATE_FILE names $RC_BK (matches the newest backup on disk)"
+  echo "         this looks like an install.sh run that did not reach its own end."
+  RC_ARGS="--from $RC_TS"
+  [ "$RC_DRY" -eq 1 ] && RC_ARGS="$RC_ARGS --dry-run"
+  [ "$RC_YES" -eq 1 ] && RC_ARGS="$RC_ARGS --yes"
+  # shellcheck disable=SC2086
+  "$REPO/uninstall.sh" $RC_ARGS
+  RC_RC=$?
+
+  # Idempotent: only clear the marker once uninstall.sh has actually restored something (--yes,
+  # exit 0). A plan-only or --dry-run call changes nothing, so the marker must still describe
+  # reality afterward -- running recover again in that state must find the exact same thing, not
+  # a cleared marker over an unfixed machine. A second real recovery run, after the marker is
+  # gone, correctly falls through to "no incomplete install detected" above: doing it twice is
+  # not worse than doing it once.
+  if [ "$RC_YES" -eq 1 ] && [ "$RC_RC" -eq 0 ]; then
+    rm -f "$INSTALL_STATE_FILE"
+    echo "recover: restored from $RC_BK and cleared $INSTALL_STATE_FILE"
+  fi
+  return "$RC_RC"
+}
+
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
 
@@ -684,6 +815,10 @@ case "$CMD" in
     ;;
   uninstall)
     "$REPO/uninstall.sh" "$@"
+    ;;
+  recover)
+    cmd_recover "$@"
+    exit $?
     ;;
   *)
     echo "vstack: unknown command: $CMD" >&2

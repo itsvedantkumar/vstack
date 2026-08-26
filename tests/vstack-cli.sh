@@ -351,7 +351,146 @@ $out"
   fi
 }
 
-cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog"
+# --- recover: install.sh's transactional-recovery story --------------------------------------
+# install.sh does not write the $HOME/.config/agents/install-state marker cmd_recover's
+# contract calls for yet (see the comment above cmd_recover in bin/vstack -- that is SUMMER's
+# side of the contract). These cases build the marker and a real install.sh-shaped backup
+# directory by hand, which is the correct way to test a consumer against a contract before its
+# producer exists: they assert on the contract, not on a fixture that happens to match today's
+# install.sh.
+
+# No marker at all is the truthful state on every machine today. Must exit 0, not error, and
+# must say plainly that recovery found nothing to do.
+case_recover_no_marker_is_clean() {
+  h="$ROOT/home-recover-no-marker"
+  mkdir -p "$h"
+  out=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover 2>&1)
+  rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'no incomplete install detected'; then
+    ok "recover: no marker -> clean, exit 0"
+  else
+    bad "recover: no marker -> clean, exit 0" "rc=$rc output:
+$out"
+  fi
+}
+
+# Sets up one realistic install.sh-shaped backup (files/.claude/CLAUDE.md, the same layout
+# install.sh's own back() writes) plus a marker naming it, and a "half-written" live file that
+# differs from the backup -- the exact shape a killed install.sh leaves behind.
+seed_recover_fixture() { # <sandbox home dir>
+  h="$1"
+  mkdir -p "$h/.claude" "$h/.config/agents/backups/install-20260101-000000/files/.claude"
+  echo "OLD CONTENT (pre-install)" > "$h/.config/agents/backups/install-20260101-000000/files/.claude/CLAUDE.md"
+  echo "NEW CONTENT (half-written install)" > "$h/.claude/CLAUDE.md"
+  printf 'backup=%s\n' "$h/.config/agents/backups/install-20260101-000000" > "$h/.config/agents/install-state"
+}
+
+# --dry-run must show the plan and touch nothing -- neither the file uninstall.sh would
+# restore, nor the marker itself (nothing was actually fixed, so recover must still find the
+# same incomplete install next time).
+case_recover_dry_run_touches_nothing() {
+  h="$ROOT/home-recover-dry-run"
+  seed_recover_fixture "$h"
+  out=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --dry-run 2>&1)
+  live=$(cat "$h/.claude/CLAUDE.md")
+  if printf '%s\n' "$out" | grep -q 'dry run' \
+     && [ "$live" = "NEW CONTENT (half-written install)" ] \
+     && [ -f "$h/.config/agents/install-state" ]; then
+    ok "recover --dry-run: shows the plan, touches neither the file nor the marker"
+  else
+    bad "recover --dry-run: shows the plan, touches neither the file nor the marker" \
+        "live='$live' marker present=$([ -f "$h/.config/agents/install-state" ] && echo yes || echo no)
+$out"
+  fi
+}
+
+# --yes actually restores (delegated to uninstall.sh, not reimplemented) and clears the marker
+# -- and a second --yes run afterward is a clean no-op, not a second destructive pass. This is
+# the idempotency property required of it: running recovery twice must not be worse than once.
+case_recover_yes_restores_and_is_idempotent() {
+  h="$ROOT/home-recover-yes"
+  seed_recover_fixture "$h"
+  out1=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc1=$?
+  live=$(cat "$h/.claude/CLAUDE.md")
+  marker_gone=1; [ -f "$h/.config/agents/install-state" ] && marker_gone=0
+  out2=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc2=$?
+  if [ "$rc1" -eq 0 ] && [ "$live" = "OLD CONTENT (pre-install)" ] && [ "$marker_gone" -eq 1 ] \
+     && [ "$rc2" -eq 0 ] && printf '%s\n' "$out2" | grep -q 'no incomplete install detected'; then
+    ok "recover --yes: restores via uninstall.sh, clears the marker, second run is a no-op"
+  else
+    bad "recover --yes: restores via uninstall.sh, clears the marker, second run is a no-op" \
+        "rc1=$rc1 live='$live' marker_gone=$marker_gone rc2=$rc2
+first run:
+$out1
+second run:
+$out2"
+  fi
+}
+
+# The refuse-rather-than-clobber bar: a newer backup exists than the one the marker names (a
+# later install or uninstall ran since). recover must refuse and change nothing -- neither the
+# live file nor the marker -- rather than guess which backup is the right one.
+case_recover_refuses_on_backup_mismatch() {
+  h="$ROOT/home-recover-mismatch"
+  mkdir -p "$h/.claude" "$h/.config/agents/backups/install-20260101-000000/files/.claude"
+  echo "old" > "$h/.config/agents/backups/install-20260101-000000/files/.claude/CLAUDE.md"
+  touch -t 202601010000 "$h/.config/agents/backups/install-20260101-000000"
+  sleep 1
+  mkdir -p "$h/.config/agents/backups/install-20260201-000000/files/.claude"
+  echo "newer-backup" > "$h/.config/agents/backups/install-20260201-000000/files/.claude/CLAUDE.md"
+  echo "current" > "$h/.claude/CLAUDE.md"
+  printf 'backup=%s\n' "$h/.config/agents/backups/install-20260101-000000" > "$h/.config/agents/install-state"
+  out=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc=$?
+  live=$(cat "$h/.claude/CLAUDE.md")
+  if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'these disagree' \
+     && [ "$live" = "current" ] && [ -f "$h/.config/agents/install-state" ]; then
+    ok "recover refuses when the marker and the newest backup disagree (nothing touched)"
+  else
+    bad "recover refuses when the marker and the newest backup disagree (nothing touched)" \
+        "rc=$rc live='$live' output:
+$out"
+  fi
+}
+
+# A marker that does not parse, or names a path that does not exist, or names a path outside
+# the backups root entirely -- each must refuse rather than pass a bad path through to
+# uninstall.sh.
+case_recover_refuses_malformed_or_missing_marker() {
+  h1="$ROOT/home-recover-malformed"
+  mkdir -p "$h1/.config/agents"
+  echo "not a backup= line" > "$h1/.config/agents/install-state"
+  out1=$(env -i HOME="$h1" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc1=$?
+
+  h2="$ROOT/home-recover-missing-backup"
+  mkdir -p "$h2/.config/agents"
+  printf 'backup=%s\n' "$h2/.config/agents/backups/install-99990101-000000" > "$h2/.config/agents/install-state"
+  out2=$(env -i HOME="$h2" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc2=$?
+
+  h3="$ROOT/home-recover-escapes-root"
+  mkdir -p "$h3/.config/agents" "$h3/evil"
+  printf 'backup=%s\n' "$h3/evil" > "$h3/.config/agents/install-state"
+  out3=$(env -i HOME="$h3" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" recover --yes 2>&1)
+  rc3=$?
+
+  if [ "$rc1" -eq 1 ] && printf '%s\n' "$out1" | grep -q 'does not parse' \
+     && [ "$rc2" -eq 1 ] && printf '%s\n' "$out2" | grep -q 'does not exist on disk' \
+     && [ "$rc3" -eq 1 ] && printf '%s\n' "$out3" | grep -q 'is not under'; then
+    ok "recover refuses a malformed, missing, or out-of-root marker (3 cases)"
+  else
+    bad "recover refuses a malformed, missing, or out-of-root marker" \
+        "rc1=$rc1 rc2=$rc2 rc3=$rc3
+$out1
+$out2
+$out3"
+  fi
+}
+
+cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog recover_no_marker_is_clean recover_dry_run_touches_nothing recover_yes_restores_and_is_idempotent recover_refuses_on_backup_mismatch recover_refuses_malformed_or_missing_marker"
 if [ $# -gt 0 ]; then cases="$*"; fi
 for c in $cases; do
   "case_$c"
