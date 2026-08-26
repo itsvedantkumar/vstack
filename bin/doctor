@@ -502,10 +502,6 @@ elif [ -n "$PLUGIN_ROOT" ]; then
 else
   note "deploy-auto.sh" "no install found, nothing to check"
 fi
-echo "── memory ──"
-# claude-mem is a third-party plugin vstack configures if present, not something it installs.
-if [ -d "$HOME/.claude-mem" ]; then ok "claude-mem store"
-else note "claude-mem" "not installed (optional; vstack tunes it when it is)"; fi
 S="$CDIR/settings.json"
 echo "── parity ──"
 [ -z "${ANTHROPIC_API_KEY:-}" ] && ok "no ANTHROPIC_API_KEY in env" || bad "ANTHROPIC_API_KEY" "set — billing API credits, not the Max sub"
@@ -569,12 +565,6 @@ fi
 # claude/CLAUDE.md in vstack. Independent of which lane is live: a stray ~/CLAUDE.md is wrong
 # regardless of how vstack itself got installed.
 [ ! -f "$HOME/CLAUDE.md" ] && ok "single global CLAUDE.md" || bad "stray ~/CLAUDE.md" "merge into vstack claude/CLAUDE.md, then delete"
-# claude-mem auto-updates and will silently revert this async flag.
-CM=$(ls -d "$CDIR"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json 2>/dev/null | tail -1)
-if [ -n "$CM" ]; then
-  jq -e '[.hooks.UserPromptSubmit[].hooks[].async] | all' "$CM" >/dev/null 2>&1 \
-    && ok "claude-mem UserPromptSubmit async" || bad "claude-mem UserPromptSubmit" "sync again (plugin updated) — re-apply"
-fi
 echo "── project coverage ──"
 # Every ACTIVE repo should carry the overlay lanes (.conductor run scripts + committed
 # .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo

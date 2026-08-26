@@ -99,6 +99,5 @@ if [ -f "$cdir/.claude/verify.sh" ]; then
     out="${out} ${D}·${R} ${Y}gate open${R}"
   fi
 fi
-[ -d "$HOME/.claude-mem" ] && out="${out} ${D}·${R} 🧠"
 [ -n "$style" ] && out="${out} ${D}· ${C}${style}${R}"
 printf '%s' "$out"

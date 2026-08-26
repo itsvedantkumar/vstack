@@ -70,19 +70,19 @@ repo's agents and gate expect — git, jq, ripgrep, fd, gh, node, bun, uv and th
 itself. Pass `--skip-deps` to the one-liner to go straight to the config install; `./install.sh`
 run directly never touches your tools unless you pass it `--with-deps`.
 
-`setup-machine.sh` can also install three Claude Code plugins, and does not by default. Two are
-third-party — `claude-mem` (persistent memory, `thedotmack/claude-mem`) and `frontend-design`
-(Anthropic's own UI-review plugin) — added from their own marketplaces and updated on their own
-schedule, not this repo's. The third, `typescript-lsp`, ships from the official
-`anthropics/claude-plugins-official` marketplace. None of the three installs from the headline
-command above. Opt in with `./setup-machine.sh --with-plugins`, or `VSTACK_PLUGINS=1` before the
-bootstrap one-liner (bootstrap.sh forwards its arguments to `install.sh`, not to
-`setup-machine.sh`, so the flag has no reach through it). If claude-mem is present — from this or
-an earlier install — `setup-machine.sh` also flips claude-mem's own `UserPromptSubmit` hook from
-sync to async in claude-mem's own `hooks.json`, so it stops blocking every prompt; that is the one
-edit this repo makes to a file it does not ship, and it is disclosed in `setup-machine.sh`'s own
-header. `./uninstall.sh --yes` undoes that specific edit. It never installs or removes claude-mem
-itself.
+`setup-machine.sh` can also install two Claude Code plugins, and does not by default. Both
+`frontend-design` (Anthropic's UI-review plugin) and `typescript-lsp` ship from the official
+`anthropics/claude-plugins-official` marketplace and update on their own schedule, not this
+repo's. Neither installs from the headline command above. Opt in with
+`./setup-machine.sh --with-plugins`, or `VSTACK_PLUGINS=1` before the bootstrap one-liner
+(bootstrap.sh forwards its arguments to `install.sh`, not to `setup-machine.sh`, so the flag has
+no reach through it).
+
+vstack carried `claude-mem` here until 1.46.0 and no longer does. Measured, its only
+`UserPromptSubmit` hook returns `{}` and the context builder it ships is reachable from no hook
+at all, so the memory it captured was never read back into a session automatically. `uninstall.sh`
+still reverts the one edit older versions made to claude-mem's own `hooks.json`, because a
+version that stops making an edit does not get to stop undoing it.
 
 Removing it restores what was there before: `./uninstall.sh --yes` puts every file it replaced
 back byte for byte, unpicks the hook entries, MCP servers and policy keys it merged into
@@ -198,6 +198,38 @@ A gate you cannot turn off gets deleted by the first person it inconveniences, s
 gate is per repository and opt-in: `vstack trust` arms it, and an untrusted `.claude/verify.sh` is
 never executed. `tests/compare-baseline.sh` produces the table above by firing the real hooks, and
 every row carries the value it is supposed to produce.
+
+The gate re-runs `.claude/verify.sh` on every Stop while it is failing. After 3 real failures in a
+session it throttles re-checks to once per `VSTACK_VERIFY_RESET_SECS` (default 300s) to bound the
+cost of an unfixable failure, but it never stops blocking while red, and a real pass clears it at
+any count. The throttle changes *when* `verify.sh` is re-run, never whether the gate blocks. Until
+1.46.0 the cap was a latch: after 3 blocks the hook returned silently for the rest of the session
+and no green run could re-arm it, so the gate failed open exactly when it was working hardest.
+
+### What `vstack trust` covers, and what it does not
+
+Arming a repository hashes `.claude/verify.sh`, every script it names, the four root installers,
+and — since 1.46.0 — the build manifests the generated gate executes through: `package.json`,
+`pyproject.toml` with `uv.lock`, and `Cargo.toml` with `Cargo.lock` and `build.rs`. Before that,
+`scripts.test` in a `package.json` was arbitrary code at Stop-hook time in an already-trusted
+repository, and the hash never moved.
+
+Stated limits, none of which this fix closes:
+
+- Any edit to a tracked manifest re-arms the confirmation, including an unrelated dependency bump.
+  Hashing only the `scripts` object would be stabler but is not enforceable: the hook compares
+  whole-file content at a fixed path, not a parsed subset.
+- Local path dependencies are not covered. `{path = "../x"}` under `[tool.uv.sources]`, or a path
+  entry in `Cargo.toml` or `[patch]`, is recorded by path rather than by content hash in either
+  lockfile, so editing files under a path dependency runs new code without touching a hashed file.
+- Test files and `conftest.py` are out of scope by design. "Run the test suite" has always meant
+  running whatever test code is there; that is the cost of trusting `verify.sh` at all.
+- A dynamically built path (`bash "$var.sh"`) inside `verify.sh` is invisible to any static scan.
+- The gate cannot defend against the agent it gates. Both run as the same user with the same
+  filesystem access, so an agent can rewrite `.claude/verify.sh` to `exit 0` and trust it itself.
+  Closing that needs the check to run somewhere the agent cannot write — a different uid, a remote
+  check, a human — which is outside a hook's reach. The gate is a guard against finishing on a red
+  tree by accident, not against an adversary sharing your uid.
 
 ## The team
 

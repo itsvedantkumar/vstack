@@ -6,6 +6,35 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.46.0 — 2026-08-26
 
+### claude-mem removed
+
+It injected nothing. Measured against the shipped `hooks.json`, not inferred:
+
+| Hook | Command | Returns |
+|---|---|---|
+| `UserPromptSubmit` | `session-init` | `{}` — 2 bytes, no `additionalContext`, on fresh and repeat session ids, with a cwd holding 660 stored observations |
+| `SessionStart` | `worker-service.cjs start` | 3 bytes (a daemon starter) |
+
+The 10,577-byte context payload the plugin can produce comes from `hook claude-code context`, and
+no hook in its `hooks.json` invokes it. Across 16 log files, all 613 lines matching `Injected` are
+OAuth tokens going into spawned subprocesses; not one is a context injection into a session. The
+read path is a skill, `mem-search`, which would arrive with 18 others — `do`, `make-plan`,
+`smart-explore`, `learn-codebase` — sharing trigger frames with `executing-plans`, `writing-plans`
+and `find-skills`. Colliding triggers were measured over 80 samples to suppress both skills, not
+one, so the trade was working skills for a store nothing read back.
+
+Removed from `setup-machine.sh` (the plugin list and the whole `hooks.json` async-flipper),
+`install.sh` (the `enabledPlugins` presence probe; the entry is now deleted unconditionally),
+`bin/doctor` (both checks), `claude/statusline.sh` (the indicator), `README.md` and
+`docs/how-skills-fire.md`. `uninstall.sh` keeps restoring the `hooks.json.vstack-orig` sidecar
+older versions left behind: a version that stops making an edit does not get to stop undoing it.
+
+`bin/doctor` had been printing `claude-mem UserPromptSubmit async ✔` over a plugin throwing
+`ERR_INVALID_PACKAGE_CONFIG` on every hook call, because it graded the lexically-last version
+directory rather than the one Claude Code resolves, and asserted a flag inside `hooks.json`
+without ever checking the plugin could execute. That is this repository's founding defect class,
+in its own doctor. The check is gone rather than fixed — there is nothing left for it to grade.
+
 ### `uninstall.sh` could not uninstall
 
 `install → install → uninstall` left every hook, skill, agent and command on disk while printing

@@ -6,7 +6,7 @@
 #   ./setup-machine.sh                 core + claude
 #   ./setup-machine.sh --with-deploy   also vercel and wrangler
 #   ./setup-machine.sh --with-security also trivy, gitleaks, nmap, nuclei
-#   ./setup-machine.sh --with-plugins  also claude-mem, frontend-design, typescript-lsp (below)
+#   ./setup-machine.sh --with-plugins  also frontend-design, typescript-lsp (below)
 #   ./setup-machine.sh --check         report what is present, install nothing
 #   ./setup-machine.sh --dry-run       print what would be installed
 #
@@ -23,13 +23,9 @@
 #                                                          personal toolchain look like a
 #                                                          requirement of the product.
 #   security  trivy, gitleaks, nmap, nuclei             — the /security command
-#   plugins   claude-mem, frontend-design, typescript-lsp — opt-in, and third-party for two of
-#                                                          the three: claude-mem and
-#                                                          frontend-design are not vstack's code,
-#                                                          added from their own marketplaces
-#                                                          (thedotmack/claude-mem,
-#                                                          anthropics/claude-plugins-official) and
-#                                                          updated on their own schedule. A
+#   plugins   frontend-design, typescript-lsp — opt-in. Neither is vstack's code; both come
+#                                                          from anthropics/claude-plugins-official
+#                                                          and update on their own schedule. A
 #                                                          headline curl-pipe command installing
 #                                                          software from outside this repo with no
 #                                                          flag and no mention in the README was a
@@ -39,11 +35,8 @@
 #                                                          which cannot take flags meant for this
 #                                                          script.
 #
-# This script installs software. It never removes any, and it never touches your dotfiles. The
-# one exception is --with-plugins: if it installs or finds claude-mem, it also flips claude-mem's
-# OWN UserPromptSubmit hook from sync to async in claude-mem's own hooks.json (see "claude
-# plugins" below for why). That edit is disclosed here, gated on claude-mem actually being
-# present, and undone by ./uninstall.sh --yes.
+# This script installs software. It never removes any, and it never touches your dotfiles or any
+# file it does not ship.
 set -uo pipefail
 
 WITH_SECURITY=0; WITH_DEPLOY=0; WITH_PLUGINS=0; CHECK=0; DRY=0; APT_UPDATED=0
@@ -314,37 +307,33 @@ fi
 
 note ""
 note "== claude plugins"
-# Plugins carry the memory layer and the language tooling. None of the three is claimed by
-# name in settings.json's enabledPlugins any more -- a name there means nothing until the
-# marketplace is added and the plugin actually installed, and typescript-lsp reproduced the
-# same defect claude-mem was fixed for once already (CHANGELOG.md's "vstack claimed to enable
-# claude-mem, and the toolchain never installs it") the moment this script stopped installing
-# it by default. claude-mem and frontend-design were never vstack's to enable at all --
-# install.sh's settings merge strips any of the three enabledPlugins entries that is not
-# actually present on disk (see the del(.enabledPlugins[...]) calls there), so a claim only
-# survives a reinstall when the plugin really is installed. Installing claude-mem and
-# frontend-design here by default without the same restraint would put this script back in
-# the business install.sh already opted out of, from a headline curl-pipe command that never
-# asked. --with-plugins (or VSTACK_PLUGINS=1) is the opt-in; the default path names what it is
-# skipping.
+# Plugins carry the language tooling. Neither is claimed by name in settings.json's
+# enabledPlugins any more -- a name there means nothing until the marketplace is added and the
+# plugin actually installed, and typescript-lsp reproduced that defect the moment this script
+# stopped installing it by default. install.sh's settings merge strips an enabledPlugins entry
+# that is not actually present on disk (see the del(.enabledPlugins[...]) calls there), so a
+# claim only survives a reinstall when the plugin really is installed. Installing them here by
+# default without the same restraint would put this script back in the business install.sh
+# already opted out of, from a headline curl-pipe command that never asked. --with-plugins (or
+# VSTACK_PLUGINS=1) is the opt-in; the default path names what it is skipping.
+#
+# claude-mem was the third entry here until 1.46.0 and is gone. It was measured injecting
+# nothing: its only UserPromptSubmit hook returns {} and the context builder it ships is
+# reachable from no hook at all. See CHANGELOG.md 1.46.0.
 if ! command -v claude >/dev/null 2>&1; then
   note "-- plugins: skipped (claude not installed)"
 elif [ "$WITH_PLUGINS" != 1 ]; then
   present=""
-  for pl in claude-mem frontend-design typescript-lsp; do
+  for pl in frontend-design typescript-lsp; do
     claude plugin list 2>/dev/null | grep -qi "$pl" && present="$present $pl"
   done
   [ -n "$present" ] && note "-- plugins: already present:$present"
-  note "-- plugins: skipped claude-mem, frontend-design, typescript-lsp (third-party marketplaces; opt in with --with-plugins or VSTACK_PLUGINS=1)"
+  note "-- plugins: skipped frontend-design, typescript-lsp (opt in with --with-plugins or VSTACK_PLUGINS=1)"
 elif [ "$CHECK" = 1 ] || [ "$DRY" = 1 ]; then
-  claude plugin list 2>/dev/null | grep -qi claude-mem \
-    && note "-- plugins: claude-mem present" \
-    || note "${DRY:+would install }plugins: claude-mem, frontend-design, typescript-lsp"
+  note "${DRY:+would install }plugins: frontend-design, typescript-lsp"
 else
-  for mkt in anthropics/claude-plugins-official thedotmack/claude-mem; do
-    claude plugin marketplace add "$mkt" >/dev/null 2>&1 || true
-  done
-  for pl in claude-mem@thedotmack frontend-design@claude-plugins-official typescript-lsp@claude-plugins-official; do
+  claude plugin marketplace add anthropics/claude-plugins-official >/dev/null 2>&1 || true
+  for pl in frontend-design@claude-plugins-official typescript-lsp@claude-plugins-official; do
     if claude plugin list 2>/dev/null | grep -q "${pl%@*}"; then
       note "-- ${pl%@*}: present"; mark have "${pl%@*}"
     elif claude plugin install "$pl" >/dev/null 2>&1; then
@@ -352,53 +341,6 @@ else
     else
       note "!! ${pl%@*} failed (add it later with: claude plugin install $pl)"; mark fail "${pl%@*}"
     fi
-  done
-fi
-
-# claude-mem ships its UserPromptSubmit hooks synchronous, which puts its work on the critical
-# path of every prompt. vstack wants them async, and bin/doctor has checked for that flag for
-# several versions -- but nothing ever set it. This lane installs the plugin and then left the
-# machine in a state its own doctor calls drift, so every fresh bootstrap ended on a red line
-# telling the operator to "re-apply" something that had never been applied once.
-#
-# Idempotent by construction: it reads the flag first and rewrites only when it is not already
-# set. That matters because claude-mem auto-updates rewrite hooks.json and revert it, which is
-# the whole reason doctor watches the flag rather than trusting a one-time edit.
-#
-# Deliberately outside the --with-plugins gate above and keyed only on claude-mem actually being
-# on disk: this is maintenance of a plugin already opted into (this run or an earlier one), not
-# an install, and the glob below matches nothing at all when claude-mem was never installed --
-# so it never runs for someone who has not opted in, with or without the flag on THIS run.
-#
-# Editing another vendor's config file is disclosed in this script's own header. It is reversible:
-# the first edit of each claude-mem version directory leaves a `.vstack-orig` sidecar holding
-# what was there before, and ./uninstall.sh --yes restores it and removes the sidecar.
-#
-# --check and --dry-run must not write anything -- the rest of this script holds that line via
-# its own CHECK/DRY branches, and this block, added later and outside that structure, did not:
-# a --dry-run against a real claude-mem install actually flipped the flag and left a sidecar,
-# which is precisely the side effect --dry-run promises not to have.
-if command -v jq >/dev/null 2>&1; then
-  cm_cdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  for cm_f in "$cm_cdir"/plugins/cache/thedotmack/claude-mem/*/hooks/hooks.json; do
-    [ -f "$cm_f" ] || continue
-    jq -e '[.hooks.UserPromptSubmit[]?.hooks[]?.async] | all' "$cm_f" >/dev/null 2>&1 && continue
-    if [ "$CHECK" = 1 ] || [ "$DRY" = 1 ]; then
-      note "-- claude-mem hooks.json: would set UserPromptSubmit async ($cm_f)"
-      continue
-    fi
-    cm_orig="${cm_f}.vstack-orig"
-    [ -f "$cm_orig" ] || cp "$cm_f" "$cm_orig" 2>/dev/null
-    cm_t=$(mktemp)
-    if jq '.hooks.UserPromptSubmit = [ .hooks.UserPromptSubmit[]?
-             | .hooks = [ .hooks[]? | .async = true ] ]' "$cm_f" > "$cm_t" \
-       && jq -e . "$cm_t" >/dev/null 2>&1; then
-      cat "$cm_t" > "$cm_f"
-      note ">> claude-mem UserPromptSubmit hooks set async"
-    else
-      note "!! could not set claude-mem hooks async in $cm_f"
-    fi
-    rm -f "$cm_t"
   done
 fi
 

@@ -17,7 +17,6 @@ gate.
 | `tests/repro/bootstrap-safety.sh` | `bootstrap.sh` checks `git status --porcelain` and nothing else, so a clean-but-ahead or diverged checkout is `reset --hard FETCH_HEAD` and the unpushed commit is dropped with no warning and no named ref. | open |
 | `tests/repro/stop-gate.sh` | The Stop gate stops blocking after 3 refusals and never re-arms for that session, even after a green run. The counter is a plain file at a path computable from the hook's own source, so one `echo 3 >` disables it on the first try. | open |
 | `tests/repro/trust-closure.sh` | `vstack trust` hashes `.claude/verify.sh` and the `*.sh` paths it names literally. The generated gate also runs `npm run typecheck`, `uv run pytest` and `cargo test`, none of which the hash covers. | open |
-| `tests/repro/doctor-claude-mem.sh` | `bin/doctor` grades the lexically-last plugin version rather than the one Claude Code resolves, and asserts a flag inside `hooks.json` without checking the plugin can execute at all. It printed a green tick over a version throwing `ERR_INVALID_PACKAGE_CONFIG` on every hook call. | open |
 
 Run one directly. There are no arguments and no fixtures to prepare:
 

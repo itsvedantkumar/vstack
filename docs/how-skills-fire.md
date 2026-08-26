@@ -49,17 +49,18 @@ for bundled skills and has no effect on skills a plugin supplies: for those, Cla
 resolves the listing mode before it reads the setting.
 
 The split is visible in any session. Of the four bundled skills set to `off`, none appear. Of
-the thirteen set to `name-only`, all thirteen appear as a bare name with no description. Every
-skill supplied by the `claude-mem` plugin appears with its full description regardless — 19 of
-them, about 992 tokens, roughly 42 percent of the listing.
+the thirteen set to `name-only`, all thirteen appear as a bare name with no description. Skills
+supplied by a plugin appear with their full description regardless of what any override says.
 
-This file previously carried 38 override entries covering those 19 plugin skills, in both
-`claude-mem:` and `claude-mem@thedotmack:` spellings. Neither works, and having both is what
-made it look like a spelling problem rather than a ceiling. They are deleted, and check 15 now
-fails any `skillOverrides` key containing `:` or `@`.
+This was measured against `claude-mem`, which supplied 19 such skills — about 992 tokens,
+roughly 42 percent of the listing. `claude/settings.json` carried 38 override entries trying to
+suppress them, in both the `claude-mem:` and `claude-mem@thedotmack:` spellings. Neither works,
+and having both is what made it look like a spelling problem rather than a ceiling. They are
+deleted, and check 15 now fails any `skillOverrides` key containing `:` or `@`.
 
-There is no setting that fixes this. The only lever is disabling the plugin, which would take
-the memory capture with it. The cost is real and is documented here rather than papered over.
+There is no setting that fixes this. The only lever is not installing the plugin. vstack removed
+claude-mem in 1.46.0 for an unrelated and more decisive reason — it injected nothing — but the
+ceiling is a property of the resolver, not of that plugin, and applies to the next one.
 
 ## Something has to route the situation
 
