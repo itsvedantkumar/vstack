@@ -136,9 +136,11 @@ either.
 The generalisation is worth more than any individual fix: the fixes are six lines of shell, and the
 shape will produce a seventh instance next month in a check nobody has written yet.
 
-It produced three, in a single day, five weeks early. The last three entries above were all found on
+It produced four, in a single day, five weeks early. The last four entries above were all found on
 2026-08-26, in an audit looking for something else. One of them had been inert since the guard was
-written. Reread this page before trusting a check you did not watch fail.
+written, and the last of the four was found by a positive control rather than by the check written
+for that exact purpose, which passed. Reread this page before trusting a check you did not watch
+fail.
 
 ## Related
 
