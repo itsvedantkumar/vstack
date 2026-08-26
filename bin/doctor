@@ -35,14 +35,19 @@ resolve_vstack_repo() {
     return 1
 }
 
-if [ "${1:-}" = "--drift" ]; then
+# Body of `--drift`, factored into a function so `--json` can call it directly (no re-exec, no
+# subshell -- DRIFT/COMPARED stay real bash globals afterward) and still get the exact same
+# comparison `doctor --drift` alone gets. `return`, not `exit`, throughout: `--drift` itself
+# calls this and then exits with its result immediately below; `--json` calls it with stdout
+# redirected, reads DRIFT/COMPARED back, and keeps running.
+run_drift() {
   # Exits 1, not 0. Reporting "nothing to compare" and succeeding meant a cron or CI wrapper
   # on a machine where the checkout had moved got a green result forever while comparing
   # nothing. bin/vstack already exits 1 in this exact situation; the two disagreed.
   REPO=$(resolve_vstack_repo) || {
     echo "doctor --drift: no vstack repo found (checked \$VSTACK_DIR, ~/.config/agents/vstack-repo, ~/.vstack, and this script's git root)"
     echo "nothing was compared, so this is a failure rather than a pass"
-    exit 1
+    return 1
   }
 
   echo "comparing installed state against: $REPO"
@@ -290,27 +295,110 @@ if [ "${1:-}" = "--drift" ]; then
   echo
   if [ "$DRIFT" = 1 ]; then
     echo "DRIFT ✖"
-    exit 1
+    return 1
   fi
   # A comparison that does not say what it compared cannot be audited, and one that compared
   # nothing must not print the same word as one that compared everything.
   if [ "$COMPARED" -eq 0 ]; then
     echo "nothing was compared, so this is a failure rather than a pass"
     echo "DRIFT ✖"
-    exit 1
+    return 1
   fi
   echo "no drift ✔ ($COMPARED item(s) compared)"
-  exit 0
+  return 0
+}
+
+# --- argument dispatch -------------------------------------------------------------------
+# One recognized flag in $1, nothing after it. Unrecognized flags and stray extra arguments
+# are a usage error, not a thing to guess about and run the full audit anyway -- a typo'd
+# `--dirft` silently running the wrong (or default) mode is worse than a loud, cheap exit 2.
+case "${1:-}" in
+  -h|--help)
+    # No audit: this branch exits before resolve_vstack_repo, run_drift, or any of the ok/bad/
+    # note checks below ever run. `doctor --help` costs nothing but printing this text.
+    cat <<'EOF'
+usage: doctor [--drift | --json | --mcp | --help]
+
+  (no flags)   full human-readable health audit of this machine's vstack install
+  --drift      compare the installed state against the vstack repo checkout it came from
+  --json       machine-readable audit (schemaVersion 1): version, install lane, profile,
+               drift, trust state, dependencies, last verification, checks, skips, exit
+               code. Requires jq; fails naming jq if jq is not on PATH.
+  --mcp        (combine with no other flag) also list configured MCP servers and their
+               connection state
+  -h, --help   show this help and exit; performs no audit
+
+exit codes:
+  0  healthy — no drift, no failing checks (or --help printed)
+  1  drift found, or one or more checks failed
+  2  usage error — unknown flag or unexpected extra argument
+  3  could not measure — a hard dependency for the requested mode is missing
+     (e.g. --json without jq on PATH)
+EOF
+    exit 0
+    ;;
+  ""|--drift|--json|--mcp)
+    ;;
+  *)
+    echo "doctor: unknown argument: ${1:-}" >&2
+    echo "usage: doctor [--drift | --json | --mcp | --help]" >&2
+    exit 2
+    ;;
+esac
+if [ "$#" -gt 1 ]; then
+  echo "doctor: unexpected extra argument(s) after '$1'" >&2
+  echo "usage: doctor [--drift | --json | --mcp | --help]" >&2
+  exit 2
 fi
 
-p(){ printf "%-40s %s\n" "$1" "$2"; }; ok(){ p "$1" "✔"; }; bad(){ p "$1" "✖ $2"; FAIL=1; }; FAIL=0
+if [ "${1:-}" = "--drift" ]; then
+  run_drift
+  exit $?
+fi
+
+# --json requires jq for the entire run: every field below (settings-key diffing, plugin.json
+# version, gh/CI parsing, the drift family checks) already assumes it deep inside the checks
+# that follow, so a jq-less run would not degrade gracefully into a smaller-but-valid document —
+# it would degrade into malformed or half-populated JSON, which the caller cannot tell apart from
+# a real report. Fail loud and name the missing binary instead: exit 3, "could not measure",
+# not a JSON body claiming to have measured something it didn't.
+JSON_MODE=0
+if [ "${1:-}" = "--json" ]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "doctor --json: requires jq, not found on PATH (brew install jq / apt install jq)" >&2
+    exit 3
+  fi
+  JSON_MODE=1
+fi
+
+# section(): every "── heading ──" below both prints (as it always did) and, in --json mode,
+# tags every ok/bad/note call until the next heading with the category it belongs to.
+CURRENT_CATEGORY="general"
+section(){ echo "── $1 ──"; CURRENT_CATEGORY="$1"; }
+
+# json_row(): the one place ok/bad/note feed --json's `checks` and `skips` arrays, so the two
+# output shapes can never see a different set of results -- same functions, same call sites,
+# same verdicts, formatted twice. jq builds each object so label/detail text (paths, error
+# messages) gets JSON-escaped instead of hand-quoted.
+JSON_ROWS=""
+json_row(){ # label status detail
+  [ "$JSON_MODE" = 1 ] || return 0
+  JSON_ROWS="${JSON_ROWS}$(jq -nc --arg cat "$CURRENT_CATEGORY" --arg label "$1" --arg status "$2" --arg detail "${3:-}" \
+    '{category:$cat,label:$label,status:$status,detail:$detail}')
+"
+}
+
+p(){ printf "%-40s %s\n" "$1" "$2"; }
+ok(){ p "$1" "✔"; json_row "$1" "ok" ""; }
+bad(){ p "$1" "✖ $2"; FAIL=1; json_row "$1" "bad" "$2"; }
+FAIL=0
 
 # Not every line below is vstack's to be right about. A stranger's Claude plan, their directory
 # layout, and which optional plugins they installed are theirs, and reporting DRIFT over them
 # made a clean install look broken -- eight red lines that no re-run could ever fix. `note` says
 # the same thing without claiming the setup is wrong. What stays a hard failure is only what
 # vstack itself installs and can therefore be held to.
-note(){ p "$1" "· $2"; }
+note(){ p "$1" "· $2"; json_row "$1" "note" "$2"; }
 
 # Bounds a command's wall time without assuming GNU coreutils' `timeout` is installed. Stock
 # macOS ships neither `timeout` nor `gtimeout` -- only `brew install coreutils` adds the latter
@@ -370,6 +458,106 @@ if [ -n "$R" ]; then
   [ "${a:-0}" -gt 0 ] && WANT_AGENTS="$a"
 fi
 
+# vstack's own declared version, read from the repo's plugin manifest -- the same source
+# release-reachability (below) already trusts for "$_rv". Not asserted against anything here;
+# --json just reports what this checkout says it is. Empty (never absent) so a missing repo and
+# a repo whose manifest doesn't parse both come out as "" and get turned into JSON null the same
+# way at assembly time.
+VSTACK_VERSION=""
+[ -n "$R" ] && command -v jq >/dev/null 2>&1 && \
+  VSTACK_VERSION=$(jq -r '.version // empty' "$R/claude/.claude-plugin/plugin.json" 2>/dev/null)
+
+# Trust state: is *this* checkout's .claude/verify.sh the one install.sh last recorded consent
+# for in ~/.config/agents/verify-trust (see install.sh's own comment on why that file exists --
+# running install.sh IS the explicit consent, and the Stop-hook gate refuses to run repo-controlled
+# code it was never told to trust). Three answers, not two: "trusted" and "untrusted" are both
+# things this machine can prove; "unknown" is reserved for when there's nothing to check against
+# (no repo resolved, no verify.sh in it, or no shasum/sha256sum to hash it with) -- an absent
+# dependency must read as unknown, never silently as either verdict.
+TRUST_STATE="unknown"; TRUST_DETAIL="no vstack repo found"
+if [ -n "$R" ]; then
+  if [ -f "$R/.claude/verify.sh" ]; then
+    _tvp="$(cd "$R/.claude" 2>/dev/null && pwd)/verify.sh"
+    if command -v shasum >/dev/null 2>&1; then _th=$(shasum -a 256 "$_tvp" 2>/dev/null | cut -d' ' -f1)
+    elif command -v sha256sum >/dev/null 2>&1; then _th=$(sha256sum "$_tvp" 2>/dev/null | cut -d' ' -f1)
+    else _th=""; fi
+    _tf="$HOME/.config/agents/verify-trust"
+    if [ -z "$_th" ]; then
+      TRUST_DETAIL="no shasum/sha256sum on PATH -- could not hash $_tvp"
+    elif [ ! -f "$_tf" ]; then
+      TRUST_STATE="untrusted"; TRUST_DETAIL="$_tf does not exist -- the verify-gate has never been armed for this checkout"
+    elif grep -qF "$_th  $_tvp" "$_tf" 2>/dev/null; then
+      TRUST_STATE="trusted"; TRUST_DETAIL="$_tvp hash matches $_tf (recorded by install.sh)"
+    else
+      TRUST_STATE="untrusted"; TRUST_DETAIL="$_tvp not recorded in $_tf at its current hash -- stale trust, or install.sh has not run from here"
+    fi
+  else
+    TRUST_DETAIL="$R/.claude/verify.sh does not exist in this checkout"
+  fi
+fi
+
+# Dependencies: the external tools doctor's own checks reach for. Every skip below (CI skipped
+# for no gh, MCP-registration skipped for no jq, and so on) traces back to one of these being
+# absent, so --json names them once as their own field instead of making the reader re-derive
+# "well *why* was that a skip" from free-text detail strings.
+DEP_JQ=false;      command -v jq      >/dev/null 2>&1 && DEP_JQ=true
+DEP_GIT=false;     command -v git     >/dev/null 2>&1 && DEP_GIT=true
+DEP_GH=false;      command -v gh      >/dev/null 2>&1 && DEP_GH=true
+DEP_CLAUDE=false;  command -v claude  >/dev/null 2>&1 && DEP_CLAUDE=true
+DEP_TIMEOUT=false; { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; } && DEP_TIMEOUT=true
+
+# Last verification: nothing install.sh writes and nothing bin/doctor writes records when doctor
+# last ran clean. The one thing on THIS machine that does is ~/.config/agents/doctor.log, appended
+# to by ~/.config/agents/bin/doctor-cron.sh via a crontab entry -- neither of which vstack ships or
+# install.sh creates; it is this operator's own scheduled-task setup. Reported best-effort, and
+# labeled as exactly that, rather than invented as though it were a guarantee this repo makes.
+LV_AVAILABLE=false; LV_TS=""; LV_SRC=""
+_lv="$HOME/.config/agents/doctor.log"
+if [ -f "$_lv" ]; then
+  LV_AVAILABLE=true
+  LV_SRC="$_lv (appended to by a crontab-run doctor-cron.sh -- not shipped or created by vstack itself)"
+  if [ "$(/usr/bin/uname -s 2>/dev/null || uname -s 2>/dev/null)" = "Darwin" ]; then
+    LV_TS=$(stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S%z' "$_lv" 2>/dev/null)
+  else
+    _lve=$(stat -c '%Y' "$_lv" 2>/dev/null)
+    [ -n "$_lve" ] && LV_TS=$(date -d @"$_lve" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)
+  fi
+fi
+
+# Drift, for --json: the exact same run_drift() `--drift` alone calls, so the two output shapes
+# can never disagree about whether this machine has drifted. Output goes to a temp file rather
+# than a `$(...)` capture on purpose -- capturing would fork a subshell, and DRIFT/COMPARED are
+# plain globals run_drift sets by side effect; a subshell's copy of them dies with the subshell
+# and --json would read back whatever they were before the call. In non-JSON mode this whole
+# block is skipped entirely: the plain audit below has never called run_drift and still doesn't.
+DRIFT_STATUS="ok"; DRIFT_COMPARED=0; DRIFT_DETAIL=""
+if [ "$JSON_MODE" = 1 ]; then
+  _drift_tmp=$(mktemp)
+  run_drift >"$_drift_tmp" 2>&1
+  _drift_rc=$?
+  # The founding defect this file was fixed for once already, restated as a floor here: a run
+  # that compared zero items can never report "ok", no matter what its exit code was.
+  if [ "$_drift_rc" -eq 0 ] && [ "${COMPARED:-0}" -gt 0 ]; then
+    DRIFT_STATUS="ok"; DRIFT_COMPARED="$COMPARED"
+    DRIFT_DETAIL="no drift ($COMPARED item(s) compared)"
+  elif [ "${COMPARED:-0}" -eq 0 ]; then
+    DRIFT_STATUS="error"; DRIFT_COMPARED=0
+    DRIFT_DETAIL=$(grep -m1 . "$_drift_tmp" 2>/dev/null)
+    [ -n "$DRIFT_DETAIL" ] || DRIFT_DETAIL="nothing was compared"
+  else
+    DRIFT_STATUS="drift"; DRIFT_COMPARED="$COMPARED"
+    DRIFT_DETAIL="drift found across $COMPARED item(s) compared -- run 'doctor --drift' for the file-by-file report"
+  fi
+  rm -f "$_drift_tmp"
+fi
+
+# Everything from here down is the plain, human-readable audit, unchanged. In --json mode its
+# stdout is swapped to /dev/null (fd 4 holds the real stdout) so it still runs -- every ok/bad/
+# note call still fires and still feeds json_row -- but only the JSON document at the very
+# bottom reaches the terminal. `doctor --json | jq -e .` must see exactly one JSON value, never
+# this section's banners interleaved with it.
+if [ "$JSON_MODE" = 1 ]; then exec 4>&1 1>/dev/null; fi
+
 # Two install lanes put the payload in two different places, and everything below this point
 # used to assume only one of them: the full ~/.claude layout install.sh writes. A plugin-only
 # install (`claude plugin install vstack@vstack`) never runs install.sh, so $CDIR/hooks,
@@ -397,7 +585,7 @@ fi
 FULL_LIVE=0
 [ -d "$CDIR/skills" ] && [ -n "$(ls -A "$CDIR/skills" 2>/dev/null)" ] && FULL_LIVE=1
 
-echo "── install ──"
+section "install"
 if [ "$FULL_LIVE" -eq 1 ]; then
   p "lane" "full ($CDIR)"
 elif [ -n "$PLUGIN_ROOT" ]; then
@@ -406,7 +594,7 @@ else
   bad "lane" "no vstack install found -- neither $CDIR/skills nor $CDIR/plugins/cache/vstack/vstack/*/skills exists (claude plugin marketplace add itsvedantkumar/vstack && claude plugin install vstack@vstack, or git clone + ./install.sh)"
 fi
 
-echo "── skills / agents / commands ──"
+section "skills / agents / commands"
 if [ "$FULL_LIVE" -eq 1 ]; then
   SK_DIR="$CDIR/skills"; AG_DIR="$CDIR/agents"; CM_DIR="$CDIR/commands"
 elif [ -n "$PLUGIN_ROOT" ]; then
@@ -425,7 +613,7 @@ else
   note "skills / agents / commands" "no install found, nothing to count"
 fi
 
-echo "── hooks ──"
+section "hooks"
 if [ "$FULL_LIVE" -eq 1 ]; then
   # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
   for f in $HOOKS; do
@@ -440,7 +628,7 @@ elif [ -n "$PLUGIN_ROOT" ]; then
 else
   note "hooks" "no install found, nothing to check"
 fi
-echo "── secrets ──"
+section "secrets"
 if [ "$FULL_LIVE" -eq 1 ]; then
   [ -f "$HOME/.config/agents/secrets.env" ] && [ "$(get_perms "$HOME/.config/agents/secrets.env")" = "600" ] && ok "secrets.env (600)" || bad "secrets.env" "missing/perms"
   # Asserts the opposite of what it used to. Sourcing secrets.env from a shell rc exports every
@@ -471,7 +659,7 @@ elif [ -n "$PLUGIN_ROOT" ]; then
 else
   note "secrets / wrappers" "no install found, nothing to check"
 fi
-echo "── mcp servers ──"
+section "mcp servers"
 # CJSON was computed at the top of this file and never read by anything. install.sh merges
 # vstack's MCP servers into it on every run and nothing checked the result, so the one lane that
 # writes to a file outside ~/.claude had no health check at all. A server that silently stopped
@@ -494,7 +682,7 @@ elif [ ! -f "$CJSON" ]; then
 else
   note "MCP servers" "no vstack repo found, so there is nothing to compare against"
 fi
-echo "── deploy ──"
+section "deploy"
 if [ "$FULL_LIVE" -eq 1 ]; then
   [ -x "$HOME/.config/agents/bin/deploy-auto.sh" ] && ok "deploy-auto.sh" || bad "deploy-auto.sh" "missing"
 elif [ -n "$PLUGIN_ROOT" ]; then
@@ -503,7 +691,7 @@ else
   note "deploy-auto.sh" "no install found, nothing to check"
 fi
 S="$CDIR/settings.json"
-echo "── parity ──"
+section "parity"
 [ -z "${ANTHROPIC_API_KEY:-}" ] && ok "no ANTHROPIC_API_KEY in env" || bad "ANTHROPIC_API_KEY" "set — billing API credits, not the Max sub"
 AS=$(claude auth status 2>/dev/null)
 # NB: there is no `apiKeySource` field in 2.1.226 — `jq '{apiKeySource}'` renders a missing
@@ -565,7 +753,7 @@ fi
 # claude/CLAUDE.md in vstack. Independent of which lane is live: a stray ~/CLAUDE.md is wrong
 # regardless of how vstack itself got installed.
 [ ! -f "$HOME/CLAUDE.md" ] && ok "single global CLAUDE.md" || bad "stray ~/CLAUDE.md" "merge into vstack claude/CLAUDE.md, then delete"
-echo "── project coverage ──"
+section "project coverage"
 # Every ACTIVE repo should carry the overlay lanes (.conductor run scripts + committed
 # .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo
 # with a commit in the last 45 days and no .conductor/settings.toml is an uncovered project.
@@ -646,7 +834,7 @@ else
     bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
   fi
 fi
-echo "── hook scope overlap ──"
+section "hook scope overlap"
 # Claude Code MERGES hook arrays across settings layers instead of overriding them, so a repo
 # carrying the committed overlay ran ~/.claude's injector AND its own: baseline block, digest and
 # directives, twice per turn. The project copy stands down now — but a repo's copy is only as
@@ -676,7 +864,7 @@ else
   [ -z "$perr" ] && ok "project hook stands down ($dupescanned repos, both scopes probed)" \
                  || bad "project hook stands down" "$perr"
 fi
-echo "── release reachability ──"
+section "release reachability"
 # The gate can prove the declared version is tagged here. It cannot prove a stranger can fetch it,
 # because that means a network call and .claude/verify.sh has to stay offline and hermetic. So the
 # question lands here instead, where doctor already talks to the network.
@@ -714,7 +902,7 @@ else
     fi
   fi
 fi
-echo "── context ──"
+section "context"
 # With autoCompactWindow unset, Claude Code compacts at the model's context limit -- ~967K of
 # Opus 5's 1M -- so a session takes one late squeeze instead of several small ones, and compaction
 # loss scales with both the compression ratio and the cycle count (arXiv 2606.22528). Measured on
@@ -779,7 +967,7 @@ elif [ -n "$PLUGIN_ROOT" ]; then
 else
   note "compact instructions" "no install found, nothing to check"
 fi
-echo "── remote/dispatch ──"
+section "remote/dispatch"
 [ -n "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ] && bad "nonessential-traffic" "set — DISABLES Remote Control feature flags" || ok "feature-flag eval enabled"
 # remoteControlAtStartup is another install.sh settings-merge key; the plugin lane never sets it.
 if [ "$FULL_LIVE" -eq 1 ]; then
@@ -796,7 +984,7 @@ if [ -f "$B" ]; then
     && ok "bridge env matches settings" || bad "bridge env" "settings=$want not in bridge-state.json"
 fi
 [ "${1:-}" = "--mcp" ] && { echo "── mcp ──"; claude mcp list 2>/dev/null | grep -E 'Connected|Failed'; }
-echo "── CI ──"
+section "CI"
 # GitHub Actions CI health is unverifiable locally — what runs green here may fail in the sandbox.
 # This check reaches GitHub to read the conclusion of the last run on main. If CI is failing, any
 # release built from that commit is unreliable, and any install from that release inherits the
@@ -861,6 +1049,67 @@ fi
 if [ -n "$_ci_skip" ]; then
   note "CI" "skipped — $_ci_skip"
 fi
+
+if [ "$JSON_MODE" = 1 ]; then
+  # Restore the real stdout the block above was borrowing fd 4 to avoid; everything from here
+  # down is the ONLY thing that reaches it, so `doctor --json | jq -e .` sees one JSON value.
+  exec 1>&4 4>&-
+
+  INSTALL_LANE="none"
+  [ "$FULL_LIVE" -eq 1 ] && INSTALL_LANE="full"
+  [ "$FULL_LIVE" -ne 1 ] && [ -n "$PLUGIN_ROOT" ] && INSTALL_LANE="plugin"
+
+  # Precedence: an actual failure found by the audit (FAIL) or actual drift (DRIFT_STATUS=drift)
+  # always outranks a measurement gap -- if something is provably broken, that IS the answer,
+  # "could not fully measure" is not a downgrade of it. A measurement gap only gets its own exit
+  # code (3) when it is the *only* thing wrong, so it can never be silently folded into either
+  # "healthy" (0, wrong -- it wasn't measured) or a generic "unhealthy" (1, wrong -- nothing was
+  # actually found broken, something just couldn't be checked).
+  EXIT_CODE=0
+  if [ "$FAIL" -ne 0 ] || [ "$DRIFT_STATUS" = "drift" ]; then
+    EXIT_CODE=1
+  elif [ "$DRIFT_STATUS" = "error" ]; then
+    EXIT_CODE=3
+  fi
+
+  CHECKS_JSON=$(printf '%s' "$JSON_ROWS" | jq -s '[.[] | select(.status=="ok" or .status=="bad") | {category,label,status,detail}]')
+  SKIPS_JSON=$(printf '%s' "$JSON_ROWS" | jq -s '[.[] | select(.status=="note") | {category,label,detail}]')
+
+  jq -n \
+    --arg version "$VSTACK_VERSION" \
+    --arg installLane "$INSTALL_LANE" \
+    --arg driftStatus "$DRIFT_STATUS" \
+    --argjson driftCompared "$DRIFT_COMPARED" \
+    --arg driftDetail "$DRIFT_DETAIL" \
+    --arg trustState "$TRUST_STATE" \
+    --arg trustDetail "$TRUST_DETAIL" \
+    --argjson depJq "$DEP_JQ" --argjson depGit "$DEP_GIT" --argjson depGh "$DEP_GH" \
+    --argjson depClaude "$DEP_CLAUDE" --argjson depTimeout "$DEP_TIMEOUT" \
+    --argjson lvAvailable "$LV_AVAILABLE" --arg lvTimestamp "$LV_TS" --arg lvSource "$LV_SRC" \
+    --argjson checks "$CHECKS_JSON" --argjson skips "$SKIPS_JSON" \
+    --argjson failCount "$FAIL" --argjson exitCode "$EXIT_CODE" \
+    '{
+      schemaVersion: 1,
+      version: ($version | if . == "" then null else . end),
+      installLane: $installLane,
+      profile: null,
+      drift: { status: $driftStatus, itemsCompared: $driftCompared, detail: $driftDetail },
+      trust: { state: $trustState, detail: $trustDetail },
+      dependencies: { jq: $depJq, git: $depGit, gh: $depGh, claude: $depClaude, timeout: $depTimeout },
+      lastVerification: {
+        available: $lvAvailable,
+        timestamp: ($lvTimestamp | if . == "" then null else . end),
+        source: ($lvSource | if . == "" then null else . end)
+      },
+      checks: $checks,
+      skips: $skips,
+      failCount: $failCount,
+      healthy: ($exitCode == 0),
+      exitCode: $exitCode
+    }'
+  exit "$EXIT_CODE"
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL GREEN ✔   (· lines are yours to decide on, not drift)"
