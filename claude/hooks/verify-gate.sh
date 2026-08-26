@@ -95,23 +95,63 @@ lock_acquired=1
 trap '[ "$lock_acquired" = 1 ] && rmdir "$lock_dir" 2>/dev/null' EXIT
 
 cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
-# Latched open at the cap: the counter file stays put so an unfixable failure blocks at
-# most 3 times per session, ever — not in repeating groups of 3. A later real pass below
-# removes the file and re-arms the gate.
-if [ "$cnt" -ge 3 ]; then
-  exit 0
+case "$cnt" in ''|*[!0-9]*) cnt=0 ;; esac
+# B-12: the old cap at cnt>=3 short-circuited with a bare `exit 0` BEFORE verify.sh ran, and the
+# only reset was the success branch below — which that same short-circuit made unreachable once
+# tripped. A red gate blocked its first 3 Stops, then went silently open for the rest of the
+# session no matter how long it stayed red, and a self-planted counter file (same path, computed
+# from public constants in this script) reached that state with zero real failures behind it.
+# Fixed by decoupling "how often we pay for another verify.sh run" from "what we tell the agent":
+# past the cap we still emit decision:block every time, we just reuse the last real result
+# instead of re-running verify.sh, and only for as long as that result is fresh. This can no
+# longer be used to reach silence — silence only ever comes from verify.sh itself passing when it
+# is actually invoked, which is the outcome the gate exists to allow.
+ts_file="$cnt_file.ts"
+out_file="$cnt_file.out"
+last_ts=$(cat "$ts_file" 2>/dev/null || echo 0)
+case "$last_ts" in ''|*[!0-9]*) last_ts=0 ;; esac
+now=$(date +%s 2>/dev/null || echo 0)
+# VSTACK_VERIFY_RESET_SECS, same idiom as VSTACK_DELEGATE_RESET_SECS in skill-mandate.sh: a
+# window, not a permanent latch. Below the cap we always re-run for real (cnt<3 below is false
+# whenever last_ts is stale or absent, e.g. a self-planted file with no .ts sibling), so this
+# only throttles re-checks once a failure has already repeated 3 times in this session.
+VERIFY_RESET_SECS="${VSTACK_VERIFY_RESET_SECS:-300}"
+recheck_due=1
+if [ "$cnt" -ge 3 ] && [ "$last_ts" -gt 0 ] && [ "$now" -gt 0 ] \
+   && [ $((now - last_ts)) -lt "$VERIFY_RESET_SECS" ]; then
+  recheck_due=0
 fi
-out=$(cd "$d" && bash "$v" 2>&1); rc=$?
-if [ "$rc" -ne 0 ]; then
-  echo $((cnt+1)) > "$cnt_file"
-  reason="Verification failed (.claude/verify.sh exit $rc, attempt $((cnt+1))/3). Fix these before finishing:
+
+if [ "$recheck_due" -eq 1 ]; then
+  out=$(cd "$d" && bash "$v" 2>&1); rc=$?
+  [ "$now" -gt 0 ] && printf '%s' "$now" > "$ts_file" 2>/dev/null
+  if [ "$rc" -ne 0 ]; then
+    cnt=$((cnt + 1))
+    printf '%s' "$cnt" > "$cnt_file"
+    printf '%s' "$out" > "$out_file" 2>/dev/null
+    reason="Verification failed (.claude/verify.sh exit $rc, attempt $cnt). Fix these before finishing:
 $out"
+    if [ -n "$JQ" ]; then
+      "$JQ" -cn --arg r "$reason" '{decision:"block",reason:$r}'
+    else
+      printf '{"decision":"block","reason":"%s"}\n' "$(esc "$reason")"
+    fi
+  else
+    rm -f "$cnt_file" "$ts_file" "$out_file"
+  fi
+else
+  # Capped and still within the window: block on the last confirmed-red result without paying
+  # for another verify.sh run. Bounds the cost of an unfixable failure the way the 3-block cap
+  # always intended to, without ever answering with silence for a gate that is, as far as this
+  # hook has actually checked, still red.
+  age=$((now - last_ts))
+  cached=$(cat "$out_file" 2>/dev/null || echo "(no cached output)")
+  reason="Verification is still failing (.claude/verify.sh last confirmed red ${age}s ago, attempt $cnt+). This gate re-runs verify.sh at most once per ${VERIFY_RESET_SECS}s once a failure has repeated 3 times, but it keeps blocking every Stop while red — it does not go silent. Last known failure:
+$cached"
   if [ -n "$JQ" ]; then
     "$JQ" -cn --arg r "$reason" '{decision:"block",reason:$r}'
   else
     printf '{"decision":"block","reason":"%s"}\n' "$(esc "$reason")"
   fi
-else
-  rm -f "$cnt_file"
 fi
 exit 0
