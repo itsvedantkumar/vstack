@@ -266,6 +266,9 @@ $task"
   cap="$ROOT/capture-$cid.jsonl"; exitf="$ROOT/capture-$cid.exit"
   t0=$(date +%s)
   if [ "$arm" = direct ]; then
+    # shellcheck disable=SC2086  # intentional word-split: $tools is role_tools()'s fixed
+    # space-separated list, and --allowedTools takes multiple argv tokens (tests/team-gating.sh's
+    # demonstrated form), not one comma-joined string; quoting it would pass one invalid tool name.
     ( cd "$wd" && env HOME="$ph" timeout "$CELL_TIMEOUT" claude -p "$prompt" \
         --model "$MODEL" --max-turns "$MAX_TURNS" --allowedTools $tools \
         --setting-sources=user,project --output-format=stream-json --verbose \
