@@ -288,7 +288,18 @@ done
 # behind, not deleting something somebody wanted.
 if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/claude/settings.json" ]; then
   utmp=$(mktemp)
-  if jq -s --arg h "$CDIR/hooks" '
+  # The names vstack installs, taken from the scripts install.sh copies (install.sh:162) and the
+  # statusline it writes (install.sh:410). Deriving them from claude/settings.json instead was a
+  # reader pointed at a source the writer never uses: the template spells its commands
+  # "$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh" -- embedded quotes, for project scope -- so every
+  # basename split out of it carried a trailing quote and matched no installed path. Both
+  # ownership branches below were dead for three releases and the printed line still claimed
+  # the cleanup had happened.
+  ubase=$(for _f in "$SRC"/claude/hooks/*.sh; do [ -e "$_f" ] && basename "$_f"; done | jq -R . | jq -s .)
+  usl=$(basename "$SRC/claude/statusline.sh")
+  if [ "$ubase" = "[]" ]; then
+    echo "warn     $CDIR/settings.json left alone (no hook scripts under $SRC/claude/hooks — ownership unknowable)" >&2
+  elif jq -s --arg h "$CDIR/hooks" --argjson ourbase "$ubase" --arg shipsl "$usl" '
       . as [$live, $ship]
       | ($live.hooks // {}) as $lh
       | $live
@@ -300,10 +311,8 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/c
       # stayed on disk. The printed line still said "vstack hooks ... removed", so the tool
       # reported a narrow cleanup while doing a broad one.
       #
-      # The right signal was already in this repo: install.sh derives the basenames vstack ships
-      # and matches endswith("/hooks/" + name). Ownership is a filename, not a parent directory.
-      | ([$ship | .. | .command? // empty] | map(split("/") | last) | unique) as $ourbase
-      | (($ship.statusLine.command? // "") | split("/") | last) as $shipsl
+      # Ownership is a filename, not a parent directory, and the filenames come from disk
+      # ($ourbase/$shipsl above) rather than from any JSON either side happens to spell.
       | .hooks = ( $lh
           | with_entries(.value |= map(select(
               [.hooks[]?.command]

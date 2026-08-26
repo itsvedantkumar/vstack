@@ -4,6 +4,40 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.46.0 — 2026-08-26
+
+### `uninstall.sh` could not uninstall
+
+`install → install → uninstall` left every hook, skill, agent and command on disk while printing
+that it had removed them. `install → uninstall` on a machine with no prior `settings.json` left
+`hooks` and `statusLine` pointing at seven scripts it had just deleted. Two independent causes,
+both fixed here.
+
+**The backup laundered the payload.** `back()` copied the file it was about to overwrite into
+this run's backup directory without checking whether that file was vstack's own from last time.
+On a second install the backup therefore held vstack's payload, and `uninstall.sh`, which reads
+"present in the backup" as "the user had this before", restored it. `back()` now takes the repo
+file as a second argument and skips the backup when the two are byte-identical; the per-skill
+directory backup does the same with `diff -rq`. The trade is stated in the source: a user file
+whose bytes exactly equal vstack's is treated as vstack's and is deleted, and what is lost is
+content this repo still ships verbatim.
+
+**Both ownership branches were dead code.** `uninstall.sh` derived the hook basenames it owns
+from `claude/settings.json`, whose commands are spelled `"$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh"`
+with embedded quotes for project scope. Splitting those on `/` produced `format.sh"` — trailing
+quote — which `endswith("/hooks/" + $b)` never matched against an installed unquoted path. The
+statusLine branch was dead for a different reason: the template has no `statusLine` at all,
+`install.sh` writes it, so the guard `$shipsl != ""` was never true. Both now derive from the
+same authority `install.sh` uses, the files under `claude/hooks/` and `claude/statusline.sh`.
+
+This is the reader/writer join again: `install.sh:381` builds its basenames from the hook object
+it constructs inline and is correct; `uninstall.sh` copied the idiom and pointed it at a source
+the writer never uses. Check 45 passed over all of it, because its sandbox had a pre-existing
+`settings.json` and the literal-restore path cleaned up before the branch under test could fail.
+
+Reproduction: `tests/repro/lifecycle.sh`, 9 assertions over 6 install/uninstall sequences, 4 red
+before this change and 0 after.
+
 ## 1.45.1 — 2026-08-24
 
 **`doctor --drift` printed `no drift ✔ (74 item(s) compared)` over a tree containing a file it

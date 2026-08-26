@@ -129,6 +129,17 @@ fi
 # Backups preserve the real path under files/ — the old flat `tr / _` names were a lossy
 # encoding that misparsed any future filename containing an underscore on restore.
 back(){ [ "$DRY" = 1 ] && return 0; [ -f "$1" ] || return 0
+  # $2, when given, is the repo file about to overwrite $1. If the two are already byte-identical
+  # then $1 is vstack's own previous install, not something the user had, and recording it as a
+  # backup makes the second install launder the payload into "pre-existing" -- after which
+  # uninstall.sh restores it and the machine can never be returned to its pre-vstack state. This
+  # is why install -> install -> uninstall left every hook and skill behind while printing that
+  # it had removed them.
+  #
+  # The trade, stated: a user file whose bytes exactly equal vstack's is indistinguishable from
+  # vstack's and is treated as vstack's, so uninstall deletes it. What is lost is content this
+  # repo still ships verbatim. The alternative loses the ability to uninstall at all.
+  if [ -n "${2:-}" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
   # Paths under $HOME are stored HOME-relative so uninstall can map them back. A config dir
   # moved outside $HOME by CLAUDE_CONFIG_DIR has no such relative form, so it is stored under
   # files_abs/ with its full path and restored to exactly where it came from.
@@ -159,22 +170,22 @@ if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
 fi
 
 # --- hooks / agents / commands ------------------------------------------------------------
-for f in "$SRC"/claude/hooks/*.sh;    do back "$CDIR/hooks/$(basename "$f")"; run cp "$f" "$CDIR/hooks/"; done
-for f in "$SRC"/claude/agents/*.md;   do back "$CDIR/agents/$(basename "$f")";   run cp "$f" "$CDIR/agents/";   done
+for f in "$SRC"/claude/hooks/*.sh;    do back "$CDIR/hooks/$(basename "$f")" "$f"; run cp "$f" "$CDIR/hooks/"; done
+for f in "$SRC"/claude/agents/*.md;   do back "$CDIR/agents/$(basename "$f")" "$f";   run cp "$f" "$CDIR/agents/";   done
 # Reference material the agents are pointed at. Deliberately *.ref, not *.md: Claude Code walks
 # an agent directory recursively and loads every .md at any depth, so a reference written as
 # markdown would install as a nameless agent competing for dispatch.
-for f in "$SRC"/claude/agents/reference/*.ref; do [ -e "$f" ] || continue; back "$CDIR/agents/reference/$(basename "$f")"; run cp "$f" "$CDIR/agents/reference/"; done
-for f in "$SRC"/claude/commands/*.md; do back "$CDIR/commands/$(basename "$f")"; run cp "$f" "$CDIR/commands/"; done
+for f in "$SRC"/claude/agents/reference/*.ref; do [ -e "$f" ] || continue; back "$CDIR/agents/reference/$(basename "$f")" "$f"; run cp "$f" "$CDIR/agents/reference/"; done
+for f in "$SRC"/claude/commands/*.md; do back "$CDIR/commands/$(basename "$f")" "$f"; run cp "$f" "$CDIR/commands/"; done
 [ "$DRY" = 0 ] && chmod 755 "$CDIR"/hooks/*.sh
 say "installed  hooks, agents, commands"
 
 # --- global directives + statusline ---------------------------------------------------------
 # CLAUDE.md is the standing instruction file every session reads. It is backed up first: it is
 # the file most likely to have been hand-edited on a machine that has been running a while.
-back "$CDIR/CLAUDE.md"
+back "$CDIR/CLAUDE.md" "$SRC/claude/CLAUDE.md"
 run cp "$SRC/claude/CLAUDE.md" "$CDIR/CLAUDE.md"
-back "$CDIR/statusline.sh"
+back "$CDIR/statusline.sh" "$SRC/claude/statusline.sh"
 run cp "$SRC/claude/statusline.sh" "$CDIR/statusline.sh"
 [ "$DRY" = 0 ] && chmod 755 "$CDIR/statusline.sh"
 say "installed  CLAUDE.md, statusline.sh"
@@ -210,7 +221,11 @@ fi
 for d in "$SRC"/claude/skills/*/; do
   s=$(basename "$d")
   [ "$DRY" = 1 ] && { say "would: install skill $s"; continue; }
-  [ -d "$CDIR/skills/$s" ] && cp -R "$CDIR/skills/$s" "$BK/skills_$s"
+  # Same provenance rule as back(): a skill dir already identical to the one being installed is
+  # vstack's own previous copy, and backing it up would let the next uninstall restore it.
+  if [ -d "$CDIR/skills/$s" ] && ! diff -rq "$CDIR/skills/$s" "${d%/}" >/dev/null 2>&1; then
+    cp -R "$CDIR/skills/$s" "$BK/skills_$s"
+  fi
   rm -rf "${CDIR:?}/skills/$s"
   # NB: strip the trailing slash. BSD/macOS `cp -R src/ dest/` copies src CONTENTS into dest,
   # not src itself, which would scatter SKILL.md and references/ across the skills root.
