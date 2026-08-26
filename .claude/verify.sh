@@ -2308,6 +2308,14 @@ if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
   printf 'x\n' > "$g_repo/claude/skills/s/SKILL.md"; printf 'x\n' > "$g_home/.claude/skills/s/SKILL.md"
   mkdir -p "$g_home/.config/agents/bin"
   printf 'x\n' > "$g_repo/bin/b"; printf 'x\n' > "$g_home/.config/agents/bin/b"
+  # mcp/servers.json is a drift family too, and unlike the others it is compared key-by-key
+  # against $CJSON's merged mcpServers rather than byte-diffed. The home side deliberately
+  # carries the "env": {} that Claude Code injects into every registered entry, so this control
+  # also proves doctor compares only the keys the repo declares. Without it a real install
+  # reads as drift on a tree that matches.
+  mkdir -p "$g_repo/mcp"
+  printf '{"stub":{"command":"x","args":[]}}\n' > "$g_repo/mcp/servers.json"
+  printf '{"mcpServers":{"stub":{"command":"x","args":[],"env":{}}}}\n' > "$g_home/.claude.json"
   _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
   grep -q 'no drift' <<<"$_o" \
     || g_errs="$g_errs\n  doctor --drift withholds its verdict from a tree that matches item for item"
