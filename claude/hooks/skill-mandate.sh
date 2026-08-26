@@ -188,7 +188,7 @@ if [ "$cnt" -ge 2 ] && { [ "$dcnt" -ge 2 ] || [ "$dscan_recent" = 1 ]; }; then
     (
       ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
       row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --arg ts "$ts" \
-        '{session_id:$sid, checkpoint_index:$ckpt, dir_count:null, ext_count:null, task_count:null, named:null, latched:true, ts:$ts}')
+        '{session_id:$sid, checkpoint_index:$ckpt, dir_count:null, ext_count:null, task_count:null, task_fail_count:null, named:null, latched:true, ts:$ts}')
       _delegation_log_row "$row"
     ) 2>/dev/null
   fi
@@ -507,6 +507,25 @@ fi
 # planned. Confirmed against 3 real transcripts on this machine before excluding it, not assumed.
 task_count=$( "$JQ" -s '[.[] | select(.type=="assistant") | .message.content[]?
             | select(.type=="tool_use" and (.name=="Task" or .name=="Agent"))] | length' "$tr_" 2>/dev/null )
+case "$task_count" in ''|*[!0-9]*) task_count=0 ;; esac
+
+# task_fail_count: of those same Task/Agent dispatches, how many resolved with is_error==true on
+# their tool_result. This is the field the delegation-drift ledger was missing entirely -- it
+# could say a session dispatched N subagents, never whether any of them actually failed. A
+# tool_use's result lands in a LATER "user"-type transcript entry, correlated by
+# tool_use.id == tool_result.tool_use_id -- the same correlation tests/compaction-effect.py
+# already relies on for its own is_error rate (confirmed there against real transcripts, not
+# assumed here). A dispatch whose result never shows up at all (killed mid-run, or this Stop
+# fired before the result landed) is not counted as failed -- absence of evidence is not
+# evidence of failure, and this must never overclaim a rate it cannot see.
+task_fail_count=$( "$JQ" -s '
+    ( [.[] | select(.type=="assistant") | .message.content[]?
+        | select(.type=="tool_use" and (.name=="Task" or .name=="Agent")) | .id] ) as $ids
+    | [ .[] | select(.type=="user") | .message.content[]?
+        | select(.type=="tool_result" and .is_error==true) | .tool_use_id
+        | select(. as $t | $ids | any(. == $t)) ] | length
+  ' "$tr_" 2>/dev/null )
+case "$task_fail_count" in ''|*[!0-9]*) task_fail_count=0 ;; esac
 
 # Agent naming: if Task/Agent count >= 1, one of the roster must appear in assistant text.
 # Extract all assistant message text.
@@ -564,6 +583,14 @@ fi
 # of it to decide whether to block. This appends one line recording it, which costs one jq
 # invocation and one file write, not a second pass over the transcript.
 #
+# task_fail_count is the one field above that ISN'T free: it is a second, small jq pass over the
+# same already-slurped transcript (see task_fail_count= above, next to task_count), because the
+# breadth/naming mandates never needed to know whether a dispatch failed, only whether one
+# happened. Without it this ledger recorded that N subagents were dispatched and nothing about
+# what came back -- a session logging task_count:5 reads identically whether all five returned
+# verified fixes or all five errored in the first second, and no claim about the routing layer
+# can be supported by a number that cannot tell those apart.
+#
 # Log unconditionally, block conditionally: this runs whether or not $unmet ends up non-empty,
 # so the log measures the behaviour (did breadth cross the threshold, did a dispatch happen) on
 # every evaluated Stop, not just the ones a mandate happened to block. A log that only captured
@@ -581,8 +608,11 @@ fi
 # subshell with stderr discarded, nothing in it writes to this script's own stdout, and no
 # command's exit status here is checked or allowed to change the exit path below.
 #
-# No file contents, no paths: session id, five integer/boolean fields, and a timestamp -- matching
+# No file contents, no paths: session id, six integer/boolean fields, and a timestamp -- matching
 # the same discipline the mandates above already apply to $paths before it ever reaches a message.
+# task_fail_count carries a count, same as task_count, never which agent or what it was asked --
+# that stays out of this log for the same reason prompts stay out of the replay log
+# (dispatch-counter.sh's own header makes the same call for the same reason).
 #
 # Opt-out: VSTACK_NO_DELEGATION_LOG=1, same shape as VSTACK_NO_MANDATE.
 # Destination override: VSTACK_DELEGATION_LOG, for tests/delegation-drift.sh's own fixtures and
@@ -598,9 +628,9 @@ if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
   (
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
     row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --argjson dc "$dir_count" \
-      --argjson ec "$ext_count" --argjson tc "$task_count" --argjson named "$named" \
-      --arg ts "$ts" \
-      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, named:$named, latched:false, ts:$ts}')
+      --argjson ec "$ext_count" --argjson tc "$task_count" --argjson tfc "$task_fail_count" \
+      --argjson named "$named" --arg ts "$ts" \
+      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, task_fail_count:$tfc, named:$named, latched:false, ts:$ts}')
     _delegation_log_row "$row"
   ) 2>/dev/null
 fi

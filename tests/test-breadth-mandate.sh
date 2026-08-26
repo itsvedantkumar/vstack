@@ -311,6 +311,47 @@ else
       "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
+# --- PROOF 13: a Task dispatch whose tool_result carries is_error:true -> logged row's
+#     task_fail_count is 1, not 0 ------------------------------------------------------------
+# Positive direction for the delegation-drift ledger's failure-awareness field. Before this, the
+# logged row recorded task_count (a dispatch happened) with nothing to say whether it succeeded --
+# task_fail_count is the field that closes that gap, correlating the Task/Agent tool_use's own
+# id against a LATER "user"-type transcript entry carrying {type:"tool_result",
+# tool_use_id:<id>, is_error:true}, the same correlation tests/compaction-effect.py already
+# relies on for its own is_error rate (confirmed there against real transcripts). BIRDPERSON is
+# named in assistant text so the agent-naming mandate is satisfied and cannot confound this
+# proof; the assertion is on the LOGGED ROW, not on decision/reason.
+last_log_row_(){ tail -n 1 "$VSTACK_DELEGATION_LOG" 2>/dev/null; }
+say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review this"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}\n{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","is_error":true,"content":"agent errored"}]}}'
+run_hook_ proof13
+row13=$(last_log_row_)
+tfc13=$(printf '%s' "$row13" | jq -r '.task_fail_count // "MISSING"' 2>/dev/null)
+tc13=$(printf '%s' "$row13" | jq -r '.task_count // "MISSING"' 2>/dev/null)
+if [ "$tc13" = "1" ] && [ "$tfc13" = "1" ]; then
+  ok "PROOF 13: Task dispatch with is_error:true tool_result -> logged row's task_fail_count is 1"
+else
+  bad "PROOF 13: Task dispatch with is_error:true tool_result -> logged row's task_fail_count is 1" \
+      "expected task_count=1 task_fail_count=1 in the logged row, got: $row13"
+fi
+
+# --- PROOF 14: a Task dispatch that resolves cleanly (no is_error) -> task_fail_count is 0,
+#     never null or missing -----------------------------------------------------------------
+# Negative direction, same shape as PROOF 3's positive/negative pairing: a successful dispatch
+# must not be counted as a failure, and the field itself must always be a real 0, not an absent
+# key that a downstream reader could misread as "field not supported" -- distinguishing "zero
+# failures measured" from "failure-awareness is not present in this row" is the whole point.
+say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review this"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}\n{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"looks good"}]}}'
+run_hook_ proof14
+row14=$(last_log_row_)
+tfc14=$(printf '%s' "$row14" | jq -r '.task_fail_count // "MISSING"' 2>/dev/null)
+tc14=$(printf '%s' "$row14" | jq -r '.task_count // "MISSING"' 2>/dev/null)
+if [ "$tc14" = "1" ] && [ "$tfc14" = "0" ]; then
+  ok "PROOF 14: Task dispatch with a clean (non-error) tool_result -> logged row's task_fail_count is 0"
+else
+  bad "PROOF 14: Task dispatch with a clean (non-error) tool_result -> logged row's task_fail_count is 0" \
+      "expected task_count=1 task_fail_count=0 in the logged row, got: $row14"
+fi
+
 echo
 printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
 if [ "$((RAN + SKIPPED))" -ne "$TOTAL" ]; then
