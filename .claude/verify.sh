@@ -138,8 +138,11 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     [ -f "$f" ] || { errs="$errs\n$f: tracked but not on disk"; continue; }
     jq -e . "$f" >/dev/null 2>&1 || errs="$errs\n$f: invalid JSON"
   done
+  # A floor of 10 against a tree of 12 is a coarse instrument and does not pretend otherwise: it
+  # catches the selector collapsing, not one file going missing. The named-five loop below is the
+  # precise half, and it is the one that would fail if a shipped manifest left the set.
   [ "$njson" -ge 10 ] \
-    || errs="$errs\nonly $njson tracked .json file(s) found; the selector has stopped matching the tree"
+    || errs="$errs\nonly $njson tracked .json file(s) found; the selector has collapsed (12 at 1.46.0)"
   for f in claude/settings.json mcp/servers.json claude/hooks/hooks.json \
            .claude-plugin/marketplace.json claude/.claude-plugin/plugin.json; do
     git ls-files --error-unmatch "$f" >/dev/null 2>&1 \

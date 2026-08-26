@@ -32,6 +32,12 @@ payload_digest_compute(){
   # dropped into claude/hooks/ counts as payload movement. A tracked file deleted from the working
   # tree still appears in the -c list and hashes as `absent`, which is how a deletion registers.
   # NUL-delimited throughout: no quoting, no filename that can split a field.
+  #
+  # --exclude-standard means .gitignore'd files inside the payload directories are NOT hashed.
+  # That is deliberate: a stray .DS_Store or *.log would otherwise make the digest differ on every
+  # developer's machine. The cost is real and stated here rather than left to be discovered --
+  # install.sh copies directories, so an ignored file sitting in one does reach the installed tree
+  # without this digest ever seeing it.
   # shellcheck disable=SC2086
   git ls-files -z -co --exclude-standard -- $PAYLOAD_PATHS \
     | LC_ALL=C sort -z -u \
@@ -41,6 +47,11 @@ payload_digest_compute(){
         elif [ -f "$f" ]; then
           printf '%s %s %s\n' "$(shasum -a 256 < "$f" | cut -d' ' -f1)" \
                                "$([ -x "$f" ] && printf 'x' || printf -- '-')" "$f"
+        elif [ -d "$f" ]; then
+          # A path that is a directory in a file listing is a gitlink (submodule). There are none
+          # here today; without this arm a future one would hash as `absent` forever and every
+          # bump inside it would be invisible. The recorded commit is the content.
+          printf 'gitlink %s %s\n' "$(git ls-files -s -- "$f" | awk '{print $2}')" "$f"
         else
           printf 'absent - %s\n' "$f"
         fi
