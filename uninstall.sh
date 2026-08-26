@@ -25,12 +25,18 @@ SECRETS="$HOME/.config/agents/secrets.env"
 # reinstalled since -- owns_path() below treats that as "assume everything, the old way",
 # which is what every uninstall.sh release before profiles existed already did.
 OWNED_PATHS="$HOME/.config/agents/vstack-installed"
-# A profile install (core/team/ui) only ever calls install.sh's own() for the subset it
-# actually copied, so OWNED_PATHS is already profile-accurate by construction -- this uninstall
-# does not need to know which profile was used, only whether a given candidate path is IN the
-# record. No record at all (pre-1.46.1, or an install this old uninstall.sh has never seen
-# write one) falls back to "yes", preserving the pre-profile behaviour of removing anything this
-# checkout would install today.
+# The record is NOT profile-accurate by construction, and this uninstall does not rely on it
+# alone for the one case where trusting it blindly is destructive: seed_owned_paths() in
+# install.sh (a migration path for pre-1.46.0 machines, which kept no record at all) can claim
+# a path that a name collision, not a real vstack copy, put on disk -- a user directory that
+# happens to share a skill's name, planted after that seeding ran. A single owns_path() check
+# here would rm -rf it on nothing more than that name match. Directories get the same
+# byte-for-byte discipline plan_file_removal() already gives single files, below: the record
+# says whether this path is a CANDIDATE, content comparison against what this repo would
+# actually install says whether it is SAFE. No record at all (pre-1.46.1, or an install this
+# old uninstall.sh has never seen write one) falls back to "yes" on the candidacy question,
+# preserving the pre-profile behaviour of removing anything this checkout would install today
+# -- content comparison still applies on top of that fallback, unchanged.
 owns_path(){ # <path>
   [ -f "$OWNED_PATHS" ] || return 0
   grep -qxF "$1" "$OWNED_PATHS" 2>/dev/null
@@ -168,6 +174,7 @@ done < <(restore_pairs)
 # (zero skills) followed by uninstall.sh would delete all 28 skill directories -- the "wrong set
 # does not install, right set does" half of the profile promise, un-done on the way back out.
 REMOVE_LIST=""
+KEPT_COLLISION=""
 for d in "$SRC"/claude/skills/*/; do
   [ -d "$d" ] || continue
   s=$(basename "$d")
@@ -176,12 +183,25 @@ for d in "$SRC"/claude/skills/*/; do
   owns_path "$tgt" || continue
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] || continue
+  # The record says this path is a candidate; this says whether it is safe to act on. A
+  # directory that does not match what this repo would install byte for byte is not vstack's
+  # to remove even though its name is -- the record can only be wrong in the direction of
+  # over-claiming (seed_owned_paths' migration path, or a name reused after that ran), never
+  # under-claiming, so a mismatch here is always "something else is here now," never "vstack
+  # shipped something different." diff -rq, not a file count or a spot check: an extra file
+  # anywhere under the directory, or one byte different in an existing one, is enough to keep
+  # it. Symlinks inside are followed by -r the same way a manual inspection would notice them.
+  if ! diff -rq "$d" "$tgt" >/dev/null 2>&1; then
+    KEPT_COLLISION="$KEPT_COLLISION$tgt
+"
+    continue
+  fi
   echo "remove   $tgt  (installed by vstack, not present in backup)"
   REMOVE_LIST="$REMOVE_LIST $s"
 done
 
 # Same rule, applied to everything else this repo copies in. It only ever ran for skills, so
-# uninstalling a fresh install left 14 agents, 15 commands, 8 hooks and 6 wrappers sitting in
+# uninstalling a fresh install left 8 agents, 14 commands, 4 hooks and 7 wrappers sitting in
 # ~/.claude with nothing to say where they came from: the backup held no prior version to
 # restore over them, and only skills had a branch that removed what the backup lacked.
 #
@@ -251,6 +271,11 @@ plan_file_removal "$HOME/.config/agents/shell/claude-parity.zsh" "$SRC/shell/cla
 if [ -n "$KEPT_EDITED" ]; then
   echo "keeping  files you have edited since install (not removing, no backup holds your version):"
   printf '%s' "$KEPT_EDITED" | while IFS= read -r k; do [ -n "$k" ] && echo "         $k"; done
+fi
+if [ -n "$KEPT_COLLISION" ]; then
+  echo "keeping  directories whose name the ownership record claims but whose contents do not"
+  echo "         match what this repo would install (not vstack's, despite the name):"
+  printf '%s' "$KEPT_COLLISION" | while IFS= read -r k; do [ -n "$k" ] && echo "         $k"; done
 fi
 
 if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ]; then

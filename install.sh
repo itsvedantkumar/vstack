@@ -87,12 +87,44 @@ seed_owned_paths(){ [ "$DRY" = 1 ] && return 0
     [ -f "$CDIR/hooks/$(basename "$_h")" ] && _hits=$((_hits+1))
   done
   [ "$_hits" -ge 3 ] || return 0
-  for _h in "$SRC"/claude/hooks/*.sh;            do [ -e "$_h" ] && own "$CDIR/hooks/$(basename "$_h")"; done
-  for _a in "$SRC"/claude/agents/*.md;           do [ -e "$_a" ] && own "$CDIR/agents/$(basename "$_a")"; done
-  for _r in "$SRC"/claude/agents/reference/*.ref; do [ -e "$_r" ] && own "$CDIR/agents/reference/$(basename "$_r")"; done
-  for _c in "$SRC"/claude/commands/*.md;         do [ -e "$_c" ] && own "$CDIR/commands/$(basename "$_c")"; done
-  for _d in "$SRC"/claude/skills/*/;             do [ -d "$_d" ] && own "$CDIR/skills/$(basename "$_d")"; done
-  own "$CDIR/CLAUDE.md"; own "$CDIR/statusline.sh"
+  # Every loop below tests the DESTINATION ($CDIR/...), the same thing the fingerprint loop
+  # above already tests -- not just [ -e "$_a" ]/[ -d "$_d" ], which is only asking "does the
+  # REPO ship this," and the repo ships all of them, every time, regardless of what is really
+  # on disk or which profile this run is. That earlier version claimed every agent, command,
+  # reference file and skill in the repository on ANY machine with >= 3 recognisable hooks --
+  # including a fresh --profile=core install, where .claude/agents and .claude/skills are
+  # empty by design. uninstall.sh's skills-removal loop trusts the record alone (directories
+  # have no per-file content-comparison fallback the way plan_file_removal gives single files),
+  # so a name a user later reused for their own directory -- ordinary skill names like
+  # "brainstorming" are exactly the names someone would pick unprompted -- got rm -rf'd on the
+  # next uninstall as "installed by vstack, not present in backup." Deliberately NOT also
+  # gated on profile_wants_* (see PROFILE_HOOK_CORE and its neighbours above): a file that is
+  # really sitting at $CDIR was really put there by some earlier vstack run, whichever profile
+  # that run used, and it staying permanently unrecorded -- never adoptable, hence never
+  # uninstallable -- would be worse for "uninstall returns the machine to its pre-vstack state"
+  # than adopting it now and letting a later, real uninstall clean it up.
+  for _h in "$SRC"/claude/hooks/*.sh; do
+    [ -e "$_h" ] || continue
+    _t="$CDIR/hooks/$(basename "$_h")"; [ -f "$_t" ] && own "$_t"
+  done
+  for _a in "$SRC"/claude/agents/*.md; do
+    [ -e "$_a" ] || continue
+    _t="$CDIR/agents/$(basename "$_a")"; [ -f "$_t" ] && own "$_t"
+  done
+  for _r in "$SRC"/claude/agents/reference/*.ref; do
+    [ -e "$_r" ] || continue
+    _t="$CDIR/agents/reference/$(basename "$_r")"; [ -f "$_t" ] && own "$_t"
+  done
+  for _c in "$SRC"/claude/commands/*.md; do
+    [ -e "$_c" ] || continue
+    _t="$CDIR/commands/$(basename "$_c")"; [ -f "$_t" ] && own "$_t"
+  done
+  for _d in "$SRC"/claude/skills/*/; do
+    [ -d "$_d" ] || continue
+    _t="$CDIR/skills/$(basename "$_d")"; [ -d "$_t" ] && own "$_t"
+  done
+  [ -f "$CDIR/CLAUDE.md" ] && own "$CDIR/CLAUDE.md"
+  [ -f "$CDIR/statusline.sh" ] && own "$CDIR/statusline.sh"
   say "adopted    an existing vstack install into $OWNED_PATHS ($_hits hook(s) matched; pre-1.46.0 kept no ownership record)"
 }
 BK="$BK_BASE"
@@ -752,7 +784,21 @@ elif [ "$DRY" = 0 ]; then
       | delpaths([$retired[] | [.]])
       | .hooks = (reduce ($ours_filtered | to_entries[]) as $e
                    ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
-      | .statusLine = {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3})
+      # Set only when absent or already ours (basename "statusline.sh") -- refreshing our own
+      # entry on a reinstall/upgrade (the path embeds $h, which moves with $CDIR) is not the
+      # same decision as clobbering a value the user set before ever running this installer.
+      # This key used to be the one exception to "merges rather than overwrites, leaves keys
+      # it does not recognise alone" (see this file and READMEs own header claim): every
+      # install silently replaced a users own statusLine with no record of what it had been,
+      # so a later uninstall had nothing left to restore it from -- check 45 in .claude/verify.sh
+      # reproduces this on the commit before profile support existed, so it predates that work.
+      # (No apostrophes anywhere in this comment either, for the same reason noted above: the
+      # whole program is one bash single-quoted string.)
+      | .statusLine = (
+          if (.statusLine == null) or (((.statusLine.command? // "") | split("/") | last) == "statusline.sh")
+          then {type:"command", command:(($h|rtrimstr("/hooks")) + "/statusline.sh"), padding:0, refreshInterval:3}
+          else .statusLine
+          end))
   ' "$US" "$SRC/claude/settings.json" > "$tmp"
   # shellcheck disable=SC2088  # the third argument is a label printed to the operator
   if commit_json "$tmp" "$US" "~/.claude/settings.json"; then
