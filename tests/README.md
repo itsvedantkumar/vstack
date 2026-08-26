@@ -385,3 +385,8 @@ exit-code contract.
 Do not read a blended number off it. Recall and precision are reported apart on purpose, and the
 `AMBIGUOUS` cases are distributions rather than pass/fail — a 50/50 split and a 100/0 split are
 different findings and both matter.
+
+## Reproductions
+
+`repro/` holds one script per confirmed defect, each red until its fix lands. See
+`tests/repro/README.md` for the current table.
