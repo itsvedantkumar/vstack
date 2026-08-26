@@ -2291,9 +2291,17 @@ if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
            "$g_repo"/claude/skills "$g_repo"/bin "$g_home/.claude"
   cp claude/CLAUDE.md claude/statusline.sh claude/settings.json "$g_repo/claude/" 2>/dev/null
   cp claude/CLAUDE.md claude/statusline.sh "$g_home/.claude/" 2>/dev/null
-  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1); _rc=$?
+  # Three assertions, not one. Requiring only the ABSENCE of "no drift" passes a doctor that
+  # crashed before printing anything, or one that was never executable -- silence would read as
+  # the floor working. The ui-gate probe above already demands its own positive marker
+  # ("UI GATE NOT RUN"); this one did not, and that asymmetry is the hole.
   grep -q 'no drift' <<<"$_o" \
     && g_errs="$g_errs\n  doctor --drift reports no drift after comparing zero items per family"
+  grep -q 'DRIFT' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not say DRIFT over empty families; it must name that case, not stay quiet (output: $(printf '%s' "$_o" | tr '\n' ' ' | cut -c1-120))"
+  [ "$_rc" -ne 0 ] \
+    || g_errs="$g_errs\n  doctor --drift exits 0 over empty families, so no caller scripting on its status can tell"
 
   # doctor --drift, positive: one member in every family, mirrored on both sides.
   # agents/reference/*.ref is its own drift family, so it needs its own member here. Leaving it
@@ -2321,6 +2329,23 @@ if [ -x ui-gate/ui-gate.sh ] && [ -x bin/doctor ]; then
     || g_errs="$g_errs\n  doctor --drift withholds its verdict from a tree that matches item for item"
   grep -qE 'no drift .*[0-9]+ item' <<<"$_o" \
     || g_errs="$g_errs\n  doctor --drift does not say how many items it compared, so the result cannot be audited"
+
+  # doctor --drift, mcp-specific: the mirrored stub above proves nothing about the mcp lane on its
+  # own. Delete run_drift()'s mcp loop entirely and that stub still reports no drift, because the
+  # other five families satisfy both assertions by themselves -- a positive control that passes
+  # for a reason unrelated to the family it plants. So move ONLY the mcp value and require doctor
+  # to name it. This is the assertion the whole family stands or falls on.
+  printf '{"mcpServers":{"stub":{"command":"MOVED","args":[],"env":{}}}}\n' > "$g_home/.claude.json"
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1); _rc=$?
+  grep -q 'mcp/servers.json:stub' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not notice an mcp server whose installed value moved; the mcp family is not being compared"
+  [ "$_rc" -ne 0 ] \
+    || g_errs="$g_errs\n  doctor --drift exits 0 with an mcp server that differs from what the repo declares"
+  # And the reverse: a key the repo declares that is not registered at all.
+  printf '{"mcpServers":{}}\n' > "$g_home/.claude.json"
+  _o=$(env HOME="$g_home" VSTACK_DIR="$g_repo" ./bin/doctor --drift 2>&1)
+  grep -q 'missing.*mcp/servers.json:stub' <<<"$_o" \
+    || g_errs="$g_errs\n  doctor --drift does not notice a declared mcp server that is not registered"
 
   rm -rf "$g_empty" "$g_repo" "$g_home"
   [ -z "$g_errs" ] \

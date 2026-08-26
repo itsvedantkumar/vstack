@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 35b 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 35b 35c 35d 35e 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -283,6 +283,9 @@ files_for(){ case "$1" in
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
   35)  printf 'ui-gate/ui-gate.sh' ;;
   35b) printf 'bin/doctor' ;;
+  35c) printf 'bin/doctor' ;;
+  35d) printf 'bin/doctor' ;;
+  35e) printf 'bin/doctor' ;;
   36)  printf 'tests/evals/lib/runlog.sh' ;;
   37)  printf 'tests/evals/optimize.sh' ;;
   38)  printf 'tests/README.md' ;;
@@ -342,6 +345,9 @@ label_for(){ case "$1" in
   34)  printf 'the policy document reaches a session exactly once' ;;
   35)  printf 'gates refuse a green on nothing measured' ;;
   35b) printf 'gates refuse a green on nothing measured' ;;
+  35c) printf 'gates refuse a green on nothing measured' ;;
+  35d) printf 'gates refuse a green on nothing measured' ;;
+  35e) printf 'gates refuse a green on nothing measured' ;;
   36)  printf 'run logs are opened append-safe' ;;
   37)  printf 'optimiser decides correctly' ;;
   38)  printf 'every repository path named in prose exists' ;;
@@ -579,6 +585,24 @@ exit 0
       # catch it -- the empty-family stub then prints "no drift" over four families that
       # compared nothing, which is the state bin/doctor shipped in before 1.14.0.
       sed -i.t 's/\[ "\$2" -gt 0 \] && return 0/[ "$2" -ge 0 ] \&\& return 0/' bin/doctor \
+        && rm -f bin/doctor.t ;;
+
+  35c) # The mcp family's comparison, and nothing else. The mirrored stub cannot catch this on its
+      # own -- five other families satisfy it either way -- so this is the row that proves the
+      # probe added for a5c4c05's sixth family is measuring that family and not its neighbours.
+      # Verified to trip exactly two assertion lines and leave the rest of the check standing.
+      sed -i.t 's/if \[ "\$h" != "\$w" \]; then/if false; then/' bin/doctor \
+        && rm -f bin/doctor.t ;;
+
+  35d) # Take away the verdict WORD while leaving the exit status. A negative probe that only
+      # asserts the absence of "no drift" passes a doctor that says nothing at all, which is the
+      # asymmetry this check carried until the ui-gate half's positive marker was mirrored here.
+      sed -i.t 's/echo "DRIFT ✖"/:/g' bin/doctor \
+        && rm -f bin/doctor.t ;;
+
+  35e) # Take away the exit STATUS: the drift branch is never taken, so a caller scripting on
+      # `doctor --drift` reads success over a tree it just described as broken.
+      sed -i.t 's/if \[ "\$DRIFT" = 1 \]; then/if [ "$DRIFT" = 9 ]; then/' bin/doctor \
         && rm -f bin/doctor.t ;;
 
   36) # Restore the truncation: treat every log as new, which is the line that shipped three
