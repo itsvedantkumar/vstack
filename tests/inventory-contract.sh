@@ -19,6 +19,11 @@ RAN=0
 
 fail(){ printf 'FAIL  %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2"; FAIL=1; RAN=$((RAN+1)); }
 pass(){ printf 'ok    %s\n' "$1"; RAN=$((RAN+1)); }
+# A skip is a named result, never folded into RAN. Counting a skip as a check that ran is how a
+# suite reports coverage it does not have; the footer prints both numbers so the two cannot be
+# confused by a reader who only sees the last line.
+SKIPPED=0
+skipc(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL  jq is required to validate $INV" >&2; exit 1; }
 [ -f "$INV" ] || { echo "FAIL  $INV not found" >&2; exit 1; }
@@ -52,6 +57,32 @@ if [ "$computed_digest" = "$stated_digest" ]; then
   pass "payload_digest matches the tree ($computed_digest)"
 else
   fail "payload_digest" "claude/inventory.json's derived_at.payload_digest is $stated_digest; the tree's is $computed_digest. The snapshot is stale."
+fi
+
+# --- derived_at.head names a real commit this checkout can see, and one HEAD descends from -----
+#
+# Until 2026-08-27 nothing validated this field at all: `grep -rn 'derived_at.head' tests/ .claude/`
+# returned nothing, so it was a recorded claim with no check behind it -- the shape this whole
+# repository exists to find, sitting in the file that describes the repository.
+#
+# It deliberately does NOT assert equality with HEAD. The field names the commit payload_digest
+# was computed FROM, and any commit that writes the field invalidates equality on the spot: the
+# same fixed point derived_at.self_reference_note works through for the digest itself. Ancestor-of
+# HEAD is the strongest assertion that is true by construction -- it still catches a fabricated
+# hash, a commit from an unrelated branch, and a value that was never updated across a rebase.
+stated_head=$(jq -r '.derived_at.head // empty' "$INV")
+if [ -z "$stated_head" ]; then
+  fail "derived_at.head" "claude/inventory.json has no derived_at.head; there is no provenance for payload_digest"
+elif ! printf '%s' "$stated_head" | grep -qE '^[0-9a-f]{40}$'; then
+  fail "derived_at.head" "derived_at.head is '$stated_head', which is not a 40-character commit hash"
+elif ! git cat-file -e "$stated_head^{commit}" 2>/dev/null; then
+  # Absent, not wrong. A shallow clone has no history to check against, and calling that a pass
+  # would be the tagless-checkout defect check 24 already learned once.
+  skipc "derived_at.head" "$stated_head is not present in this checkout (shallow clone?), so its ancestry cannot be checked"
+elif git merge-base --is-ancestor "$stated_head" HEAD 2>/dev/null; then
+  pass "derived_at.head is an ancestor of HEAD ($(printf '%.12s' "$stated_head"), $(git rev-list --count "$stated_head..HEAD" 2>/dev/null) commit(s) ago)"
+else
+  fail "derived_at.head" "derived_at.head is $stated_head, which exists but is NOT an ancestor of HEAD -- the snapshot was taken on a commit this branch does not descend from"
 fi
 
 # --- every list: regenerate with the exact command the file's own regeneration.derivations
@@ -160,9 +191,13 @@ done
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-  echo "inventory-contract: $RAN checks, all clean"
+  if [ "$SKIPPED" -gt 0 ]; then
+    echo "inventory-contract: $RAN checks, $SKIPPED skipped, all clean"
+  else
+    echo "inventory-contract: $RAN checks, all clean"
+  fi
   exit 0
 else
-  echo "inventory-contract: $RAN checks, FAILURES ABOVE"
+  echo "inventory-contract: $RAN checks, $SKIPPED skipped, FAILURES ABOVE"
   exit 1
 fi
