@@ -408,6 +408,22 @@ The case worth knowing about is `self-test` with every check skipped. `ran + ski
 holds there, so the accounting footer alone would report success on a run that measured nothing;
 the suite asserts that `ran == 0` fails on its own.
 
+## require-checks-green.sh
+
+`tests/require-checks-green.sh` runs `.github/scripts/latest-check-run.jq` — the program the
+release workflow uses to decide which check-run speaks for a candidate commit when the same check
+ran more than once against the same SHA. It runs that file, not a restatement of it.
+
+Ten cases, both directions: a re-run to green wins, a later failure is never masked by an earlier
+success, delivery order does not change the answer, an in-flight re-run outranks a finished older
+run, a foreign SHA or a foreign check name selects nothing, and two controls prove the fixtures
+reach the program at all.
+
+The fourth case is there because it caught a defect in the fix. Ordering on `completed_at` first
+looked right and put an in-flight re-run *below* the finished run it was re-running, which would
+have published on the stale result while the real check was still going. `started_at` is the right
+primary key because every run has one, in flight or not.
+
 ## Reproductions
 
 `repro/` holds one script per confirmed defect, each red until its fix lands. See

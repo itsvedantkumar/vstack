@@ -151,6 +151,14 @@ jobs:
       # claude-task.sh, deploy-auto.sh) were syntax-checked by checks 1 and 29 of the gate but
       # never actually run before this suite existed -- see tests/bin-scripts.sh's own header.
       # Zero model calls: every `claude` this suite touches is a local stub.
+      # The release gate's check-run selection, exercised against fixtures. It runs the real
+      # .github/scripts/latest-check-run.jq rather than a copy of the rule, because a test that
+      # restates the logic it tests agrees with itself forever. The defect it was written for
+      # shipped in this repository: the selection sorted on a key that was constant across the
+      # set it sorted, so it returned whatever order the API happened to use.
+      - name: tests/require-checks-green.sh proves the release gate picks the right check-run
+        run: ./tests/require-checks-green.sh
+
       - name: tests/bin-scripts.sh runs the shipped bin/ scripts, not just lints them
         run: ./tests/bin-scripts.sh
 
