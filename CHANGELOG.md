@@ -266,12 +266,43 @@ The delegation ledger records `task_fail_count` alongside `task_count`, correlat
 that died after thirty seconds cannot support any claim about the routing layer, and this
 repository makes claims about the routing layer.
 
-### The catalogue goes from six to nine
+### The ownership record claimed paths no run had installed
+
+`seed_owned_paths()` exists so a machine installed before 1.46.0, from a version with no ownership
+tracking, can still be uninstalled. It fingerprints such a machine by counting vstack hook
+basenames at the destination. Its five seeding loops then walked the repository instead, calling
+`own()` on every agent, reference, command, and skill the tree ships, whether or not that profile's
+run had written it. A `core`, `team`, or `ui` install on a fingerprinted machine came out of it
+claiming the whole repository.
+
+`uninstall.sh` then acted on that claim. Its skills loop matched a directory by name and removed it,
+with none of the byte-identity discipline `plan_file_removal` already applies to files, so a user
+directory sharing a name with a shipped skill was deleted unread. `brainstorming` is not a name
+anyone has to work to collide with. The loop now runs `diff -rq` against the repository first and
+reports a mismatch as `KEPT_COLLISION` rather than removing it. Seeding tests the destination, the
+way the fingerprint loop above it already did. It is deliberately not gated on the current run's
+profile: a file genuinely on disk from an earlier install should stay adoptable no matter which
+profile runs next, and gating on profile would leave real artifacts permanently untrackable.
+
+Two smaller ones alongside. `own()` was reached through a path that checked for the file before
+recording ownership, so a first-ever install recorded almost nothing and `uninstall.sh` fell back
+to treating none of it as vstack's. And the `.statusLine` merge overwrote whatever the user had;
+it now claims the key only when it is unset or already points at vstack's own `statusline.sh`.
+`install.sh` writes and clears `~/.config/agents/install-state` around the run, which is the marker
+`vstack recover` documents and had never been given.
+
+`tests/profiles.sh` is the regression: 83 checks over per-profile install and uninstall round-trips,
+the seeding over-claim under a non-default profile, ownership disagreeing with content, and byte
+identity between `opinionated` and the no-argument default. Each fix was reverted alone and watched
+turn exactly one check red.
+
+### The catalogue goes from six to ten
 
 `docs/checks-that-inherit-their-answer.md` closed by predicting a seventh instance next month. It
-got three in a day, five weeks early: the guard decision nothing downstream honoured, check 18's cap
-clearing by one byte because the injected block embeds the absolute repository path, and a
-reproduction whose no-op control inverted the moment its own fix was committed.
+got four in a day, five weeks early: the guard decision nothing downstream honoured, check 18's cap
+clearing by one byte because the injected block embeds the absolute repository path, a reproduction
+whose no-op control inverted the moment its own fix was committed, and an ownership record that
+read the repository's contents as a report of what had been installed.
 
 ## 1.45.1 — 2026-08-24
 

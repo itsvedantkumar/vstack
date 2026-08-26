@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The nine
+## The ten
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -70,6 +70,20 @@ The moment the fix was committed, HEAD became the fixed hook, the attack stopped
 the repro reported the hole OPEN because its own control had gone green. A no-op detector that
 reads `HEAD` measures the tree's history, not the fix, and every fix moves the thing it reads.
 Inherited from: which commit happened to be checked out.
+
+**The record that inherited the repository's contents.** `seed_owned_paths()` adopts a pre-1.46.0
+install, one that predates ownership tracking, so `uninstall.sh` can later remove it. It decides
+whether to run by counting recognisable vstack hook basenames **at the destination**, which is
+correct. The five loops that follow then iterate the files the **repository ships** and call
+`own()` on each unconditionally, which is true of every path in the tree regardless of what the
+run put on disk. On a fingerprinted machine installed with `core`, `team`, or `ui`, the record
+therefore claimed every agent, command, and skill in the repository. `uninstall.sh`'s skills loop
+trusted that record on its own and `rm -rf`'d on a name match, so a user directory called
+`brainstorming` was removed without its contents ever being compared. The comment above
+`owns_path()` asserted the invariant the seeder breaks, in the present tense, as the reason the
+loop is safe. No check caught it because check 45 and the profile round-trips all start from a
+machine with no prior install, where the fingerprint reads zero and the seeder returns before its
+first loop. Inherited from: what the repository contains, standing in for what the run installed.
 
 ## The test
 
