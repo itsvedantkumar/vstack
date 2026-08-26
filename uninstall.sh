@@ -19,6 +19,23 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BKROOT="$HOME/.config/agents/backups"
 SECRETS="$HOME/.config/agents/secrets.env"
 
+# Plain, unsigned, world-editable-by-this-user text: a list of paths install.sh wrote, not a
+# signed attestation. Written by install.sh (see its own comment above OWNED_PATHS there);
+# read-only here. Absent entirely on a machine installed by vstack <= 1.45.1 and never
+# reinstalled since -- owns_path() below treats that as "assume everything, the old way",
+# which is what every uninstall.sh release before profiles existed already did.
+OWNED_PATHS="$HOME/.config/agents/vstack-installed"
+# A profile install (core/team/ui) only ever calls install.sh's own() for the subset it
+# actually copied, so OWNED_PATHS is already profile-accurate by construction -- this uninstall
+# does not need to know which profile was used, only whether a given candidate path is IN the
+# record. No record at all (pre-1.46.1, or an install this old uninstall.sh has never seen
+# write one) falls back to "yes", preserving the pre-profile behaviour of removing anything this
+# checkout would install today.
+owns_path(){ # <path>
+  [ -f "$OWNED_PATHS" ] || return 0
+  grep -qxF "$1" "$OWNED_PATHS" 2>/dev/null
+}
+
 # Claude Code reads its user config from $CLAUDE_CONFIG_DIR when set, ~/.claude otherwise.
 # Mirrors install.sh: anything else and this operates on a directory the install never used.
 CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -144,12 +161,19 @@ done < <(restore_pairs)
 
 # skills this repo installs that the backup does not contain existed before install → vstack
 # added them, so an uninstall should remove them. Never touch a symlink (builtin/plugin skill).
+#
+# owns_path gates this on the ownership record: a profile install (core, ui) that never copied a
+# given skill directory never called install.sh's own() for it either, so it is not vstack's to
+# remove here even though this checkout still ships it. Without this a `--profile=core` install
+# (zero skills) followed by uninstall.sh would delete all 28 skill directories -- the "wrong set
+# does not install, right set does" half of the profile promise, un-done on the way back out.
 REMOVE_LIST=""
 for d in "$SRC"/claude/skills/*/; do
   [ -d "$d" ] || continue
   s=$(basename "$d")
   [ -d "$BK/skills_$s" ] && continue
   tgt="$CDIR/skills/$s"
+  owns_path "$tgt" || continue
   [ -L "$tgt" ] && continue
   [ -e "$tgt" ] || continue
   echo "remove   $tgt  (installed by vstack, not present in backup)"
@@ -181,6 +205,11 @@ plan_file_removal() { # <installed-path> <repo-source-or-empty>
   tgt="$1"; src="${2:-}"
   [ -e "$tgt" ] || return 0
   [ -L "$tgt" ] && return 0
+  # Same profile gate as the skills loop above: not in the ownership record means this exact
+  # install run never claimed it, so it is not this uninstall's to remove -- a hook, agent,
+  # command or wrapper a profile-limited install deliberately left uncopied stays exactly as
+  # uncopied as it was, rather than being reported "removed" for a copy that was never made.
+  owns_path "$tgt" || return 0
   # Backup lookup follows the same split install.sh used when writing: HOME-relative under
   # files/, full path under files_abs/. Checking only the first meant an external config file
   # never looked backed up, so it was classified as removable and deleted.
@@ -404,14 +433,15 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CJSON" ] && [ -f "$SRC/mcp/servers.js
   rm -f "$mship" "$morig"
 fi
 
-# --- the install receipt ----------------------------------------------------------------------
+# --- the ownership record -----------------------------------------------------------------------
 # install.sh appends every path it owns here so the NEXT install can tell its own previous
-# payload from the user's files. Once vstack is removed the record is a liability: a user who
-# later writes their own ~/.claude/hooks/format.sh would have it silently claimed by a reinstall.
-RECEIPT="$HOME/.config/agents/vstack-installed"
-if [ -f "$RECEIPT" ]; then
-  rm -f "$RECEIPT"
-  echo "removed  $RECEIPT  (install receipt; a fresh install starts with no ownership claims)"
+# payload from the user's files. It is plain, unsigned, world-editable-by-this-user text -- a
+# list of paths install.sh wrote, not a signed attestation that those paths are still what it
+# wrote. Once vstack is removed the record is a liability: a user who later writes their own
+# ~/.claude/hooks/format.sh would have it silently claimed by a reinstall.
+if [ -f "$OWNED_PATHS" ]; then
+  rm -f "$OWNED_PATHS"
+  echo "removed  $OWNED_PATHS  (ownership record; a fresh install starts with no ownership claims)"
 fi
 
 # --- claude-mem hooks.json: undo the async edit older vstack versions made ---------------------
