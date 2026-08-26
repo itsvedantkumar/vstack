@@ -1227,6 +1227,28 @@ external_path(){
   esac
   return 1
 }
+# Paths install.sh CREATES BY WRITING rather than by copying, so there is no repo file to
+# compare against -- src_for's "install copies a tracked file there" model does not apply, and
+# runtime_path's "not install's doing at all" is wrong the other way: install.sh's own own()
+# function writes ~/.config/agents/vstack-installed on every run (install.sh:65-66,
+# OWNED_PATHS="$HOME/.config/agents/vstack-installed"). Filing a file install.sh itself creates
+# under "not install's doing" is a false classification in the one check whose subject is prose
+# and the tree disagreeing.
+#
+# The list below is floored, not a bare allow-list: the loop right after src_for asserts
+# install.sh actually contains the literal path for every entry here, with the leading ~/
+# rewritten to $HOME. A bare addition here would be exactly the shape this repo catalogues nine
+# times over -- an exemption nothing holds to account. Renaming OWNED_PATHS's target turns this
+# check red naming the floor, instead of silently widening the exemption to cover the old name
+# forever.
+INSTALL_GENERATED_PATHS='~/.config/agents/vstack-installed'
+# shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
+install_generated(){
+  case " $INSTALL_GENERATED_PATHS " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
 # shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
 src_for(){ # installed path -> the repo file install.sh copies there, or empty if unmapped
   case "$1" in
@@ -1241,11 +1263,19 @@ src_for(){ # installed path -> the repo file install.sh copies there, or empty i
   esac
 }
 errs=""
+ig_n=0
+for _ig in $INSTALL_GENERATED_PATHS; do
+  ig_n=$((ig_n + 1))
+  _igh="\$HOME${_ig#'~'}"
+  grep -Fq "$_igh" install.sh \
+    || errs="$errs\ninstall_generated names $_ig but install.sh does not contain the literal path $_igh -- the exemption may be stale"
+done
 # shellcheck disable=SC2088  # the heredoc below greps for the literal "~/..." spelling in docs
 while IFS= read -r ref; do
   [ -n "$ref" ] || continue
   runtime_path "$ref" && continue
   external_path "$ref" && continue
+  install_generated "$ref" && continue
   src=$(src_for "$ref")
   if [ -z "$src" ]; then
     errs="$errs\n$ref: no install.sh rule puts anything there, and it is not declared foreign"
@@ -1257,7 +1287,7 @@ $(grep -rhoE '~/[A-Za-z0-9._/-]+' \
     README.md claude/commands claude/agents claude/skills 2>/dev/null \
   | sed 's#[.,:;)`"]*$##; s#/$##' | sort -u)
 EOF
-[ -z "$errs" ] && ok "referenced install paths exist" \
+[ -z "$errs" ] && ok "referenced install paths exist ($ig_n install_generated entr$([ "$ig_n" = 1 ] && printf y || printf ies) floored)" \
   || bad "referenced install paths exist" "$(printf '%b' "$errs")"
 
 # --- 21. install.sh only deletes keys this repo actually retired -------------------------------
