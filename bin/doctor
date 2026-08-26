@@ -144,6 +144,54 @@ run_drift() {
     nfam=$((nfam + 1))
   done
   family_floor "bin" "$nfam"; nfam=0
+  # mcp servers. Merged into $CJSON's mcpServers map by install.sh, not copied byte-for-byte, so
+  # this compares by key and value against the live merge target rather than diffing files the
+  # way check_item does above. Until now, run_drift() never read mcp/servers.json at all -- a
+  # server added, removed or edited here compared identical to baseline forever (confirmed by
+  # tests/inventory-fixture.sh's mcp_servers row: a planted server, exit=0, compared=$COMPARED
+  # unchanged). Same family_floor discipline as every glob above: an empty or missing
+  # mcp/servers.json is a drift finding, not a silent zero.
+  if [ -f "$REPO/mcp/servers.json" ] && command -v jq >/dev/null 2>&1; then
+    mcp_want=$(sed "s|__HOME__|$HOME|g" "$REPO/mcp/servers.json")
+    for m in $(printf '%s' "$mcp_want" | jq -r 'keys[]' 2>/dev/null); do
+      nfam=$((nfam + 1))
+      COMPARED=$((COMPARED + 1))
+      if [ ! -f "$CJSON" ]; then
+        echo "missing   mcp/servers.json:$m  (not installed at $CJSON)"
+        DRIFT=1
+        continue
+      fi
+      w=$(printf '%s' "$mcp_want" | jq -cS --arg m "$m" '.[$m]' 2>/dev/null)
+      h_raw=$(jq -cS --arg m "$m" '.mcpServers[$m] // empty' "$CJSON" 2>/dev/null)
+      if [ -z "$h_raw" ] || [ "$h_raw" = "null" ]; then
+        echo "missing   mcp/servers.json:$m  (not registered in $CJSON)"
+        DRIFT=1
+      else
+        # Compare only the keys this repo declares. install.sh MERGES into an existing
+        # mcpServers map rather than overwriting it, and the merge target legitimately carries
+        # keys the repo never stated -- Claude Code writes `"env": {}` into every entry it
+        # registers, so a byte-equal comparison reported `differs` for context7 on every machine
+        # where the installer had ever run. A check that is red on a correct install is the same
+        # defect as one that is green on a broken one; it just fails in the direction that gets
+        # it ignored rather than trusted.
+        #
+        # Declared key missing from the installed entry, or present with a different value, is
+        # still drift. Extra keys belong to the merge target and are not this repo's business.
+        wk=$(printf '%s' "$w" | jq -c 'keys' 2>/dev/null)
+        h=$(printf '%s' "$h_raw" | jq -cS --argjson k "$wk" 'with_entries(select(.key as $x | $k | index($x)))' 2>/dev/null)
+        if [ "$h" != "$w" ]; then
+          echo "differs   mcp/servers.json:$m  (declared keys: $h vs wanted $w, in $CJSON)"
+          DRIFT=1
+        fi
+      fi
+    done
+    family_floor "mcp/servers.json" "$nfam"; nfam=0
+  elif [ -f "$REPO/mcp/servers.json" ]; then
+    echo "error     mcp/servers.json  (jq not found, cannot compare)"
+    DRIFT=1
+  else
+    family_floor "mcp/servers.json" "0"
+  fi
   # install.sh calls CLAUDE.md "the file most likely to have been hand-edited on a machine that
   # has been running a while", and it was the one file --drift never looked at. Hand-edit it,
   # get "no drift", then lose the edit on the next update. Same for the statusline and the

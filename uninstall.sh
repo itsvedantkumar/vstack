@@ -278,7 +278,68 @@ if [ -n "$KEPT_COLLISION" ]; then
   printf '%s' "$KEPT_COLLISION" | while IFS= read -r k; do [ -n "$k" ] && echo "         $k"; done
 fi
 
-if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ]; then
+# --- mcp servers: unpick vstack's own entries from ~/.claude.json, leave everything else -------
+#
+# install.sh merges cloudflare-mcp and context7 into the GLOBAL mcpServers map and never removes
+# either, so leaving this file alone -- the way settings.json used to be left alone -- broke the
+# same promise the same way: a removed vstack left two mcpServers entries behind, one of them
+# (cloudflare-mcp) pointing at a wrapper the bin/ removal pass above had just deleted. Claude Code
+# then tries to spawn a stdio command that no longer exists on every session.
+#
+# Ownership follows the install-time backup of this exact file, the same signal the file-removal
+# pass above uses ("present in the backup" = "was here before vstack touched it"): a key vstack
+# ships is removed only if THIS backup's claude.json did not already have it, and only if the
+# live value still equals what vstack currently ships -- a value the user has since edited is
+# kept and named, never silently overwritten or deleted, same as an edited settings.json key
+# above. A key that predates the install (your own context7, say) is never touched: install.sh's
+# merge may already have folded some of vstack's fields into it on key collision, but its
+# existence in the backup is what says it was yours first.
+#
+# Classified here -- before the --dry-run/plan-only exits below -- rather than down in the
+# execute section where it used to live: `--dry-run` and the bare "print the plan" mode are
+# this script's entire documented contract for "show me before it happens", and this was the
+# one part of the plan that mode never showed, because it lived after both early exits and only
+# ever ran for real. The classification itself (kept-preexisting / kept-edited / remove) depends
+# on $origm having the key, not on whether the whole-file restore above has run yet, so computing
+# it here and computing it after that restore agree on every key that predates this install; the
+# one case they can differ on -- a key install.sh added fresh AND a prior .claude.json backup
+# exists -- is a key the whole-file restore below deletes outright either way (the backup never
+# had it), so "remove" printed here is still an accurate prediction of the file's final state,
+# just not a claim about which of the two mechanisms below performs it. Only the WRITE stays
+# gated on real execution (`$DRY = 0` and `$YES = 1`); the classification and its echo lines run
+# unconditionally, the same way plan_file_removal's own "remove ..." lines do above.
+MCP_REMOVE=""
+if command -v jq >/dev/null 2>&1 && [ -f "$CJSON" ] && [ -f "$SRC/mcp/servers.json" ]; then
+  mship=$(mktemp); morig=$(mktemp)
+  sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$mship"
+  if [ -f "$BK/claude.json" ]; then cat "$BK/claude.json" > "$morig"; else printf '{}\n' > "$morig"; fi
+  while IFS=$'\t' read -r mstatus mkey; do
+    [ -n "$mkey" ] || continue
+    case "$mstatus" in
+      remove)
+        MCP_REMOVE="$MCP_REMOVE $mkey"
+        echo "remove   mcpServers.$mkey in $CJSON  (installed by vstack, not present in backup)" ;;
+      kept-preexisting)
+        echo "keeping  mcpServers.$mkey in $CJSON  (present before vstack installed it)" ;;
+      kept-edited)
+        echo "keeping  mcpServers.$mkey in $CJSON  (edited since install, not vstack's alone to remove)" ;;
+    esac
+  done < <(jq -s -r '
+      . as [$live, $ship, $orig]
+      | $ship as $shipm
+      | ($orig.mcpServers // {}) as $origm
+      | ($live.mcpServers // {}) as $livem
+      | ($shipm | keys_unsorted[]) as $k
+      | select($livem | has($k))
+      | if ($origm | has($k)) then "kept-preexisting\t\($k)"
+        elif ($livem[$k] == $shipm[$k]) then "remove\t\($k)"
+        else "kept-edited\t\($k)"
+        end
+    ' "$CJSON" "$mship" "$morig" 2>/dev/null)
+  rm -f "$mship" "$morig"
+fi
+
+if [ "$PLAN_EMPTY" = 1 ] && [ -z "$REMOVE_LIST" ] && [ -z "$FILE_REMOVE_LIST" ] && [ -z "$MCP_REMOVE" ]; then
   echo "(backup is empty — nothing to restore)"
 fi
 
@@ -396,66 +457,26 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CDIR/settings.json" ] && [ -f "$SRC/c
   rm -f "$utmp"
 fi
 
-# --- mcp servers: unpick vstack's own entries from ~/.claude.json, leave everything else -------
-#
-# install.sh merges cloudflare-mcp and context7 into the GLOBAL mcpServers map and never removes
-# either, so leaving this file alone -- the way settings.json used to be left alone -- broke the
-# same promise the same way: a removed vstack left two mcpServers entries behind, one of them
-# (cloudflare-mcp) pointing at a wrapper the bin/ removal pass above had just deleted. Claude Code
-# then tries to spawn a stdio command that no longer exists on every session.
-#
-# Ownership follows the install-time backup of this exact file, the same signal the file-removal
-# pass above uses ("present in the backup" = "was here before vstack touched it"): a key vstack
-# ships is removed only if THIS backup's claude.json did not already have it, and only if the
-# live value still equals what vstack currently ships -- a value the user has since edited is
-# kept and named, never silently overwritten or deleted, same as an edited settings.json key
-# above. A key that predates the install (your own context7, say) is never touched: install.sh's
-# merge may already have folded some of vstack's fields into it on key collision, but its
-# existence in the backup is what says it was yours first.
-if command -v jq >/dev/null 2>&1 && [ -f "$CJSON" ] && [ -f "$SRC/mcp/servers.json" ]; then
-  mship=$(mktemp); morig=$(mktemp)
-  sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$mship"
-  if [ -f "$BK/claude.json" ]; then cat "$BK/claude.json" > "$morig"; else printf '{}\n' > "$morig"; fi
-  MCP_REMOVE=""
-  while IFS=$'\t' read -r mstatus mkey; do
-    [ -n "$mkey" ] || continue
-    case "$mstatus" in
-      remove)
-        MCP_REMOVE="$MCP_REMOVE $mkey"
-        echo "remove   mcpServers.$mkey in $CJSON  (installed by vstack, not present in backup)" ;;
-      kept-preexisting)
-        echo "keeping  mcpServers.$mkey in $CJSON  (present before vstack installed it)" ;;
-      kept-edited)
-        echo "keeping  mcpServers.$mkey in $CJSON  (edited since install, not vstack's alone to remove)" ;;
-    esac
-  done < <(jq -s -r '
-      . as [$live, $ship, $orig]
-      | $ship as $shipm
-      | ($orig.mcpServers // {}) as $origm
-      | ($live.mcpServers // {}) as $livem
-      | ($shipm | keys_unsorted[]) as $k
-      | select($livem | has($k))
-      | if ($origm | has($k)) then "kept-preexisting\t\($k)"
-        elif ($livem[$k] == $shipm[$k]) then "remove\t\($k)"
-        else "kept-edited\t\($k)"
-        end
-    ' "$CJSON" "$mship" "$morig" 2>/dev/null)
-  if [ -n "$MCP_REMOVE" ]; then
-    back "$CJSON"
-    mtmp=$(mktemp)
-    # shellcheck disable=SC2086  # $MCP_REMOVE is a space-separated list of our own key names
-    # (never containing spaces) and has to word-split here to become one -R value per line.
-    mkeys=$(printf '%s\n' $MCP_REMOVE | jq -R . | jq -s .)
-    if jq --argjson keys "$mkeys" '
-        .mcpServers = ((.mcpServers // {}) | with_entries(select(([.key] | inside($keys)) | not)))
-        | if ((.mcpServers // {}) | length) == 0 then del(.mcpServers) else . end
-      ' "$CJSON" > "$mtmp" && jq -e . "$mtmp" >/dev/null 2>&1; then
-      cat "$mtmp" > "$CJSON"
-      echo "cleaned  $CJSON (vstack mcpServers entries removed:$MCP_REMOVE)"
-    fi
-    rm -f "$mtmp"
+# The mcp write itself: gated on real execution ($DRY = 0, $YES = 1 both already true by this
+# point in the script -- the two early exits above return before reaching here otherwise). Left
+# as a separate block, not folded into the classification pass above, so the actual mutation
+# runs against $CJSON as it stands right here -- after the whole-file restore in the execute
+# section above has already run, exactly where this write ran before the classification (and its
+# preview echo lines) moved earlier in the script; only the printing moved, not the mutation.
+if [ -n "$MCP_REMOVE" ]; then
+  back "$CJSON"
+  mtmp=$(mktemp)
+  # shellcheck disable=SC2086  # $MCP_REMOVE is a space-separated list of our own key names
+  # (never containing spaces) and has to word-split here to become one -R value per line.
+  mkeys=$(printf '%s\n' $MCP_REMOVE | jq -R . | jq -s .)
+  if jq --argjson keys "$mkeys" '
+      .mcpServers = ((.mcpServers // {}) | with_entries(select(([.key] | inside($keys)) | not)))
+      | if ((.mcpServers // {}) | length) == 0 then del(.mcpServers) else . end
+    ' "$CJSON" > "$mtmp" && jq -e . "$mtmp" >/dev/null 2>&1; then
+    cat "$mtmp" > "$CJSON"
+    echo "cleaned  $CJSON (vstack mcpServers entries removed:$MCP_REMOVE)"
   fi
-  rm -f "$mship" "$morig"
+  rm -f "$mtmp"
 fi
 
 # --- the ownership record -----------------------------------------------------------------------

@@ -465,6 +465,153 @@ fi
 rm -rf "$WT" 2>/dev/null
 
 hr
+say "=== mcp_servers: the weakest-covered inventory family (tests/inventory-fixture.sh's finding) ==="
+hr
+say "(bin/doctor's run_drift() never read mcp/servers.json at all -- a planted/edited server"
+say " compared identical to baseline forever. uninstall.sh --dry-run never mentioned an mcp"
+say " entry, not because it is out of scope -- the unpick logic that decides remove/keep was"
+say " always correct, it just lived after both early exits and only printed for real --yes"
+say " runs. Both below.)"
+
+if ! command -v jq >/dev/null 2>&1; then
+  say "SKIP  [mcp_servers coverage] jq not on PATH -- both bin/doctor and uninstall.sh's mcp"
+  say "      lanes no-op without it, nothing to regress-test"
+else
+
+hr
+say "--- bin/doctor --drift ---"
+hr
+# opinionated, not core: bin/doctor --drift compares against the FULL repo tree regardless of
+# which profile installed (it has no profile awareness of its own), so a profile-limited
+# install (core, ui, team) always reports drift for the skills/CLAUDE.md it deliberately never
+# copied -- a real, pre-existing, unrelated-to-mcp limitation. opinionated installs everything
+# doctor expects, giving a genuinely clean baseline to drift the mcp comparison off of.
+new_sandbox
+HOME="$HOME" VSTACK_PROFILE=opinionated "$SRC/install.sh" >/dev/null 2>&1
+mcp_key=$(jq -r 'keys[0]' "$SRC/mcp/servers.json")
+
+HOME="$HOME" "$SRC/bin/doctor" --drift >/dev/null 2>&1; base_rc=$?
+check "mcp drift: clean install, doctor --drift reports no drift" "0" "$base_rc" \
+  "$([ "$base_rc" = 0 ] && echo 0 || echo 1)"
+
+# Remove one vstack-registered key from the INSTALLED .claude.json -- the shape of real drift:
+# something (a hand-edit, a stale copy, a half-finished manual cleanup) diverged the machine
+# from what mcp/servers.json declares, same as check_item's "missing" case for every other
+# family's files.
+tmp=$(mktemp)
+jq --arg k "$mcp_key" 'del(.mcpServers[$k])' "$HOME/.claude.json" > "$tmp" && cat "$tmp" > "$HOME/.claude.json"
+rm -f "$tmp"
+missing_out=$(HOME="$HOME" "$SRC/bin/doctor" --drift 2>&1); missing_rc=$?
+check "mcp drift: a removed mcpServers key is reported, not silently identical to baseline" \
+  "exit!=0, names mcp/servers.json:$mcp_key" "exit=$missing_rc: $(printf '%s' "$missing_out" | grep "mcp/servers.json" | head -1)" \
+  "$([ "$missing_rc" != 0 ] && printf '%s' "$missing_out" | grep -q "mcp/servers.json:$mcp_key" && echo 0 || echo 1)"
+
+# Restore the key but change its value -- must read as "differs", not "missing", and must still
+# trip drift. Regression for the same run_drift() gap: a changed command/args is exactly the
+# kind of edit that used to compare identical to baseline forever.
+tmp=$(mktemp)
+jq --arg k "$mcp_key" '.mcpServers[$k].args = ["--vstack-fixture-drift"]' "$HOME/.claude.json" > "$tmp" && cat "$tmp" > "$HOME/.claude.json"
+rm -f "$tmp"
+differs_out=$(HOME="$HOME" "$SRC/bin/doctor" --drift 2>&1); differs_rc=$?
+check "mcp drift: a changed mcpServers value is reported" \
+  "exit!=0, names mcp/servers.json:$mcp_key" "exit=$differs_rc: $(printf '%s' "$differs_out" | grep "mcp/servers.json" | head -1)" \
+  "$([ "$differs_rc" != 0 ] && printf '%s' "$differs_out" | grep -q "mcp/servers.json:$mcp_key" && echo 0 || echo 1)"
+rm -rf "$SBOX"
+
+# family_floor: a $REPO whose mcp/servers.json ships zero servers must be a drift finding, not
+# a silent zero -- the exact discipline the other four globs already carry (see run_drift()'s
+# own comment about the claude/skills/ incident this floor exists to prevent).
+FIXREPO=$(mktemp -d)
+mkdir -p "$FIXREPO/claude" "$FIXREPO/mcp"
+printf '{}\n' > "$FIXREPO/claude/settings.json"
+printf '{}\n' > "$FIXREPO/mcp/servers.json"
+new_sandbox
+floor_out=$(VSTACK_DIR="$FIXREPO" HOME="$HOME" "$SRC/bin/doctor" --drift 2>&1); floor_rc=$?
+check "mcp drift: an empty mcp/servers.json family is an error, not a silent zero" \
+  "exit!=0, names 'mcp/servers.json' + 'nothing to compare'" \
+  "exit=$floor_rc: $(printf '%s' "$floor_out" | grep "mcp/servers.json" | head -1)" \
+  "$([ "$floor_rc" != 0 ] && printf '%s' "$floor_out" | grep -q "mcp/servers.json.*nothing to compare" && echo 0 || echo 1)"
+rm -rf "$SBOX" "$FIXREPO"
+
+hr
+say "--- uninstall.sh --dry-run / plan-only ---"
+hr
+new_sandbox
+HOME="$HOME" VSTACK_PROFILE=core "$SRC/install.sh" >/dev/null 2>&1
+mcp_key=$(jq -r 'keys[0]' "$SRC/mcp/servers.json")
+
+dry_out=$(HOME="$HOME" "$SRC/uninstall.sh" --dry-run 2>&1)
+check "mcp uninstall --dry-run: mentions the vstack-installed mcpServers key" \
+  "mentions mcpServers.$mcp_key" "$(printf '%s' "$dry_out" | grep 'mcpServers' | head -1)" \
+  "$(printf '%s' "$dry_out" | grep -q "mcpServers\.$mcp_key" && echo 0 || echo 1)"
+check "mcp uninstall --dry-run: still a dry run, .claude.json unchanged on disk" \
+  "mcpServers.$mcp_key still present" "$(jq -e --arg k "$mcp_key" '.mcpServers | has($k)' "$HOME/.claude.json")" \
+  "$(jq -e --arg k "$mcp_key" '.mcpServers | has($k)' "$HOME/.claude.json" >/dev/null 2>&1 && echo 0 || echo 1)"
+
+# The bare "print the plan" mode (no --dry-run, no --yes) is documented to show the same plan;
+# it must not silently omit the mcp entry either.
+plan_out=$(HOME="$HOME" "$SRC/uninstall.sh" 2>&1)
+check "mcp uninstall (plan-only, no flags): also mentions the mcpServers key" \
+  "mentions mcpServers.$mcp_key" "$(printf '%s' "$plan_out" | grep 'mcpServers' | head -1)" \
+  "$(printf '%s' "$plan_out" | grep -q "mcpServers\.$mcp_key" && echo 0 || echo 1)"
+
+# Round trip: --yes must actually remove it, not just mention it.
+HOME="$HOME" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
+yes_rc=$?
+check "mcp uninstall --yes: exits 0" "0" "$yes_rc" "$([ "$yes_rc" = 0 ] && echo 0 || echo 1)"
+check "mcp uninstall --yes: the vstack mcpServers key is actually gone" \
+  "mcpServers.$mcp_key absent" \
+  "$(jq -e --arg k "$mcp_key" '.mcpServers // {} | has($k)' "$HOME/.claude.json" 2>/dev/null)" \
+  "$(jq -e --arg k "$mcp_key" '(.mcpServers // {}) | has($k)' "$HOME/.claude.json" 2>/dev/null | grep -qx true && echo 1 || echo 0)"
+rm -rf "$SBOX"
+
+hr
+say "--- a user's own pre-existing mcp server survives, and dry-run says why ---"
+hr
+say "(two shapes of pre-existing: an unrelated key name, never in mcp/servers.json's own key"
+say " set so the classification loop never even considers it; and the more interesting one --"
+say " the user's OWN definition of a name vstack ALSO ships, e.g. their own context7, which"
+say " install.sh's merge overwrites live -- \"kept-preexisting\" is the promise that uninstall"
+say " gives that original definition back, not vstack's.)"
+new_sandbox
+mkdir -p "$HOME"
+printf '{"mcpServers":{"my-own-server":{"type":"stdio","command":"my-own-binary","args":[]}}}\n' > "$HOME/.claude.json"
+mcp_key=$(jq -r 'keys[0]' "$SRC/mcp/servers.json")
+tmp=$(mktemp)
+jq --arg k "$mcp_key" '.mcpServers[$k] = {"type":"stdio","command":"my-own-'"$mcp_key"'-binary","args":[]}' \
+  "$HOME/.claude.json" > "$tmp" && cat "$tmp" > "$HOME/.claude.json"
+rm -f "$tmp"
+HOME="$HOME" VSTACK_PROFILE=core "$SRC/install.sh" >/dev/null 2>&1
+# install.sh's merge: "ours win on key collision" -- confirm the live file really was
+# overwritten, or "kept-preexisting" below is a test of nothing.
+overwritten=$(jq -r --arg k "$mcp_key" '.mcpServers[$k].command' "$HOME/.claude.json" 2>/dev/null)
+check "mcp pre-existing: install.sh really did overwrite the user's own $mcp_key on collision" \
+  "not my-own-$mcp_key-binary (vstack's own command)" "$overwritten" \
+  "$([ "$overwritten" != "my-own-$mcp_key-binary" ] && echo 0 || echo 1)"
+
+own_dry=$(HOME="$HOME" "$SRC/uninstall.sh" --dry-run 2>&1)
+check "mcp uninstall --dry-run: an unrelated user key is never in vstack's plan at all" \
+  "no mention" "$(printf '%s' "$own_dry" | grep 'my-own-server')" \
+  "$(printf '%s' "$own_dry" | grep -q 'my-own-server' && echo 1 || echo 0)"
+check "mcp uninstall --dry-run: the user's own pre-existing $mcp_key is named kept, not removed" \
+  "keeping mcpServers.$mcp_key ... present before vstack installed it" \
+  "$(printf '%s' "$own_dry" | grep "mcpServers.$mcp_key")" \
+  "$(printf '%s' "$own_dry" | grep -q "keeping.*mcpServers\.$mcp_key.*present before vstack installed it" && echo 0 || echo 1)"
+
+HOME="$HOME" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
+check "mcp uninstall --yes: the unrelated user key survives for real" \
+  "present, unedited" \
+  "$(jq -e '.mcpServers["my-own-server"].command' "$HOME/.claude.json" 2>/dev/null)" \
+  "$(jq -e '.mcpServers["my-own-server"].command == "my-own-binary"' "$HOME/.claude.json" 2>/dev/null | grep -qx true && echo 0 || echo 1)"
+check "mcp uninstall --yes: the user's own $mcp_key definition, not vstack's, comes back" \
+  "my-own-$mcp_key-binary" \
+  "$(jq -r --arg k "$mcp_key" '.mcpServers[$k].command' "$HOME/.claude.json" 2>/dev/null)" \
+  "$([ "$(jq -r --arg k "$mcp_key" '.mcpServers[$k].command' "$HOME/.claude.json" 2>/dev/null)" = "my-own-$mcp_key-binary" ] && echo 0 || echo 1)"
+rm -rf "$SBOX"
+
+fi   # jq present
+
+hr
 say "checks run: $CHECK_N   failed: $FAIL"
 if [ "$FAIL" -gt 0 ]; then
   say "RESULT: FAIL -- install.sh profile support and/or its uninstall join has a defect"
