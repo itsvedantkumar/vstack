@@ -8,9 +8,9 @@ a linked worktree of this repo and comparing both from each side:
 
 ```
 main git-dir:      .git
-worktree git-dir:   /Users/vk/Projects/vstack/.git/worktrees/wt1
+worktree git-dir:   /Users/you/Projects/vstack/.git/worktrees/wt1
 main common-dir:    .git
-worktree common-dir: /Users/vk/Projects/vstack/.git   (identical, resolved absolute)
+worktree common-dir: /Users/you/Projects/vstack/.git   (identical, resolved absolute)
 `git worktree list` — byte-identical output from both locations, including a THIRD, unrelated
   worktree (/private/tmp/vstack-falsify-19bd268) neither side was told about directly.
 ```

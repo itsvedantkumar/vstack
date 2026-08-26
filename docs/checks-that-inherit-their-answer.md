@@ -87,3 +87,8 @@ shape will produce a seventh instance next month in a check nobody has written y
   defect, which is that neither is connected to the outcome it names.
 - What that survey changed, and did not, is in
   [`research/what-we-changed-2026-08-22.md`](research/what-we-changed-2026-08-22.md).
+- A guard can inherit its answer from the wrong scope rather than the wrong source. The
+  falsifiability lock keyed on `git rev-parse --git-dir`, which returns a different path inside
+  every linked worktree, so two sessions each held a lock neither could see and both believed
+  they had the tree to themselves. Measured, with the resolution, in
+  [`worktree-collision-detection.md`](worktree-collision-detection.md).
