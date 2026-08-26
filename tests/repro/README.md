@@ -21,6 +21,7 @@ gate.
 
 | `tests/repro/compat-canary.sh` | Every hook parsed Claude Code's payload with `jq ... // empty` and no else branch, so a renamed field or an unrecognised `hook_event_name` degraded to the same silent exit 0 as nothing happening. No hook or `bin/doctor` checked the Claude version at all. | fixed 1.46.0 |
 | `tests/repro/worktree-collision.sh` | Harness save/restore had no refusal on a changed file and the falsifiability lock is keyed on `git rev-parse --git-dir`, which differs per linked worktree, so two sessions each held a lock neither could see. | fixed 1.46.0 |
+| `tests/repro/backup-self-claim.sh` | `install.sh`'s `back()` asks the ownership record whether an earlier install claimed the path, two lines after its own `own "$1"` wrote that path into the record. The guard matched everything, `back()` returned before its `cp`, and no file was ever backed up. `$BK` was still created, still printed on the last line as `backup: <path>`, and empty. | fixed 1.46.0 |
 | `tests/repro/lock-anchor.sh` | The three remaining `--git-dir` lock anchors, red until they move to `--git-common-dir`. | open |
 
 Run one directly. There are no arguments and no fixtures to prepare:

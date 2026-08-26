@@ -390,6 +390,15 @@ back(){ [ "$DRY" = 1 ] && return 0
   # with no skills (core) never tripped this, because with $OWNED_PATHS never created at all,
   # owns_path()'s missing-file branch fell back to "assume everything", the pre-1.46.0 behaviour
   # -- the right answer by accident, not because ownership was actually being recorded.
+  # Read the ownership guard's answer BEFORE own() supplies it. own() appends $1 to
+  # $OWNED_PATHS, so the check further down -- which asks "did an EARLIER install claim this
+  # path" -- was reading a line this call had just written, matched every path on every run,
+  # and returned before its `cp`. Nothing was ever backed up. $BK was still created, still
+  # announced on install.sh's last line, and still empty. Ordering is the whole fix: own() must
+  # stay above the `[ -f "$1" ]` guard (see the paragraph above) and the ownership question must
+  # be asked above own().
+  _pre_owned=0
+  if [ -f "$OWNED_PATHS" ] && grep -qxF "$1" "$OWNED_PATHS"; then _pre_owned=1; fi
   own "$1"
   [ -f "$1" ] || return 0
   # Two independent ways to know $1 is vstack's own and must NOT be recorded as pre-existing
@@ -408,7 +417,7 @@ back(){ [ "$DRY" = 1 ] && return 0
   # The trade, stated: a user file whose bytes exactly equal vstack's is indistinguishable from
   # vstack's and is treated as vstack's, so uninstall deletes it. What is lost is content this
   # repo still ships verbatim. The alternative loses the ability to uninstall at all.
-  if [ -f "$OWNED_PATHS" ] && grep -qxF "$1" "$OWNED_PATHS"; then return 0; fi
+  if [ "$_pre_owned" = 1 ]; then return 0; fi
   if [ -n "${2:-}" ] && [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
   # Paths under $HOME are stored HOME-relative so uninstall can map them back. A config dir
   # moved outside $HOME by CLAUDE_CONFIG_DIR has no such relative form, so it is stored under

@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The twelve
+## The thirteen
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -119,6 +119,23 @@ program. **A discipline that has to be remembered is not a control**, and this c
 two entries -- this and the empty-directory one -- where the defect was in how a true statement
 was read rather than in whether it was true.
 
+**The backup directory that exists and is empty.** `install.sh` ends a successful run with
+`backup: /Users/you/.config/agents/backups/install-20260827-051816`, and `abort_note` promises that
+"every file this run touched was copied there first". Both statements were true about the
+directory and false about its contents. `back()` calls `own "$1"`, which appends the path to the
+ownership record, and then asks that record whether an *earlier* install claimed the path. It had:
+two lines up, in this run. The guard matched every path on every call and `back()` returned before
+its `cp`. No file was ever backed up, on any machine, from the moment the ordering changed. What
+makes it belong here rather than in a changelog is the reporting: the directory is real, the path
+is real, the announcement is accurate, and the only thing missing is the thing the announcement is
+for. `.claude/verify.sh` was `48 declared, 48 ran, 0 skipped, VERIFIED` throughout, which is not a
+gate defect -- install lanes belong to `tests/install-matrix.sh` by a stated division -- and the
+matrix did go red, on all three platforms, within fifteen minutes of the push. It was read
+fourteen hours later. The check worked; nobody read the remote. Pinned by
+[`../tests/repro/backup-self-claim.sh`](../tests/repro/backup-self-claim.sh), which asserts the
+copy's *bytes*, because a directory containing a post-overwrite copy is the same lie one level
+down.
+
 ## The test
 
 Before believing any check, ask: **what in the environment could make this print `ok` without
@@ -153,7 +170,8 @@ The generalisation is worth more than any individual fix: the fixes are six line
 shape will produce a seventh instance next month in a check nobody has written yet.
 
 It produced five, in two days, five weeks early. Four of the last five were found on 2026-08-26, in
-an audit looking for something else, and the fifth on 2026-08-27 by committing it. One of them had been inert since the guard was
+an audit looking for something else, and the fifth on 2026-08-27 by committing it. The sixth
+that day was found by a remote CI job that had been red for fourteen hours. One of them had been inert since the guard was
 written, and the last of the four was found by a positive control rather than by the check written
 for that exact purpose, which passed. Reread this page before trusting a check you did not watch
 fail.

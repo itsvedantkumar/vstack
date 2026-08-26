@@ -74,8 +74,8 @@ Three `principle-*` skills fire at or near 0/10 and are named here rather than o
   was reverted rather than shipped, and the failure is recorded rather than retried silently.
 
 **Six checks were found in one day printing `ok` while measuring nothing they controlled.** On
-2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents twelve now;
-the six added since are not restated here, because this section is dated and the catalogue is the
+2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents thirteen now;
+the seven added since are not restated here, because this section is dated and the catalogue is the
 place that stays current:
 
 - An anchor a prose edit silently moved (check 18, blind for eleven commits).
@@ -91,7 +91,7 @@ place that stays current:
 
 This is the closest thing this repository has to a stress test of the "all checks falsifiable"
 claim in category 1. It found the claim true only after finding six ways it had quietly stopped
-being true. The catalogue has since reached twelve, and by its own dating five of those were found across
+being true. The catalogue has since reached thirteen, and by its own dating six of those were found across
 2026-08-26 and 2026-08-27, so the rate that document predicted at roughly one a month is
 understated by about an order of magnitude. The twelfth is the one worth reading: no check was
 wrong, no mutation would have caught it, and the suite was green throughout. What failed was a

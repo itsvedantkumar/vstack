@@ -296,7 +296,7 @@ the seeding over-claim under a non-default profile, ownership disagreeing with c
 identity between `opinionated` and the no-argument default. Each fix was reverted alone and watched
 turn exactly one check red.
 
-### The catalogue goes from six to twelve
+### The catalogue goes from six to thirteen
 
 `docs/checks-that-inherit-their-answer.md` closed by predicting a seventh instance next month. It
 got four in a day, five weeks early: the guard decision nothing downstream honoured, check 18's cap
@@ -304,7 +304,7 @@ clearing by one byte because the injected block embeds the absolute repository p
 whose no-op control inverted the moment its own fix was committed, and an ownership record that
 read the repository's contents as a report of what had been installed.
 
-Then two more, and both are a different shape from the first ten. Neither was a check that
+Then three more. The first two are a different shape from the first ten. Neither was a check that
 measured the wrong thing. Both were a **true statement read as the answer to a different
 question**, which no mutation can catch and which the falsifiability suite was green throughout.
 
@@ -325,6 +325,29 @@ reading reached a commit message here as `VERIFIED`, in a commit about labels ov
 assert. The exit code was right the whole time; nothing read it. Refusals now end with `NOT RUN` in
 the position a real run puts `VERIFIED`, and check 14 asserts the refusal's *last* line, not just
 its first. **A discipline that has to be remembered is not a control.**
+
+Thirteen: `install.sh` backed up nothing, and said otherwise on its last line. `back()` calls
+`own "$1"`, which writes the path into the ownership record, and then asks that record whether an
+earlier install claimed the path. It had, two lines up, in this run. Every call matched and
+returned before its `cp`. The backup directory was still created, still announced as
+`backup: <path>`, and empty; `abort_note` still promised that every file the run touched was copied
+there first. `tests/install-matrix.sh` caught it on all three platforms within fifteen minutes of
+the push and was read fourteen hours later. Pinned by `tests/repro/backup-self-claim.sh`, which
+asserts the copy's bytes rather than its existence, and which was watched going red against the
+unfixed `install.sh` in a detached worktree before the fix landed.
+
+### `back()` asked a question it had already answered
+
+Separate from the catalogue entry, because the fix is worth stating on its own: the ordering is the
+whole bug. `own()` must run above the `[ -f "$1" ] || return 0` guard -- a first-ever install has
+nothing at `$1` yet, and returning there without recording ownership is what left `uninstall.sh`
+keeping every hook, agent and command a `--yes` uninstall was supposed to remove. The ownership
+*question* must run above `own()`. Those two constraints are not in conflict and the first
+revision satisfied only one of them. `back()` now reads the record into `_pre_owned` before
+claiming anything, so "an earlier install owns this" means an earlier install.
+
+Reaching this needed a `git worktree` at `HEAD`: the repo's own guard refuses a bare `git stash`,
+correctly, because this checkout is shared.
 
 ### `payload_digest` hashed no bytes, and read its own recipe out of the file it was checking
 
