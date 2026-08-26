@@ -11,11 +11,12 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "3f1d02061b319a07e3773463c3fa428dedd5b542",
-    "payload_digest": "6f8443f9f0ad5b16253e2514ac0f627fdeb9ce0b1c5904381c7d996d3b9ac71d",
+    "head": "764df6f7d6c72d20078a48de0f77263d1cc3c443",
+    "payload_digest": "1948731fc8c233c521e7fcc1493334eb6c648d4e1f1bee8723b96774ca67defb",
     "digest_recipe": "{ git ls-files -s -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; git status --porcelain -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; } | shasum -a 256",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
     "concurrency_warning": "Derived from a working tree that other agents were editing at the same time. Any consumer that trusts these numbers without regenerating them is the defect this file exists to catch.",
+    "head_note": "head names the commit payload_digest was computed FROM, not the commit that carries this file -- the latter cannot be recorded from inside the file, for the same fixed-point reason self_reference_note gives about the digest. Nothing validates this field today: grep for derived_at.head across tests/ and .claude/ returns nothing, so it is a recorded claim with no check behind it. Treat it as provenance, not as an assertion.",
     "self_reference_note": "claude/inventory.json lives inside claude/, which this recipe scans, so the recipe excludes the file's own path with a git pathspec. Without that exclusion the digest could never match itself: committing the file changes its own blob hash, which changes the scanned tree, which changes the digest the file is trying to record -- a fixed point that cannot be reached by editing the file. Excluding the file's own path makes payload_digest mean \"did the shippable payload move\", not \"did this contract about the payload move\", which is also the more honest reading of the field's name.",
     "computation_discipline": "The recipe includes git status --porcelain, so it is sensitive to UNCOMMITTED changes in whatever checkout computes it -- including files this contract does not otherwise care about, as long as they fall under the scanned paths. Computing it in a shared checkout while another agent's unrelated edit (e.g. install.sh) sits uncommitted bakes that edit's presence into payload_digest, producing a value a clean worktree of the same commit will never reproduce. Recompute payload_digest from a clean worktree (git status --porcelain empty) of the commit being recorded, never from a dirty shared checkout."
   },
