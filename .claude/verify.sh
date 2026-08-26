@@ -883,7 +883,86 @@ if command -v jq >/dev/null; then
     [ "$2" -le "$4" ] || errs="$errs\n$1: $2 bytes exceeds the $4 byte cap"
   }
   chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)"  128  512
-  chk "session baseline"       "$(probe SessionStart '' '')"    1024 4096
+
+  # The SessionStart baseline is the one probe that reaches the WORKSPACE CONVENTIONS block
+  # (claude/hooks/inject-session-context.sh, "Repo root: $root - branch: $branch"). $root is
+  # spliced in twice (the "Repo root:" line and the `$root/.context/` scratch-space line) and
+  # $branch once, and both are genuinely environment text -- whatever this checkout's absolute
+  # path and current branch happen to be, not prose this repo controls. A raw byte cap over that
+  # output is a cap over the operator's directory name: a normal working checkout measured 4092 B
+  # on a named branch, and the exact same commit measured 4103 B in a git worktree under a longer
+  # temp-directory path on a detached HEAD -- 11 bytes of pure path/branch noise against a 4096 B
+  # cap that had one byte of headroom. A clone two characters longer, or a longer branch name,
+  # turns a clean tree red on every machine but the one it happened to be written on.
+  #
+  # Fix: normalize before capping. The hook truncates $root to <=160 bytes and $branch to <=80
+  # bytes before splicing (`tr -cd ... | head -c 160` / `head -c 80`), so the worst those two
+  # variables can ever contribute is fixed and known regardless of where this check runs. Derive
+  # THIS checkout's actual root/branch (same commands the hook itself uses), subtract their real
+  # contribution out of the raw measurement, and add back the hook's own worst case. What is left
+  # is invariant to the operator's directory name and branch name -- it moves only when the
+  # STRUCTURAL prose in the block changes, which is the only thing this cap should ever catch.
+  # ($base -- "Target branch for every diff..." -- is spliced three times too, but it names the
+  # remote's default branch, not this checkout's path or branch, so it does not vary with either
+  # and is left out of the normalization on purpose. A fork whose remote default branch has an
+  # unusually long name is a real, separate source of noise this does not cover.)
+  _root_now=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null | tr -cd 'A-Za-z0-9 ._/-' | head -c 160)
+  _branch_now=$(git -C "$PWD" branch --show-current 2>/dev/null | tr -cd 'A-Za-z0-9._/-' | head -c 80)
+  [ -n "$_branch_now" ] || _branch_now='<detached>'
+  _baseline_raw=$(probe SessionStart '' '')
+  # Floor stays on the raw byte count -- "did the hook say anything at all" does not depend on
+  # checkout path, and this never fires from trimming a sentence.
+  [ "$_baseline_raw" -ge 1024 ] \
+    || errs="$errs\nsession baseline: $_baseline_raw bytes is under the 1024 byte floor -- the hook emitted nothing or nearly nothing"
+  # Worst-case normalized bytes: this checkout's raw measurement, with its own root/branch
+  # contribution removed and the hook's documented worst case (root padded to 160, branch to 80)
+  # added back. Identical regardless of where the repo sits on disk or what the branch is called.
+  _baseline_worst=$(awk -v raw="$_baseline_raw" -v rl="${#_root_now}" -v bl="${#_branch_now}" \
+    'BEGIN{print raw - 2*rl - bl + 2*160 + 80}')
+  # Cap derived, not chosen: worst-case measured 4423 B on this commit (invariant text 4023 B +
+  # the hook's own 320+80 B worst-case root/branch padding), +25% headroom to match the
+  # philosophy stated at the top of this check. 5632 is that number rounded up to a clean
+  # multiple of 128. Recompute _baseline_worst by hand if this ever needs re-deriving -- it is
+  # not a magic constant, it is this formula's output on the day it was set. Below this cap: the
+  # WORKSPACE CONVENTIONS block's structural text is bounded. Above it: something added prose
+  # there, on every checkout, regardless of path length.
+  _baseline_cap=5632
+  [ "$_baseline_worst" -le "$_baseline_cap" ] \
+    || errs="$errs\nsession baseline: normalized $_baseline_worst bytes (raw $_baseline_raw B at this checkout) exceeds the $_baseline_cap byte worst-case cap"
+
+  # Path-invariance control. The normalization above is only honest if it removes every byte
+  # that scales with where this repo sits on disk -- prove that live rather than asserting it.
+  # Run the SAME probe from two directories of deliberately different path length and require
+  # the SAME normalized (worst-case) count out of both. If a future edit splices in some other
+  # environment-dependent string this formula does not know about, the two numbers disagree,
+  # which is exactly the class of bug check 18's cap shipped with. Both directories are throwaway
+  # git repos on the same branch name (main, forced via symbolic-ref rather than `git init -b`
+  # for portability to older git), so path length is the only thing that differs between them.
+  _inv_root="${TMPDIR:-/tmp}/vstack-inv-verify.$$"
+  rm -rf "$_inv_root"
+  _inv_short="$_inv_root/a"
+  _inv_long="$_inv_root/a-much-longer-directory-name-chosen-to-move-the-prefix-by-a-lot"
+  mkdir -p "$_inv_short" "$_inv_long"
+  for _id in "$_inv_short" "$_inv_long"; do
+    git -C "$_id" init -q >/dev/null 2>&1
+    git -C "$_id" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+  done
+  _inv_worst(){ # dir -> worst-case normalized byte count for a SessionStart probe run there
+    _wd="$1"
+    _wraw=$(printf '{"hook_event_name":"SessionStart"}' \
+      | env CLAUDE_PROJECT_DIR="$_wd" CONDUCTOR_WORKSPACE_PATH="" bash claude/hooks/inject-session-context.sh 2>/dev/null \
+      | wc -c | tr -d ' ')
+    _wr=$(git -C "$_wd" rev-parse --show-toplevel 2>/dev/null | tr -cd 'A-Za-z0-9 ._/-' | head -c 160)
+    _wb=$(git -C "$_wd" branch --show-current 2>/dev/null | tr -cd 'A-Za-z0-9._/-' | head -c 80)
+    [ -n "$_wb" ] || _wb='<detached>'
+    awk -v raw="$_wraw" -v rl="${#_wr}" -v bl="${#_wb}" 'BEGIN{print raw - 2*rl - bl + 2*160 + 80}'
+  }
+  _wc_short=$(_inv_worst "$_inv_short")
+  _wc_long=$(_inv_worst "$_inv_long")
+  rm -rf "$_inv_root"
+  [ "$_wc_short" = "$_wc_long" ] \
+    || errs="$errs\npath invariance: normalized byte count disagreed by checkout path length ($_wc_short B at a short prefix vs $_wc_long B at a long one) -- the normalization above is not honest until these agree"
+
   chk "skills profile"         "$(probe SessionStart skills 1)"  512 2560
   # The README publishes these byte counts as the cost column of its comparison table. A number
   # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
@@ -902,7 +981,7 @@ if command -v jq >/dev/null; then
   # Three outcomes, three messages. The row missing and the row present with an unparseable
   # value are different repairs, and conflating them sends the next reader looking for a row
   # that is sitting in front of them.
-  _full=$(probe SessionStart '' '')
+  _full=$_baseline_raw
   _sk=$(probe SessionStart skills 1)
   _label='Context spent per session'
   _row=$(grep -F "| $_label " README.md 2>/dev/null | head -1)
@@ -926,7 +1005,7 @@ if command -v jq >/dev/null; then
       || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
   fi
   [ -z "$errs" ] \
-    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B)" \
+    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B raw / $_baseline_worst B worst-case)" \
     || bad "injected context bounded" "$(printf '%b' "$errs")"
 else
   skip "injected context bounded" "jq not installed"
