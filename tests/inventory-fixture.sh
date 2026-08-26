@@ -396,10 +396,18 @@ for fam in $FAMILIES; do
   drift_out=$(HOME="$BASE_HOME" ./bin/doctor --drift 2>&1); drift_rc=$?
   drift_compared=$(printf '%s\n' "$drift_out" | grep -oE '[0-9]+ item\(s\) compared' | grep -oE '[0-9]+' | head -1)
   if [ "$fam" = mcp_servers ]; then
-    if [ "$drift_rc" -eq 0 ] && [ "$drift_compared" = "$BASE_COMPARED" ]; then
-      stale "bin/doctor --drift" "exit=0, compared=$drift_compared (identical to the no-plant baseline of $BASE_COMPARED) -- run_drift() never reads mcp/servers.json" "$fam" "$name"
+    # a5c4c05 gave run_drift() an mcp/servers.json family, so this row has a noticed arm for the
+    # first time. It cannot reuse the generic arm below: doctor names this family as
+    # "mcp/servers.json:<key>", not as an installed path, and $rel is empty for mcp_servers
+    # because there is no per-file install to name. Without an arm of its own the row can only
+    # ever say stale or unknown -- the fixture would stay unable to credit a consumer that
+    # works, which is the same blindness this file exists to expose in others.
+    if [ "$drift_rc" -ne 0 ] && printf '%s\n' "$drift_out" | grep -q "missing.*mcp/servers.json:$name"; then
+      noticed "bin/doctor --drift" "$(printf '%s\n' "$drift_out" | grep "mcp/servers.json:$name" | head -1) (baseline was $BASE_COMPARED item(s) compared, no drift)"
+    elif [ "$drift_rc" -eq 0 ] && [ "$drift_compared" = "$BASE_COMPARED" ]; then
+      stale "bin/doctor --drift" "exit=0, compared=$drift_compared (identical to the no-plant baseline of $BASE_COMPARED) -- run_drift() has stopped reading mcp/servers.json" "$fam" "$name"
     else
-      unknown "bin/doctor --drift" "exit=$drift_rc compared=$drift_compared -- does not match the STALE prediction for mcp_servers, attribute by hand" "$fam" "$name"
+      unknown "bin/doctor --drift" "exit=$drift_rc compared=$drift_compared -- neither names the planted key nor matches the no-plant baseline, attribute by hand" "$fam" "$name"
     fi
   else
     # A drift-found run prints only the missing/differs lines plus "DRIFT (word)", no
@@ -412,16 +420,23 @@ for fam in $FAMILIES; do
     fi
   fi
 
-  # 7. tests/install-matrix.sh default -- installs from THIS tree into a throwaway HOME and
-  #    asserts counts it also derives from THIS tree in the same call, so a family that grows
-  #    correctly on both sides of that comparison can never produce a mismatch. Run for real
-  #    rather than assumed, because that is exactly the kind of claim this file exists to check
-  #    empirically rather than take on trust.
+  # 7. tests/install-matrix.sh default -- installs from THIS tree into a throwaway HOME. Until
+  #    39ddd56 it also derived the expected counts from that same tree, so a family that grew on
+  #    both sides of the comparison could never produce a mismatch; it now reads them from
+  #    claude/inventory.json, which check 48 holds against the tree independently. Two families
+  #    are still outside its comparison for structural reasons, named per family below. Run for
+  #    real rather than assumed, because that is exactly the kind of claim this file exists to
+  #    check empirically rather than take on trust.
   im_out=$(./tests/install-matrix.sh default 2>&1); im_rc=$?
   if [ "$im_rc" -ne 0 ] && printf '%s\n' "$im_out" | grep -qi "$name"; then
     noticed "install-matrix.sh default" "$(printf '%s\n' "$im_out" | grep -i "$name" | head -1)"
   elif [ "$im_rc" -eq 0 ]; then
-    stale "install-matrix.sh default" "exit=0, ok -- counts are derived from this same tree on both sides of every comparison" "$fam" "$name"
+    case "$fam" in
+      mcp_servers)      im_why="this lane compares no mcp_servers count -- servers merge into .claude.json instead of installing as discrete files" ;;
+      agent_references) im_why="this lane has no member-diff consumer for agent_references" ;;
+      *)                im_why="since 39ddd56 the expected counts come from claude/inventory.json, not from this tree, so a plant this lane covers should now be named -- re-check" ;;
+    esac
+    stale "install-matrix.sh default" "exit=0, ok -- $im_why" "$fam" "$name"
   else
     unknown "install-matrix.sh default" "exit=$im_rc, FAIL line(s): $(printf '%s\n' "$im_out" | grep -i 'FAIL' | tr '\n' ';')" "$fam" "$name"
   fi
@@ -490,10 +505,13 @@ for fam in $FAMILIES; do
     *)        un_installed="$un_cdir/$rel" ;;
   esac
   if [ "$fam" = mcp_servers ]; then
-    if ! printf '%s\n' "$un_out" | grep -q "$name"; then
-      stale "uninstall.sh --dry-run" "plan never mentions $name -- settings.json/.claude.json merges are deliberately outside plan_file_removal's scope" "$fam" "$name"
+    # Inverted at a5c4c05: the mcp unpick is separate from plan_file_removal's byte-diff scope,
+    # and it used to sit after the --dry-run early exit, so preview never showed it. It now runs
+    # before that exit. Present is the expected outcome; absent is the regression.
+    if printf '%s\n' "$un_out" | grep -q "$name"; then
+      noticed "uninstall.sh --dry-run" "$(printf '%s\n' "$un_out" | grep "$name" | head -1)"
     else
-      noticed "uninstall.sh --dry-run" "unexpectedly present -- re-check the STALE prediction for mcp_servers"
+      stale "uninstall.sh --dry-run" "plan never mentions $name -- the mcp unpick has fallen back below the --dry-run early exit" "$fam" "$name"
     fi
   else
     if [ -e "$un_installed" ] && printf '%s\n' "$un_out" | grep -q "remove.*$un_installed"; then
