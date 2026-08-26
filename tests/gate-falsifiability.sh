@@ -254,7 +254,7 @@ files_for(){ case "$1" in
   18b) printf 'README.md' ;;
   18c) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
-  20)  printf 'claude/commands/test.md' ;;
+  20)  printf 'claude/commands/test.md install.sh' ;;
   20b) printf 'claude/commands/test.md' ;;
   21)  printf 'install.sh' ;;
   22)  printf 'claude/skills/swarm/SKILL.md' ;;
@@ -439,7 +439,17 @@ exit 0
         && mv /tmp/fx19.$$ claude/.claude-plugin/plugin.json ;;
   20) # a command telling the model to run something no lane ever installs — exactly the
       # shape of the /bootstrap defect this check was written for
-      printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md ;;
+      printf '\nRun `~/.claude/scripts/does-not-exist.sh` first.\n' >> claude/commands/test.md
+      # A second, independent lane in the same row rather than a new id (check 16 counts
+      # declared checks, not falsifiability rows, but CHECKS= is one id per check and this stays
+      # 20): install_generated()'s floor names the literal path install.sh must still contain
+      # for ~/.config/agents/vstack-installed to stay a legitimate exemption rather than a stale
+      # allow-list entry. Renaming the string OWNED_PATHS assigns is a defect the prose mutation
+      # above cannot reach -- one edits claude/commands/test.md, the other install.sh, and
+      # neither mutation's pattern matches the other file, so this is genuinely two lanes under
+      # one label rather than one mutation doing double duty.
+      sed -i.t 's#\$HOME/\.config/agents/vstack-installed#$HOME/.config/agents/renamed-installed-record#' install.sh \
+        && rm -f install.sh.t ;;
   20b) # The same promise, one namespace over. `/push` shipped `~/.100xprompt/hooks/pre-push.sh`
       # -- another tool's template path, referenced by a command this repo installs -- and the
       # extractor could not see it, because it matched only ~/.claude, ~/.config/agents and
