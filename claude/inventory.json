@@ -12,7 +12,7 @@
   },
   "derived_at": {
     "head": "3f1d02061b319a07e3773463c3fa428dedd5b542",
-    "payload_digest": "936ef1b35440cc97214511033901406c38ade2d68a3483ae302c5296a2a1d326",
+    "payload_digest": "59e441807228bc2d46a0d3dea8c45ae38419d7b2b68e318217a5edc2be2b20be",
     "digest_recipe": "{ git ls-files -s -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; git status --porcelain -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; } | shasum -a 256",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
     "concurrency_warning": "Derived from a working tree that other agents were editing at the same time. Any consumer that trusts these numbers without regenerating them is the defect this file exists to catch.",
@@ -338,7 +338,7 @@
       "dir": "claude/hooks",
       "pattern": "*.sh",
       "kind": "file",
-      "count": 7,
+      "count": 8,
       "floor": 7,
       "floor_reason": "Derived, not literal: the floor is the number of distinct hook scripts install.sh's own jq rebuild program names. Every one of those must exist on disk or the user lane installs a hook command pointing at nothing. Recomputed from install.sh on every validation, so it cannot go stale.",
       "lanes": [
@@ -347,6 +347,7 @@
         "overlay"
       ],
       "members": [
+        "compat-canary.sh",
         "dispatch-counter.sh",
         "failure-diagnose.sh",
         "format.sh",
