@@ -1,0 +1,33 @@
+{
+  "name": "main: require the four platform jobs",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "verify" },
+          { "context": "install-linux" },
+          { "context": "install-macos" },
+          { "context": "install-alpine" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

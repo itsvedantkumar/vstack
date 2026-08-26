@@ -1,0 +1,200 @@
+name: release
+
+# Publication is a separate, stricter act from tagging. A tag can already exist by the time
+# this workflow starts -- release-manager (UNITY) creates and pushes it the same way it always
+# has -- but nothing here treats a pushed tag as permission to publish. Every job re-reads the
+# remote's own record for the exact commit the tag points to, never the machine this workflow
+# happens to run on and never a branch reference that could have moved since.
+#
+# Trigger is a tag push, not `main`. `main` is a moving reference by definition -- a second
+# push during this run would change what it points to -- and Phase 2's "no workflow step
+# publishes from a moving branch reference" rules that out as the publish source. A tag pointing
+# at one fixed commit does not have that failure mode, provided nothing here ever force-moves
+# one, which is why the publish job re-derives and re-checks the tag's target commit instead of
+# trusting a value cached from an earlier job.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re-)verify and publish, e.g. v1.46.0. Defaults to the tag that triggered this run.'
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REQUIRED_CHECKS: verify install-linux install-macos install-alpine
+  # Four job names in .github/workflows/verify.yml, testing three unique platforms
+  # (ubuntu-latest, macos-latest, alpine:latest -- `verify` and `install-linux` both run on
+  # ubuntu-latest). README.md and check 26 of .claude/verify.sh assert three documented
+  # platforms; this list asserts four required *jobs*. Both counts are correct at once because
+  # they are counting different things. See the release report for the discrepancy in full --
+  # do not "fix" this list to length 3 to make it match the platform count, and do not add a
+  # fourth platform to satisfy an arithmetic coincidence; the repo does not run one.
+
+jobs:
+  # --- resolve: pin everything to one commit before any other job trusts it -----------------
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pin.outputs.tag }}
+      sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Pin the candidate tag to the exact commit it names right now
+        id: pin
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "refusing: '$TAG' is not a vMAJOR.MINOR.PATCH tag"; exit 1 ;;
+          esac
+          git rev-parse "refs/tags/$TAG" >/dev/null 2>&1 \
+            || { echo "refusing: tag $TAG does not exist on the remote this checkout fetched"; exit 1; }
+          # ^{commit} dereferences an annotated tag object to the commit it points at. This
+          # repo's tags are annotated (release-manager's own process creates them that way) --
+          # trusting github.sha for a tag-push event would work today but ties correctness to
+          # GitHub's event-payload behavior for annotated vs lightweight tags, which this
+          # workflow has no reason to depend on when `git rev-parse` answers the same question
+          # directly against the ref it is about to publish.
+          SHA=$(git rev-parse "refs/tags/$TAG^{commit}")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "resolved $TAG -> $SHA"
+
+      - name: The candidate commit is reachable from main, not an orphan or a rewritten history
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "${{ steps.pin.outputs.sha }}" origin/main \
+            || { echo "refusing: ${{ steps.pin.outputs.sha }} is not an ancestor of origin/main"; exit 1; }
+          echo "ok  ${{ steps.pin.outputs.sha }} is on origin/main"
+
+      - name: Every required job succeeded for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/require-checks-green.sh \
+            "${{ github.repository }}" "${{ steps.pin.outputs.sha }}" ${{ env.REQUIRED_CHECKS }}
+
+      - name: tests/bin-scripts.sh runs clean against the candidate commit
+        run: ./tests/bin-scripts.sh
+
+  # --- container-matrix: the published-artifact lane, run before anything is published -------
+  # The tag from `resolve` already exists on the remote (that is what triggered this workflow),
+  # so it is a resolvable ref container-matrix.sh can clone -- but nothing has created a GitHub
+  # Release yet, and this job runs before the one that does. A tag existing is not "published"
+  # in the sense Phase 2 means it: there are no release notes, it is not marked Latest, and
+  # nothing a stranger's install script resolves to it until the publish job below runs.
+  container-matrix:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Published-artifact install, three foreign container images
+        env:
+          VSTACK_REF: ${{ needs.resolve.outputs.tag }}
+        run: bash ./tests/container-matrix.sh
+
+  # --- cleanup: a failed required job does not get to leave a tag behind ---------------------
+  # "A failed required job cannot produce a tag or GitHub release" is a claim about the state
+  # this workflow leaves behind, not just about which step it refuses to run. release-manager
+  # pushes the tag before this workflow can evaluate anything -- that ordering is unavoidable,
+  # since a tag push is what a workflow trigger reads -- so the only way to make the claim true
+  # end-to-end is for a failure here to remove what a failure produced. This deletes only the
+  # exact tag this run resolved, seconds after this same run pushed nobody else's history and
+  # nothing this run's own SHA-pin did not already record.
+  cleanup-on-failed-gate:
+    needs: [resolve, container-matrix]
+    if: always() && (needs.resolve.result == 'failure' || needs.container-matrix.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Delete the candidate tag; it did not earn publication
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git push origin ":refs/tags/$TAG"
+            echo "deleted refs/tags/$TAG -- required checks did not pass for the commit it named"
+          else
+            echo "refs/tags/$TAG already gone"
+          fi
+
+  # --- publish: the one step in this workflow that is irreversible ---------------------------
+  publish:
+    needs: [resolve, container-matrix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: The tag still points where resolve found it
+        run: |
+          set -euo pipefail
+          NOW=$(git rev-parse "refs/tags/${{ needs.resolve.outputs.tag }}^{commit}")
+          if [ "$NOW" != "${{ needs.resolve.outputs.sha }}" ]; then
+            echo "refusing: refs/tags/${{ needs.resolve.outputs.tag }} moved from ${{ needs.resolve.outputs.sha }} to $NOW between resolve and publish"
+            exit 1
+          fi
+          echo "ok  refs/tags/${{ needs.resolve.outputs.tag }} still names ${{ needs.resolve.outputs.sha }}"
+
+      - name: Every required job is still green immediately before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/require-checks-green.sh \
+            "${{ github.repository }}" "${{ needs.resolve.outputs.sha }}" ${{ env.REQUIRED_CHECKS }}
+
+      - name: Release notes from CHANGELOG.md, not invented here
+        run: |
+          set -euo pipefail
+          VER="${{ needs.resolve.outputs.tag }}"
+          VER="${VER#v}"
+          awk -v ver="$VER" '
+            /^## / { if (found) exit; if ($0 ~ "^## \\[?" ver "([^0-9.]|$)") { found=1; print; next } }
+            found { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "no CHANGELOG.md section found for $VER; falling back to --generate-notes" >&2
+            echo "__GENERATE__" > /tmp/release-notes.md
+          fi
+          cat /tmp/release-notes.md
+
+      - name: gh release create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve.outputs.tag }}"
+          if [ "$(cat /tmp/release-notes.md)" = "__GENERATE__" ]; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file /tmp/release-notes.md
+          fi
+
+      - name: Read the release back; a created object gh cannot fetch is not published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${{ needs.resolve.outputs.tag }}" --json url,tagName,isDraft

@@ -13,7 +13,7 @@ jobs:
       # version the manifests declare, and the default shallow checkout carries no tags at all.
       # Without this the check cannot measure and skips, which is honest but proves nothing on
       # the one machine that gates every push.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -26,6 +26,24 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq jq shellcheck
           shellcheck --version
+
+      # tests/dispatch-static.sh parses every skill fixture in the language the fixture claims
+      # to be. Before 1.46.0 a missing parser was a silent SKIP that still printed ok, so 28 of
+      # 35 fixtures were never parsed on a runner without these four binaries -- the suite's own
+      # fake green. It now FAILs naming the missing validator, which means CI must actually
+      # carry them. `--version` on each so a broken install stops here rather than being read
+      # later as a fixture defect.
+      - name: Install fixture validators (tsc, csslint, xmllint, gofmt)
+        run: |
+          set -eu
+          sudo apt-get install -y -qq libxml2-utils
+          npm install -g typescript@5 csslint@1
+          tsc --version
+          csslint --version
+          xmllint --version
+          # gofmt ships with the Go toolchain, preinstalled on ubuntu-latest. Assert rather than
+          # assume: if a future image drops it, fail here naming it instead of in the suite.
+          gofmt --help >/dev/null 2>&1 || { echo "gofmt not on PATH"; exit 1; }
 
       # Check 19 runs `claude plugin validate --strict`; without a working CLI it skips, and the
       # falsifiability suite skips its case 19 with it. Install it so CI proves the real thing.
@@ -55,7 +73,7 @@ jobs:
           # 2.1.236, so npm resolved nothing and said nothing. Ask for the platform package by
           # name at whatever version is actually published, and use the binary it ships — it is
           # self-contained and needs no shim.
-          npm install -g @anthropic-ai/claude-code || true
+          npm install -g @anthropic-ai/claude-code@2.1.243 || true
           case "$(uname -s)-$(uname -m)" in
             Linux-x86_64)  PKG=linux-x64 ;;
             Linux-aarch64) PKG=linux-arm64 ;;
@@ -65,7 +83,7 @@ jobs:
           esac
           if [ -n "$PKG" ]; then
             PREFIX="$RUNNER_TEMP/ccbin"
-            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG" || true
+            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG@2.1.243" || true
             BIN="$PREFIX/node_modules/@anthropic-ai/claude-code-$PKG/claude"
             if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
               sudo ln -sf "$BIN" /usr/local/bin/claude
@@ -88,6 +106,15 @@ jobs:
             exit 1
           fi
           grep '^ok    plugin manifests valid' "$RUNNER_TEMP/gate.txt"
+
+      # This lane has every validator installed on purpose (jq, shellcheck, the CLI), so the
+      # only skip it should ever see is the version-tag comparison before the commit that gets
+      # tagged. Reuses the capture from the step above rather than running the gate a third
+      # time in one job.
+      - name: No unexpected skips in this lane's gate output
+        run: |
+          bash .github/scripts/require-no-unexpected-skips.sh "$RUNNER_TEMP/gate.txt" \
+            "declared version matches what installs"
 
       - name: Run the verification gate
         run: ./.claude/verify.sh
@@ -120,6 +147,13 @@ jobs:
       - name: auto-trigger.sh fixtures are still intact (no model calls)
         run: ./tests/dispatch-static.sh
 
+      # The three bin/ scripts install.sh ships into every user's PATH (claude-bg.sh,
+      # claude-task.sh, deploy-auto.sh) were syntax-checked by checks 1 and 29 of the gate but
+      # never actually run before this suite existed -- see tests/bin-scripts.sh's own header.
+      # Zero model calls: every `claude` this suite touches is a local stub.
+      - name: tests/bin-scripts.sh runs the shipped bin/ scripts, not just lints them
+        run: ./tests/bin-scripts.sh
+
       - name: Confirm the tree is restored
         run: git diff --exit-code
 
@@ -131,7 +165,7 @@ jobs:
   install-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
@@ -159,7 +193,7 @@ jobs:
           # 2.1.236, so npm resolved nothing and said nothing. Ask for the platform package by
           # name at whatever version is actually published, and use the binary it ships — it is
           # self-contained and needs no shim.
-          npm install -g @anthropic-ai/claude-code || true
+          npm install -g @anthropic-ai/claude-code@2.1.243 || true
           case "$(uname -s)-$(uname -m)" in
             Linux-x86_64)  PKG=linux-x64 ;;
             Linux-aarch64) PKG=linux-arm64 ;;
@@ -169,7 +203,7 @@ jobs:
           esac
           if [ -n "$PKG" ]; then
             PREFIX="$RUNNER_TEMP/ccbin"
-            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG" || true
+            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG@2.1.243" || true
             BIN="$PREFIX/node_modules/@anthropic-ai/claude-code-$PKG/claude"
             if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
               sudo ln -sf "$BIN" /usr/local/bin/claude
@@ -258,13 +292,30 @@ jobs:
   install-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      # fetch-depth 0 for the same reason as the verify job above: without it check 24
+      # ("declared version matches what installs") cannot see any tags and reports the "shallow
+      # clone" skip, which read as an environment fact for as long as this checkout omitted it
+      # and was really just this job never asking for the tags it needed.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install matrix on macOS
         run: ./tests/install-matrix.sh
 
       - name: Run the verification gate
-        run: ./.claude/verify.sh
+        run: ./.claude/verify.sh | tee "$RUNNER_TEMP/gate-macos.txt"
+
+      # This lane declares, out loud, the only two checks it accepts as skips: the CLI is not
+      # installed here on purpose (only the ubuntu `verify` job proves check 19 runs, per the
+      # comment on that job's own CLI-install step), and the version-tag comparison is expected
+      # to skip on every commit before the one that gets tagged. Anything else that skips here
+      # is a regression this lane is supposed to catch, not an environment fact to shrug at.
+      - name: No unexpected skips on macOS
+        run: |
+          bash .github/scripts/require-no-unexpected-skips.sh "$RUNNER_TEMP/gate-macos.txt" \
+            "plugin manifests valid" \
+            "declared version matches what installs"
 
   # Alpine, because BusyBox is not GNU. Its sed, grep, find and stat take different flags, and
   # there is no bash until you install it — which is exactly the shape of a slim container
@@ -276,7 +327,19 @@ jobs:
       - name: Tools a slim image does not ship
         run: apk add --no-cache bash git jq curl findutils coreutils grep sed nodejs npm
 
-      - uses: actions/checkout@v7
+      # check 29 ("shellcheck clean") skips without a validator on PATH, and a check that skips
+      # on a lane specifically kept around to catch BusyBox-vs-GNU differences is a green
+      # measuring nothing on the one image most likely to carry a GNU-ism shellcheck would
+      # catch. Install it for real and fail here, by name, if the package this image ships does
+      # not resolve -- not a silent fallback to running without it.
+      - name: shellcheck for a slim image, or fail naming it
+        run: |
+          apk add --no-cache shellcheck
+          shellcheck --version
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # The container runs as root against a checkout owned by another uid, so git refuses to
       # operate on it at all. That is a property of running in a container, not of this repo,
@@ -297,4 +360,14 @@ jobs:
         run: bash ./tests/install-matrix.sh
 
       - name: Run the verification gate
-        run: bash ./.claude/verify.sh
+        run: bash ./.claude/verify.sh | tee "$RUNNER_TEMP/gate-alpine.txt"
+
+      # Same declaration as the macOS lane: the CLI is deliberately absent here too, and the
+      # version-tag check is expected to skip pre-release. shellcheck is no longer on this list
+      # -- the step above installs it for real, so a skip of check 29 here now means the
+      # install silently stopped working, and that must fail the lane, not slide past it.
+      - name: No unexpected skips on Alpine
+        run: |
+          bash .github/scripts/require-no-unexpected-skips.sh "$RUNNER_TEMP/gate-alpine.txt" \
+            "plugin manifests valid" \
+            "declared version matches what installs"
