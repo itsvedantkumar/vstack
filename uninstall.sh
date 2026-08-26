@@ -181,7 +181,7 @@ for d in "$SRC"/claude/skills/*/; do
 done
 
 # Same rule, applied to everything else this repo copies in. It only ever ran for skills, so
-# uninstalling a fresh install left 8 agents, 14 commands, 4 hooks and 7 wrappers sitting in
+# uninstalling a fresh install left 14 agents, 15 commands, 8 hooks and 6 wrappers sitting in
 # ~/.claude with nothing to say where they came from: the backup held no prior version to
 # restore over them, and only skills had a branch that removed what the backup lacked.
 #
