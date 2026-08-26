@@ -246,7 +246,112 @@ case_verify_runlog_matches_own_footer() {
   fi
 }
 
-cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer"
+# --- explain: reads the live machine, says UNKNOWN rather than guessing --------------------
+
+# No repo, no install, nothing on this machine at all -- explain must still exit 0 and say
+# UNKNOWN in every section it could not read, never crash and never fabricate a lane/state.
+case_explain_no_repo_all_unknown() {
+  v=$(standalone_vstack explain-no-repo)
+  h="$ROOT/home-explain-no-repo"
+  mkdir -p "$h"
+  out=$(env -i HOME="$h" PATH="$MINPATH" "$v" explain 2>&1)
+  rc=$?
+  ok_all=1
+  for want in "lane: UNKNOWN" "no receipt at" "none -- "; do
+    printf '%s\n' "$out" | grep -qF "$want" || ok_all=0
+  done
+  if [ "$rc" -eq 0 ] && [ "$ok_all" -eq 1 ]; then
+    ok "explain: no repo, no install -> UNKNOWN everywhere, exits 0"
+  else
+    bad "explain: no repo, no install -> UNKNOWN everywhere, exits 0" "rc=$rc output:
+$out"
+  fi
+}
+
+# Hook wiring is read from the installed settings.json, not asserted from memory: a wired
+# script that is missing on disk is reported MISSING (the thing a user actually hits --
+# "why didn't my hook fire"), and a known matcher gets its plain-language reason attached.
+case_explain_hook_wiring_reads_live_settings() {
+  if ! command -v jq >/dev/null 2>&1; then skip "explain hook wiring reads live settings.json" "jq not installed"; return; fi
+  v=$(standalone_vstack explain-hooks)
+  h="$ROOT/home-explain-hooks"
+  mkdir -p "$h/.claude/hooks"
+  printf '#!/usr/bin/env bash\necho ok\n' > "$h/.claude/hooks/guard-destructive.sh"
+  chmod +x "$h/.claude/hooks/guard-destructive.sh"
+  cat > "$h/.claude/settings.json" << JSON
+{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$h/.claude/hooks/guard-destructive.sh"}]}],
+"Stop":[{"hooks":[{"type":"command","command":"$h/.claude/hooks/verify-gate.sh"}]}]}}
+JSON
+  out=$(env -i HOME="$h" PATH="$MINPATH" "$v" explain 2>&1)
+  if printf '%s\n' "$out" | grep -q 'guard-destructive.sh \[present, executable\].*fires only on Bash tool calls' \
+     && printf '%s\n' "$out" | grep -q 'verify-gate.sh \[MISSING'; then
+    ok "explain hook wiring reads live settings.json (present+matcher note, missing named)"
+  else
+    bad "explain hook wiring reads live settings.json" "output:
+$out"
+  fi
+}
+
+# The ownership receipt is read verbatim, not summarised from a hardcoded family list: a path
+# under an unrecognised family still counts toward the total and toward "other."
+case_explain_reads_ownership_receipt() {
+  v=$(standalone_vstack explain-receipt)
+  h="$ROOT/home-explain-receipt"
+  mkdir -p "$h/.config/agents"
+  cat > "$h/.config/agents/vstack-installed" << REC
+$h/.claude/hooks/format.sh
+$h/.claude/agents/code-reviewer.md
+$h/.claude/CLAUDE.md
+REC
+  out=$(env -i HOME="$h" PATH="$MINPATH" "$v" explain 2>&1)
+  if printf '%s\n' "$out" | grep -q '^3 path(s) recorded' \
+     && printf '%s\n' "$out" | grep -q '1 other'; then
+    ok "explain reads the ownership receipt verbatim (3 paths, 1 uncategorised)"
+  else
+    bad "explain reads the ownership receipt verbatim" "output:
+$out"
+  fi
+}
+
+# Trusted-scripts section: exact opposite states, both read from the same file this script also
+# exercises through `vstack trust` -- present vs. absent, not a guess about the format.
+case_explain_trusted_scripts_both_states() {
+  v=$(standalone_vstack explain-trust)
+  h1="$ROOT/home-explain-trust-none"
+  mkdir -p "$h1"
+  out1=$(env -i HOME="$h1" PATH="$MINPATH" "$v" explain 2>&1)
+  h2="$ROOT/home-explain-trust-some"
+  mkdir -p "$h2/.config/agents"
+  printf 'deadbeefcafe0000  %s/some/repo/.claude/verify.sh\n' "$h2" > "$h2/.config/agents/verify-trust"
+  out2=$(env -i HOME="$h2" PATH="$MINPATH" "$v" explain 2>&1)
+  if printf '%s\n' "$out1" | grep -q 'none -- ' \
+     && printf '%s\n' "$out2" | grep -q 'deadbeef\.\.\.'; then
+    ok "explain trusted-scripts section: both directions (none vs. listed)"
+  else
+    bad "explain trusted-scripts section: both directions" "out1:
+$out1
+out2:
+$out2"
+  fi
+}
+
+# Join: after self-test writes a run-log record, explain's tail read must surface it -- proving
+# the record is actually readable by a later command, the whole reason it exists.
+case_explain_surfaces_recent_runlog() {
+  if ! command -v jq >/dev/null 2>&1; then skip "explain surfaces recent run-log entries" "jq not installed"; return; fi
+  h="$ROOT/home-explain-runlog-join"
+  mkdir -p "$h"
+  env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" self-test >/dev/null 2>&1
+  out=$(env -i HOME="$h" PATH="$MINPATH" VSTACK_DIR="$SRC" "$VSTACK_BIN" explain 2>&1)
+  if printf '%s\n' "$out" | grep -q '"command":"self-test"'; then
+    ok "explain surfaces a run-log entry self-test just wrote (the join, not the halves)"
+  else
+    bad "explain surfaces a run-log entry self-test just wrote" "output:
+$out"
+  fi
+}
+
+cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog"
 if [ $# -gt 0 ]; then cases="$*"; fi
 for c in $cases; do
   "case_$c"

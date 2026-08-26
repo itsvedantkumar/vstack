@@ -23,6 +23,11 @@ commands:
   self-test             offline, zero-model checks against THIS machine's installed state
                          (not the repo checkout -- see 'verify' for that). Single verdict,
                          declared/ran/skipped accounting; a run that ran nothing cannot pass.
+  explain               explain why this machine's config is behaving as it is: install
+                         lane, files vstack claims, hook wiring and why a hook would or
+                         would not fire, verify-gate trust, trusted repos, recent local
+                         run-log entries. Reads the live machine; says UNKNOWN and names
+                         what it could not read, rather than restating the README.
   help                 show this message
 
 The repo is resolved the same way as `doctor --drift`: $VSTACK_DIR, else ~/.vstack, else the
@@ -228,6 +233,138 @@ $(basename "$st_f"): $st_out"
   return "$ST_FAIL"
 }
 
+# --- explain ---------------------------------------------------------------------------------
+# Answers "why is this machine's config behaving as it is", read from the live machine rather
+# than restated from the README. Deliberately reuses `doctor --json` for anything doctor
+# already computes correctly (install lane, trust state, the live hook-dedupe probe) instead of
+# re-deriving it -- a second implementation of the same lane-detection logic is exactly the kind
+# of duplicate selector docs/checks-that-inherit-their-answer.md and this file's own "one
+# selector, four callers" precedent in .claude/verify.sh warn against, and it is also how two
+# copies quietly disagree. Everything explain does NOT get from doctor is read directly from
+# the files a stranger would otherwise have to know to go looking for by hand: the ownership
+# receipt, the installed settings.json hook wiring, and the trust file.
+#
+# Static, not dynamic, on the hooks section by design: it does not invoke installed hook
+# scripts for real. doctor's own "hook scope overlap" probe already does that safely (a
+# synthetic UserPromptSubmit event against inject-session-context.sh, proven harmless by
+# already running on every `doctor` invocation in this repo), and explain surfaces that result
+# rather than inventing a second live-invocation path -- dispatch-counter.sh, format.sh and
+# verify-gate.sh are not scratch-safe to fire blind (a counter increment, a real file rewrite,
+# the whole gate) as a side effect of a read-only diagnostic command.
+cmd_explain() {
+  EX_CDIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  echo "vstack explain: why this machine's Claude Code config is behaving as it is"
+  echo "(reads live state under $EX_CDIR, \$HOME/.config/agents, and the resolved repo -- not the README)"
+  echo
+
+  EX_DOC="$HOME/.config/agents/bin/doctor"
+  [ -x "$EX_DOC" ] || EX_DOC="${REPO:-}/bin/doctor"
+  EX_DOCJSON=""
+  if [ -x "$EX_DOC" ] && command -v jq >/dev/null 2>&1; then
+    EX_DOCJSON=$("$EX_DOC" --json 2>/dev/null)
+    printf '%s' "$EX_DOCJSON" | jq -e . >/dev/null 2>&1 || EX_DOCJSON=""
+  fi
+
+  echo "== install lane =="
+  if [ -n "$EX_DOCJSON" ]; then
+    printf 'lane: %s   version: %s   (source: doctor --json .installLane/.version)\n' \
+      "$(printf '%s' "$EX_DOCJSON" | jq -r '.installLane')" \
+      "$(printf '%s' "$EX_DOCJSON" | jq -r '.version // "UNKNOWN"')"
+  else
+    echo "lane: UNKNOWN -- could not run 'doctor --json' (checked \$HOME/.config/agents/bin/doctor and \$REPO/bin/doctor; needs jq too; or its output did not parse as JSON)"
+  fi
+  echo
+
+  echo "== files vstack claims on this machine (per \$HOME/.config/agents/vstack-installed) =="
+  EX_REC="$HOME/.config/agents/vstack-installed"
+  if [ -f "$EX_REC" ]; then
+    EX_N=$(grep -c . "$EX_REC" 2>/dev/null || echo 0)
+    echo "$EX_N path(s) recorded as installed by vstack. by family:"
+    sed -n 's#.*/\(hooks\|agents\|commands\|skills\)/.*#\1#p' "$EX_REC" | sort | uniq -c | sed 's/^/  /'
+    EX_OTHER=$(grep -vE '/(hooks|agents|commands|skills)/' "$EX_REC" | grep -c .)
+    [ "$EX_OTHER" -gt 0 ] && echo "  $EX_OTHER other (CLAUDE.md, statusline.sh, bin/*, conductor settings, ...)"
+  else
+    echo "UNKNOWN -- no receipt at $EX_REC. Either install.sh has never run on this machine (the"
+    echo "plugin lane never writes one by design), or this is a pre-1.46.0 install that predates"
+    echo "the receipt (doctor --drift still compares those by content)."
+  fi
+  echo
+
+  echo "== hooks: wiring, and why each would or would not fire =="
+  if command -v jq >/dev/null 2>&1 && [ -f "$EX_CDIR/settings.json" ]; then
+    EX_HTMP=$(mktemp)
+    jq -r '
+      .hooks // {} | to_entries[] as $e
+      | $e.value[]? as $g
+      | ($g.matcher // "(any)") as $m
+      | $g.hooks[]?.command as $c
+      | "\($e.key)\t\($m)\t\($c)"
+    ' "$EX_CDIR/settings.json" > "$EX_HTMP" 2>/dev/null
+    if [ -s "$EX_HTMP" ]; then
+      while IFS="$(printf '\t')" read -r ev matcher cmd; do
+        [ -n "$ev" ] || continue
+        if [ -f "$cmd" ] && [ -x "$cmd" ]; then st="present, executable"
+        elif [ -e "$cmd" ]; then st="present, NOT executable -- Claude Code will fail to invoke it"
+        else st="MISSING -- Claude Code will error invoking this hook"
+        fi
+        note=""
+        case "$ev:$matcher" in
+          PreToolUse:Bash)             note="  (fires only on Bash tool calls)" ;;
+          PostToolUse:'Edit|Write|MultiEdit') note="  (fires only after Edit/Write/MultiEdit)" ;;
+          PostToolUse:'Agent|Task')    note="  (fires only after an Agent/Task dispatch)" ;;
+          PostToolUseFailure:'*')      note="  (fires on any failed tool call)" ;;
+        esac
+        printf '  %-19s matcher=%-18s -> %s [%s]%s\n' "$ev" "$matcher" "$cmd" "$st" "$note"
+      done < "$EX_HTMP"
+    else
+      echo "UNKNOWN -- $EX_CDIR/settings.json has no .hooks entries"
+    fi
+    rm -f "$EX_HTMP"
+  else
+    echo "UNKNOWN -- $EX_CDIR/settings.json missing, or jq not installed"
+  fi
+  echo
+
+  echo "== live dedupe/suppression probe (project vs user-scope injector) =="
+  if [ -n "$EX_DOCJSON" ]; then
+    EX_ROW=$(printf '%s' "$EX_DOCJSON" | jq -c '(.checks + .skips)[] | select(.label == "project hook stands down")' 2>/dev/null)
+    if [ -n "$EX_ROW" ]; then
+      printf '%s' "$EX_ROW" | jq -r '"  " + (.status // "note") + "  " + (.detail // "")'
+    else
+      echo "UNKNOWN -- doctor did not report this row (see 'doctor' directly for the live output)"
+    fi
+  else
+    echo "UNKNOWN -- could not read via doctor --json"
+  fi
+  echo
+
+  echo "== verify-gate trust: why .claude/verify.sh would or would not run unattended =="
+  if [ -n "$EX_DOCJSON" ]; then
+    printf 'state: %s\ndetail: %s\n' \
+      "$(printf '%s' "$EX_DOCJSON" | jq -r '.trust.state')" \
+      "$(printf '%s' "$EX_DOCJSON" | jq -r '.trust.detail')"
+  else
+    echo "UNKNOWN -- could not read via doctor --json"
+  fi
+  echo
+
+  echo "== trusted scripts (per \$HOME/.config/agents/verify-trust) =="
+  EX_TF="$HOME/.config/agents/verify-trust"
+  if [ -f "$EX_TF" ] && [ -s "$EX_TF" ]; then
+    sed -E 's/^([0-9a-f]{8})[0-9a-f]* /  \1... /' "$EX_TF"
+  else
+    echo "none -- $EX_TF does not exist or is empty (no repo's gate has been armed with 'vstack trust')"
+  fi
+  echo
+
+  echo "== recent local run-log entries (not attestations -- unsigned, editable, local only) =="
+  if [ -f "$RUNLOG" ] && command -v jq >/dev/null 2>&1; then
+    tail -n 5 "$RUNLOG" | jq -c '{command,outcome,timestamp,sha:(if .sha=="UNKNOWN" then .sha else .sha[0:10] end),declared,ran,skipped}' 2>/dev/null
+  else
+    echo "UNKNOWN -- no run log yet at $RUNLOG (run 'vstack self-test' or 'vstack verify' to create one), or jq not installed"
+  fi
+}
+
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
 
@@ -238,15 +375,15 @@ case "$CMD" in
     ;;
 esac
 
-# self-test exists specifically to work on a machine where no repo checkout is around at all
-# -- a plugin-only install, or a full install whose original clone was deleted after
-# ./install.sh ran. Every other command still needs $REPO to find the script it runs
+# self-test and explain exist specifically to work on a machine where no repo checkout is
+# around at all -- a plugin-only install, or a full install whose original clone was deleted
+# after ./install.sh ran. Every other command still needs $REPO to find the script it runs
 # (install.sh, overlay.sh, uninstall.sh, .claude/verify.sh), so this stays a hard failure for
-# them; self-test says UNKNOWN for whatever specifically needed a repo (see checks 1/2).
+# them; self-test/explain say UNKNOWN for whatever specifically needed a repo.
 REPO=$(resolve_vstack_repo) || REPO=""
 if [ -z "$REPO" ]; then
   case "$CMD" in
-    self-test) : ;;
+    self-test|explain) : ;;
     *)
       echo "vstack: no vstack repo found (checked \$VSTACK_DIR, ~/.vstack, and this script's git root)" >&2
       echo "vstack: set \$VSTACK_DIR to your checkout, or clone one to ~/.vstack" >&2
@@ -391,6 +528,9 @@ case "$CMD" in
   self-test)
     cmd_self_test
     exit $?
+    ;;
+  explain)
+    cmd_explain
     ;;
   test)
     "$REPO/tests/auto-trigger.sh" "$@"
