@@ -484,7 +484,61 @@ nck=$TOTAL
 # map. Derived the same way check 29 selects, so the two can never disagree.
 nsh=$(sh_files | grep -c .)
 
-want_for(){ # noun (lowercased, plural or singular) -> expected count, or empty if not covered
+# Lane-aware resolution for README's two "## What lands where" tables. Check 12 used to resolve
+# one number per noun for the whole repository, but README states its counts once per install
+# lane, and the two lanes ship different things: the plugin lane wires two routing hooks and
+# ships no CLI wrappers or MCP servers at all. A repo-wide number satisfied both tables by
+# coincidence for skills/agents/commands (the plugin lane's rows happen to equal the full lane's)
+# and missed the rows that actually differ, because a cell reading "2 (routing only)" never
+# matched the table regex below. That hole is where this repository's worst live contradiction
+# sat: the plugin lane wired the Stop gate while README, bin/doctor and this check all agreed the
+# lane shipped no hooks, because none of them read profiles.plugin.ships.
+#
+# The rule: a family absent from profiles.<lane>.ships must show 0. A family present shows the
+# lane's own wired count where the manifest states one (hooks -- the plugin lane wires two of the
+# eight hook scripts the repo ships via hook_scripts_wired, and both numbers are derived from the
+# tree so they can never disagree with each other), and components.<family>.count otherwise.
+lane_family_for(){ # README table noun -> inventory.json component family, or empty if uncovered
+  case "$1" in
+    skill|skills)                                          printf '%s' skills ;;
+    subagent|subagents|sub-agent|sub-agents|agent|agents)  printf '%s' agents ;;
+    command|commands)                                      printf '%s' commands ;;
+    hook|hooks)                                            printf '%s' hooks ;;
+    "cli wrapper"|"cli wrappers")                          printf '%s' wrappers ;;
+    "mcp server"|"mcp servers")                            printf '%s' mcp_servers ;;
+  esac
+}
+
+lane_want(){ # lane noun -> expected count for that lane's row, or empty if the noun has no family
+  _ln_lane=$1 _ln_noun=$2
+  _ln_fam=$(lane_family_for "$_ln_noun")
+  [ -n "$_ln_fam" ] || { printf ''; return; }
+  command -v jq >/dev/null || { printf ''; return; }
+  _ln_present=$(jq -r --arg lane "$_ln_lane" --arg fam "$_ln_fam" \
+    '(.profiles[$lane].ships // []) | index($fam) != null' claude/inventory.json 2>/dev/null)
+  if [ "$_ln_present" != "true" ]; then printf '%s' 0; return; fi
+  if [ "$_ln_fam" = hooks ]; then
+    _ln_wired=$(jq -r --arg lane "$_ln_lane" \
+      '(.profiles[$lane].hook_scripts_wired // empty) | length' claude/inventory.json 2>/dev/null)
+    if [ -n "$_ln_wired" ] && [ "$_ln_wired" != null ]; then printf '%s' "$_ln_wired"; return; fi
+  fi
+  case "$_ln_fam" in
+    skills)      printf '%s' "$nsk" ;;
+    agents)      printf '%s' "$nag" ;;
+    commands)    printf '%s' "$ncm" ;;
+    hooks)       printf '%s' "$nhk" ;;
+    wrappers)    printf '%s' "$nwr" ;;
+    mcp_servers) printf '%s' "$nmc" ;;
+  esac
+}
+
+want_for(){ # noun (lowercased, plural or singular), optional lane ("full"/"plugin"/"overlay")
+            # -> expected count, or empty if not covered. With a lane given, resolves against
+            # profiles.<lane>.ships in claude/inventory.json instead of the repo-wide totals below.
+  if [ -n "${2:-}" ]; then
+    lane_want "$2" "$1"
+    return
+  fi
   case "$1" in
     skill|skills)                                   printf '%s' "$nsk" ;;
     check|checks)                                   printf '%s' "$nck" ;;
@@ -587,17 +641,44 @@ EOF
 $(printf '%s' "$norm" | grep -oE "(^|[^\$[:alnum:]])[0-9]+ ($NOUNS)" | sed -E 's/^[^0-9]*//' | sort -u)
 EOF
 
-  # table form: "| Commands | 14 |"
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    noun=$(printf '%s' "$row" | sed -E 's/^\| *//; s/ *\|.*//' | tr '[:upper:]' '[:lower:]')
-    num=$(printf '%s' "$row" | sed -E 's/.*\| *([0-9]+).*/\1/')
-    want=$(want_for "$noun")
-    [ -n "$want" ] && [ "$num" != "$want" ] \
-      && errs="$errs\n$f: table row '$noun' says $num, tree has $want"
-  done <<EOF
-$(printf '%s' "$norm" | grep -oE '\| *[A-Za-z][A-Za-z ]*\| *[0-9]+ *\|' | sort -u)
+  # table form: "| Commands | 14 |". The trailing "( *\([^|]*\))?" lets a cell read
+  # "2 (routing only)" or "0 (not this lane)" match at all -- without it the number was still
+  # there but the whole row fell out of the extraction silently, which is how the plugin lane's
+  # Hooks/CLI-wrappers/MCP-servers rows escaped every check for this repository's life.
+  if [ "$f" = README.md ]; then
+    # README states its component table once per install lane (see "## What lands where"), and
+    # the two lanes ship different things. Scanning the whole file as one blob is lane-blind by
+    # construction, so split on the two lane headings already in the prose (they are the anchor
+    # the "Confirm it worked" paragraph above this check already points a reader at) and resolve
+    # each half's rows against that lane's own profile in claude/inventory.json.
+    full_seg=$(printf '%s' "$norm" | sed -E 's/^.*\*\*Full install\*\*//; s/\*\*Plugin-marketplace install\*\*.*$//')
+    plugin_seg=$(printf '%s' "$norm" | sed -E 's/^.*\*\*Plugin-marketplace install\*\*//; s/## Day to day.*$//')
+    for _lane_seg in "full:$full_seg" "plugin:$plugin_seg"; do
+      _lane=${_lane_seg%%:*}
+      _seg=${_lane_seg#*:}
+      while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        noun=$(printf '%s' "$row" | sed -E 's/^\| *//; s/ *\|.*//' | tr '[:upper:]' '[:lower:]')
+        num=$(printf '%s' "$row" | sed -E 's/.*\| *([0-9]+).*/\1/')
+        want=$(want_for "$noun" "$_lane")
+        [ -n "$want" ] && [ "$num" != "$want" ] \
+          && errs="$errs\n$f: $_lane lane table row '$noun' says $num, that lane ships $want"
+      done <<EOF2
+$(printf '%s' "$_seg" | grep -oE '\| *[A-Za-z][A-Za-z ]*\| *[0-9]+( *\([^|]*\))? *\|' | sort -u)
+EOF2
+    done
+  else
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      noun=$(printf '%s' "$row" | sed -E 's/^\| *//; s/ *\|.*//' | tr '[:upper:]' '[:lower:]')
+      num=$(printf '%s' "$row" | sed -E 's/.*\| *([0-9]+).*/\1/')
+      want=$(want_for "$noun")
+      [ -n "$want" ] && [ "$num" != "$want" ] \
+        && errs="$errs\n$f: table row '$noun' says $num, tree has $want"
+    done <<EOF
+$(printf '%s' "$norm" | grep -oE '\| *[A-Za-z][A-Za-z ]*\| *[0-9]+( *\([^|]*\))? *\|' | sort -u)
 EOF
+  fi
 done
 
 # Config values quoted in prose drift exactly the way counts do. how-skills-fire.md teaches the
