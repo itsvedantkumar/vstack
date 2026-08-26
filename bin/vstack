@@ -232,7 +232,8 @@ case "$CMD" in
     if [ "$YES" -ne 1 ]; then
       if [ -t 0 ]; then
         echo "this arms the Stop-hook gate to execute $v (and whatever install.sh-shaped"
-        echo "scripts it references at the repo root) unattended, on every commit, from now on."
+        echo "scripts, sourced files, or package.json/pyproject.toml/Cargo.toml manifests it"
+        echo "references at the repo root) unattended, on every commit, from now on."
         echo "the boundary this command exists to protect is anchored on a human having read"
         echo "the script first -- nothing after this point checks that you actually did."
         printf 'have you read %s yourself, just now? [y/N] ' "$v"
@@ -265,11 +266,58 @@ case "$CMD" in
     # A path verify.sh builds at runtime is still invisible here, and no amount of scanning fixes
     # that. The boundary is anchored on a human reading the script before running this command;
     # what the hashes buy is that it cannot change afterwards without the gate noticing.
+    #
+    # `source foo` / `. foo` loads and executes a file with no `.sh` suffix requirement at all --
+    # the grep above only ever matched files literally named *.sh, so a dot-sourced `lib/helpers`
+    # was invisible to it even though it runs with the same authority as verify.sh itself.
+    src_refs=$(grep -E '^[[:space:]]*(source|\.)[[:space:]]+[A-Za-z0-9_./-]+' "$v" 2>/dev/null \
+               | sed -E 's/^[[:space:]]*(source|\.)[[:space:]]+([A-Za-z0-9_./-]+).*/\2/' | sort -u)
+    #
+    # create-verification-skill's own default template (claude/verify.sh.tmpl) branches on
+    # package.json / pyproject.toml / Cargo.toml and shells out to `npm run`, `uv run pytest`,
+    # `cargo test` -- none of which is a *.sh or source/. path, so none of it was ever in the
+    # hashed set. Editing scripts.test in package.json (or the dependency graph / build backend
+    # in pyproject.toml, or Cargo.toml's deps/[patch]/build.rs) gets code execution at Stop-hook
+    # time in an already-trusted repo without the trust hash ever moving.
+    #
+    # verify-gate.sh can only compare one real file's current bytes against a recorded hash, so
+    # "hash just the scripts object" isn't available here -- that needs the checker to parse and
+    # re-derive a subset on every run, and this command doesn't own verify-gate.sh. The whole
+    # manifest is the finest grain this mechanism has, so a manifest is tracked whole (any edit,
+    # including an unrelated dependency bump, re-arms confirmation -- deliberately coarse, not
+    # narrowed, because a narrower claim would not be true). Lockfiles and build.rs are tracked
+    # alongside the manifest because they carry execution paths the manifest text alone doesn't:
+    # a pinned git/registry source in uv.lock or Cargo.lock, and Cargo's build.rs, which cargo
+    # runs by filesystem convention with no textual reference in Cargo.toml at all.
+    #
+    # None of this reaches a local path dependency's own file content (`{path = "../x"}` in
+    # pyproject.toml's [tool.uv.sources], or a path entry in Cargo.toml/[patch]) -- those are
+    # recorded by path, not by content hash, in either ecosystem's lockfile, so editing files
+    # under a path dependency runs new code without retriggering trust. That gap is documented,
+    # not closed, for the same reason a runtime-built *.sh path isn't: no static scan closes it.
+    manifests=""
+    grep -qE 'npm (run|test)|package\.json' "$v" 2>/dev/null && manifests="$manifests package.json"
+    grep -qE 'uv run|pyproject\.toml' "$v" 2>/dev/null && manifests="$manifests pyproject.toml uv.lock"
+    grep -qE 'cargo (test|build)|Cargo\.toml' "$v" 2>/dev/null && manifests="$manifests Cargo.toml Cargo.lock build.rs"
+    # Resolve symlinks before trusting a path: a repo-root-looking relative path (no leading
+    # `/`, no `..`) can still walk out of the repo through a symlinked directory, and a human
+    # reading "trusted: N scripts at the repo root" is being told something false if one of them
+    # is actually outside it. `realpath` is standard on current macOS and Linux; the `pwd -P`
+    # fallback only resolves symlinked directory components, not a symlinked leaf file itself --
+    # a narrower guarantee, kept rather than skipped, on hosts without realpath.
+    if command -v realpath >/dev/null 2>&1; then root_phys=$(realpath "$root" 2>/dev/null)
+    else root_phys=$(cd "$root" && pwd -P); fi
     n=1
-    for extra in $(grep -ohE '[A-Za-z0-9_][A-Za-z0-9_./-]*\.sh' "$v" 2>/dev/null | sed 's|^\./||' | sort -u) \
+    for extra in $(printf '%s\n' "$src_refs" \
+                     "$(grep -ohE '[A-Za-z0-9_][A-Za-z0-9_./-]*\.sh' "$v" 2>/dev/null | sed 's|^\./||')" \
+                     "$manifests" | sort -u) \
                  install.sh overlay.sh uninstall.sh bootstrap.sh; do
+      [ -n "$extra" ] || continue
       case "$extra" in /*|*..*) continue ;; esac
       [ -f "$root/$extra" ] || continue
+      if command -v realpath >/dev/null 2>&1; then extra_phys=$(realpath "$root/$extra" 2>/dev/null)
+      else extra_phys=$(cd "$(dirname "$root/$extra")" 2>/dev/null && pwd -P)/$(basename "$extra"); fi
+      case "$extra_phys" in "$root_phys"/*) ;; *) continue ;; esac
       [ "$root/$extra" = "$v" ] && continue
       grep -qF "  $root/$extra" "$tmp" && continue
       if command -v shasum >/dev/null 2>&1; then eh=$(shasum -a 256 "$root/$extra" | cut -d' ' -f1)
