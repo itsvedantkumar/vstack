@@ -23,7 +23,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 # Skipped when the harness is the caller (it exports VSTACK_FALSIFY), and a lock whose process has
 # died is ignored rather than honoured -- a killed run must not wedge the gate for everyone.
 if [ -z "${VSTACK_FALSIFY:-}" ]; then
-  _lk="$(git rev-parse --git-dir 2>/dev/null)/vstack-falsifiability.lock"
+  # --git-common-dir, not --git-dir: the latter is PER-WORKTREE, so a lock written by the
+  # falsifiability harness in one worktree would be invisible to a verify.sh run in another
+  # worktree of the same repo. --git-common-dir is the same path from every worktree.
+  _lk="$(git rev-parse --git-common-dir 2>/dev/null)/vstack-falsifiability.lock"
   if [ -f "$_lk" ] && kill -0 "$(cat "$_lk" 2>/dev/null)" 2>/dev/null; then
     printf 'REFUSED  tests/gate-falsifiability.sh (pid %s) is mutating this working tree.\n' "$(cat "$_lk")"
     printf '         Any result now would name a defect the harness planted. Wait for it to finish.\n'
@@ -227,8 +230,17 @@ done
 # program ships green and then aborts a real install halfway through. Run the same program
 # here against a throwaway target. This check exists because exactly that happened.
 if command -v jq >/dev/null; then
-  prog=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh \
-         | sed '1d;$d')
+  # The invocation this extracts from is itself multi-line and \-continued (one --arg/--argjson
+  # per line before the jq filter's opening quote), and how many lines that spans is not fixed --
+  # it grew from one line to two when --argjson allowed was added, and the old "drop exactly the
+  # first captured line" extraction silently fed the SECOND invocation line ("--argjson allowed
+  # \"$ALLOWED_HOOKS_JSON\" '") into jq as if it were filter text, a syntax error that looked
+  # like install.sh's program was broken when the bug was in how this check reads it. Drop every
+  # line up to and including the one that ends in the filter's bare opening quote, however many
+  # of them there are, rather than a fixed count.
+  raw=$(sed -n "/^  jq -s --arg h /,/^  ' \"\$US\"/p" install.sh)
+  prog=$(printf '%s\n' "$raw" | awk 'f==1{print} f==0 && /'"'"'[[:space:]]*$/{f=1}')
+  prog=$(printf '%s\n' "$prog" | sed '$d')
   if [ -z "$prog" ]; then
     bad "settings merge program" "could not extract the jq program from install.sh"
   else
@@ -238,6 +250,7 @@ if command -v jq >/dev/null; then
     out=$(printf '{}\n' > "$md/a.json"; cp claude/settings.json "$md/b.json";
           jq -s --arg h "/tmp/hooks" --argjson retired '["probe_retired_key"]' \
              --argjson cm_present false --argjson tsl_present false \
+             --argjson allowed '["format","inject-session-context","verify-gate"]' \
              "$prog" "$md/a.json" "$md/b.json" 2>&1)
     if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
       ok "settings merge program"
@@ -697,7 +710,10 @@ fi
 # suite does get killed. Refusing to the harness itself deadlocks it against its own lock.
 g_errs=""
 if command -v git >/dev/null 2>&1; then
-  _gd=$(git rev-parse --git-dir 2>/dev/null)
+  # --git-common-dir: same reasoning as the two anchors above -- this probe's whole point is to
+  # write to the exact path the harness and the refusal check above use as the lock, and that has
+  # to be the shared, not per-worktree, path.
+  _gd=$(git rev-parse --git-common-dir 2>/dev/null)
   if [ -n "$_gd" ] && [ -w "$_gd" ]; then
     _lkf="$_gd/vstack-falsifiability-probe.lock"
     _saved=""
@@ -2924,6 +2940,81 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
     || bad "plugin-lane hooks run standalone" "$(printf '%b' "$c47_errs")"
 else
   skip "plugin-lane hooks run standalone" "jq or git not installed"
+fi
+
+# --- 48. the inventory contract matches what the tree actually ships ---------------------------
+# claude/inventory.json is a check-time oracle: nothing shipped reads it, install.sh keeps
+# deriving what it does straight from the filesystem exactly as before the file existed. The
+# only value it has is that something independent regenerates the same lists/counts and diffs —
+# tests/inventory-contract.sh is that independent half; this wires it into the gate.
+if command -v jq >/dev/null 2>&1; then
+  c48_errs=""
+  c48_out=$(./tests/inventory-contract.sh 2>&1)
+  c48_rc=$?
+  [ "$c48_rc" -eq 0 ] || c48_errs="$c48_errs\n$c48_out"
+
+  # doctor's plugin-lane hook text, cross-checked against the contract rather than a number
+  # copied into this check by hand. c842cc2 fixed the README's plugin-lane row and added check
+  # 47 to run every plugin-lane hook standalone; bin/doctor's own prose was not part of that fix
+  # and, if it still claims the lane ships no hooks, disagrees with a component the contract
+  # itself (claude/inventory.json's profiles.plugin.ships) says the lane does ship.
+  if jq -e '.profiles.plugin.ships | index("hooks")' claude/inventory.json >/dev/null 2>&1; then
+    if grep -qE '"hooks" +"not part of the plugin lane by design' bin/doctor 2>/dev/null; then
+      c48_errs="$c48_errs\nbin/doctor still says hooks are 'not part of the plugin lane by design'; claude/inventory.json's profiles.plugin.ships names hooks as a component that lane does ship (2 routing hooks as of c842cc2)"
+    fi
+  fi
+
+  # ATTRIBUTION provenance: the union of components.skills.provenance's six source lists must
+  # equal components.skills.members exactly, each source list's length must equal its
+  # ATTRIBUTION.md section heading count, and the sum of those must equal the skill count.
+  c48_prov_union=$(jq -r '.components.skills.provenance[].skills[]' claude/inventory.json 2>/dev/null | sort -u)
+  c48_members=$(jq -r '.components.skills.members[]' claude/inventory.json 2>/dev/null | sort -u)
+  if [ "$c48_prov_union" != "$c48_members" ]; then
+    c48_added=$(comm -23 <(printf '%s\n' "$c48_prov_union") <(printf '%s\n' "$c48_members") 2>/dev/null)
+    c48_missing=$(comm -13 <(printf '%s\n' "$c48_prov_union") <(printf '%s\n' "$c48_members") 2>/dev/null)
+    c48_msg="components.skills.provenance's six source lists do not union to components.skills.members."
+    [ -n "$c48_added" ]   && c48_msg="$c48_msg\n  in provenance, not in members: $(printf '%s' "$c48_added" | tr '\n' ' ')"
+    [ -n "$c48_missing" ] && c48_msg="$c48_msg\n  in members, not in any provenance list: $(printf '%s' "$c48_missing" | tr '\n' ' ')"
+    c48_errs="$c48_errs\n$c48_msg"
+  fi
+  c48_prov_sum=0
+  for c48_src in $(jq -r '.components.skills.provenance | keys[]' claude/inventory.json 2>/dev/null); do
+    c48_n=$(jq -r --arg s "$c48_src" '.components.skills.provenance[$s].skills | length' claude/inventory.json 2>/dev/null)
+    # ATTRIBUTION.md's own heading text does not spell the provenance key verbatim (the key is
+    # "vercel-labs", the heading says "Vercel Labs"), so map key -> the substring its heading
+    # actually contains rather than assume they match.
+    case "$c48_src" in
+      (pstack)      c48_hpat='pstack' ;;
+      (superpowers) c48_hpat='Superpowers' ;;
+      (impeccable)  c48_hpat='Impeccable' ;;
+      (vercel-labs) c48_hpat='Vercel Labs' ;;
+      (mattpocock)  c48_hpat='Matt Pocock' ;;
+      (original)    c48_hpat='Original' ;;
+      (*)           c48_hpat="$c48_src" ;;
+    esac
+    c48_hn=$(grep -E "^#+ .*$c48_hpat" claude/skills/ATTRIBUTION.md 2>/dev/null \
+             | grep -oE '\([0-9]+\)' | head -1 | tr -d '()')
+    if [ -z "$c48_hn" ]; then
+      c48_errs="$c48_errs\nclaude/skills/ATTRIBUTION.md has no '(N)' section heading matching provenance source '$c48_src'"
+    elif [ "$c48_hn" != "$c48_n" ]; then
+      c48_errs="$c48_errs\ncomponents.skills.provenance.$c48_src lists $c48_n skill(s); claude/skills/ATTRIBUTION.md's matching heading says ($c48_hn)"
+    fi
+    c48_prov_sum=$((c48_prov_sum + c48_n))
+  done
+  c48_skill_count=$(jq -r '.components.skills.count' claude/inventory.json 2>/dev/null)
+  if [ "$c48_prov_sum" != "$c48_skill_count" ]; then
+    c48_errs="$c48_errs\nclaude/skills/ATTRIBUTION.md provenance: the six source lists sum to $c48_prov_sum skills, components.skills.count says $c48_skill_count"
+  fi
+  c48_attr_sum=$(grep -oE '\([0-9]+\)' claude/skills/ATTRIBUTION.md 2>/dev/null | tr -d '()' | awk '{s+=$1} END{print s+0}')
+  if [ "$c48_attr_sum" != "$c48_skill_count" ]; then
+    c48_errs="$c48_errs\nclaude/skills/ATTRIBUTION.md's own '(N)' section headings sum to $c48_attr_sum, components.skills.count says $c48_skill_count"
+  fi
+
+  [ -z "$c48_errs" ] \
+    && ok "inventory contract matches the tree" \
+    || bad "inventory contract matches the tree" "$(printf '%b' "$c48_errs")"
+else
+  skip "inventory contract matches the tree" "jq not installed"
 fi
 
 echo

@@ -13,9 +13,10 @@
   "derived_at": {
     "head": "3f1d02061b319a07e3773463c3fa428dedd5b542",
     "payload_digest": "936ef1b35440cc97214511033901406c38ade2d68a3483ae302c5296a2a1d326",
-    "digest_recipe": "{ git ls-files -s -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh; git status --porcelain -- <same>; } | shasum -a 256",
+    "digest_recipe": "{ git ls-files -s -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; git status --porcelain -- claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh ':(exclude)claude/inventory.json'; } | shasum -a 256",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
-    "concurrency_warning": "Derived from a working tree that other agents were editing at the same time. Any consumer that trusts these numbers without regenerating them is the defect this file exists to catch."
+    "concurrency_warning": "Derived from a working tree that other agents were editing at the same time. Any consumer that trusts these numbers without regenerating them is the defect this file exists to catch.",
+    "self_reference_note": "claude/inventory.json lives inside claude/, which this recipe scans, so the recipe excludes the file's own path with a git pathspec. Without that exclusion the digest could never match itself: committing the file changes its own blob hash, which changes the scanned tree, which changes the digest the file is trying to record -- a fixed point that cannot be reached by editing the file. Excluding the file's own path makes payload_digest mean \"did the shippable payload move\", not \"did this contract about the payload move\", which is also the more honest reading of the field's name."
   },
   "regeneration": {
     "rule": "Every list and count below is derived from the tree, never hand-written. A validator regenerates them and diffs.",
@@ -548,7 +549,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 47,
+      "declared_checks": 48,
       "check_ids": [
         "0",
         "1",
@@ -596,7 +597,8 @@
         "44",
         "45",
         "46",
-        "47"
+        "47",
+        "48"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
@@ -617,7 +619,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 56,
+        "rows": 57,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way."
       },
       {

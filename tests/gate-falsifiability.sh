@@ -18,7 +18,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -84,7 +84,11 @@ CONFLICT_DIR=$(mktemp -d)
 # The lock lives in .git, not the worktree, so it can never show up in the tree-unchanged diff at
 # the end. It carries this pid, and verify.sh ignores a lock whose process is gone, so a killed
 # run cannot wedge the gate for everyone -- which matters, because this suite does get killed.
-LOCK="$(git rev-parse --git-dir 2>/dev/null)/vstack-falsifiability.lock"
+# --git-common-dir, not --git-dir: the latter is PER-WORKTREE (.git/worktrees/<name> from a
+# linked worktree), so a lock written there is invisible to a peer session working a different
+# worktree of the same repo. --git-common-dir resolves to the same path from every worktree.
+# See docs/worktree-collision-detection.md.
+LOCK="$(git rev-parse --git-common-dir 2>/dev/null)/vstack-falsifiability.lock"
 printf '%s\n' "$$" > "$LOCK" 2>/dev/null || LOCK=""
 # EXIT alone does not fire when the shell is killed, and this suite gets killed: someone restarts
 # it at a later commit, or a wrapper times it out. Both times that happened today it left a
@@ -236,6 +240,7 @@ files_for(){ case "$1" in
   7)   printf 'claude/CLAUDE.md' ;;
   8|9|11) printf 'install.sh' ;;
   47)  printf 'claude/hooks/hooks.json' ;;
+  48)  printf 'claude/inventory.json' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   12)  printf 'README.md' ;;
@@ -290,6 +295,7 @@ label_for(){ case "$1" in
   8)   printf 'settings merge program' ;;
   9)   printf 'install.sh --dry-run' ;;
   47)  printf 'plugin-lane hooks run standalone' ;;
+  48)  printf 'inventory contract matches the tree' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   11)  printf 'hook wiring' ;;
@@ -372,6 +378,10 @@ exit 7
   # README said the lane installed no hooks at all.
   47) jq '.hooks.Stop[0].hooks = ([{type:"command",shell:"bash",command:"\"${CLAUDE_PLUGIN_ROOT}/hooks/verify-gate.sh\""}] + .hooks.Stop[0].hooks)' \
         claude/hooks/hooks.json > /tmp/c47row.$$ && cat /tmp/c47row.$$ > claude/hooks/hooks.json && rm -f /tmp/c47row.$$ ;;
+  48) # An unrecognised contract_version: tests/inventory-contract.sh must fail loudly rather
+      # than silently reading fields whose meaning may have changed under it.
+      jq '.contract_version = 999' claude/inventory.json > /tmp/c48row.$$ \
+        && cat /tmp/c48row.$$ > claude/inventory.json && rm -f /tmp/c48row.$$ ;;
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
   11) # drop the PostToolUse key while PostToolUseFailure stays: the exact shape the old

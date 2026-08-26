@@ -446,11 +446,15 @@ get_perms(){
 }
 
 # Expectations come from the repo when it can be found, so adding a hook or an agent does not
-# need a matching edit here. The hardcoded fallbacks are what this file used to assert
-# unconditionally, and both had already fallen behind the tree.
+# need a matching edit here. This used to fall back to a hardcoded HOOKS list and WANT_AGENTS=6
+# when no repo could be resolved, and both had already fallen behind the tree (4 of 7 hooks, 6
+# of 14 agents) -- a constant that goes stale is a check with no second opinion asserting itself
+# as if it had one. Both cases below now DECLINE TO ASSERT with no repo to compare against,
+# instead of asserting a number that is only ever accurate by coincidence. HOOKS="" and
+# WANT_AGENTS="" are the "no repo resolved" signal the two call sites branch on.
 R=$(resolve_vstack_repo 2>/dev/null) || R=""
-HOOKS="format inject-session-context verify-gate failure-diagnose"
-WANT_AGENTS=6
+HOOKS=""
+WANT_AGENTS=""
 if [ -n "$R" ]; then
   h=$(ls "$R"/claude/hooks/*.sh 2>/dev/null | while read -r f; do basename "$f" .sh; done | tr '\n' ' ')
   [ -n "$h" ] && HOOKS="$h"
@@ -607,7 +611,11 @@ if [ -n "$SK_DIR" ]; then
   nag=$(ls "$AG_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
   ncm=$(ls "$CM_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
   [ "${nsk:-0}" -gt 0 ] && ok "skills ($nsk)" || bad "skills" "none found in $SK_DIR"
-  [ "${nag:-0}" -ge "$WANT_AGENTS" ] && ok "subagents ($nag)" || bad "subagents" "$nag<$WANT_AGENTS"
+  if [ -n "$WANT_AGENTS" ]; then
+    [ "${nag:-0}" -ge "$WANT_AGENTS" ] && ok "subagents ($nag)" || bad "subagents" "$nag<$WANT_AGENTS"
+  else
+    note "subagents ($nag)" "no vstack repo found to compare against -- cannot assert a minimum, only report the count"
+  fi
   [ "${ncm:-0}" -gt 0 ] && ok "commands ($ncm)" || bad "commands" "none found in $CM_DIR"
 else
   note "skills / agents / commands" "no install found, nothing to count"
@@ -616,15 +624,24 @@ fi
 section "hooks"
 if [ "$FULL_LIVE" -eq 1 ]; then
   # inject-orchestrator + inject-tokenmaxxing were merged into inject-session-context (2026-08-10)
-  for f in $HOOKS; do
-    [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
+  if [ -n "$HOOKS" ]; then
+    for f in $HOOKS; do
+      [ -x "$CDIR/hooks/$f.sh" ] && ok "$f.sh" || bad "$f.sh" "missing/not exec"; done
+  else
+    note "hooks" "no vstack repo found to compare against -- cannot enumerate which hook scripts should exist"
+  fi
   [ -x "$HOME/.config/agents/bin/claude-bg.sh" ] && ok "claude-bg.sh (headless)" || bad "claude-bg.sh" "missing"
   # bin/claude-task.sh ships in the same sweep (install.sh copies bin/* wholesale) and nothing in
   # the repository named it, so nothing checked it either -- it was installed on every machine and
   # findable from none. It is the scheduled-task runner cron drives.
   [ -x "$HOME/.config/agents/bin/claude-task.sh" ] && ok "claude-task.sh (scheduled runs)" || bad "claude-task.sh" "missing"
 elif [ -n "$PLUGIN_ROOT" ]; then
-  note "hooks" "not part of the plugin lane by design -- take the full install (git clone + ./install.sh) for hooks, the shell lane, and the CLI wrappers"
+  # As of c842cc2 the plugin lane DOES wire hooks -- claude/hooks/hooks.json auto-discovers into
+  # it, SessionStart + Stop routing only (inject-session-context.sh, skill-mandate.sh). README's
+  # component table and .claude/verify.sh check 47 both know this; this note used to be the one
+  # place left still claiming the lane installed zero. verify.sh check 48 asserts this note does
+  # not regress by cross-checking it against claude/inventory.json's profiles.plugin.ships.
+  note "hooks" "2 routing hooks via claude/hooks/hooks.json (SessionStart + Stop) -- no verify-gate.sh, no shell lane, no CLI wrappers; take the full install for those"
 else
   note "hooks" "no install found, nothing to check"
 fi

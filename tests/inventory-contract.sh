@@ -34,13 +34,19 @@ case "$SUPPORTED_CONTRACT_VERSIONS" in
   (*) fail "contract_version" "claude/inventory.json declares contract_version $cv, which this validator does not recognise (known:$SUPPORTED_CONTRACT_VERSIONS). The schema may have changed under it -- update tests/inventory-contract.sh before trusting anything else in this file, do not proceed past this line." ;;
 esac
 
-# --- payload digest: recompute the exact recipe the file documents (derived_at.digest_recipe)
-# and compare. A mismatch means the tree moved since this snapshot was taken and every derived
-# field below needs re-checking -- the file calls this out itself
-# (derived_at.staleness_is_the_signal): "the intended failure, not a maintenance chore".
-DIGEST_PATHS="claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh"
-# shellcheck disable=SC2086 # DIGEST_PATHS is a fixed, script-owned word list, not user input
-computed_digest=$( { git ls-files -s -- $DIGEST_PATHS; git status --porcelain -- $DIGEST_PATHS; } | shasum -a 256 | awk '{print $1}')
+# --- payload digest: recompute the EXACT recipe the file documents (derived_at.digest_recipe),
+# by eval'ing that string rather than a copy of it kept here, so the recipe this script runs and
+# the recipe the file claims to be reporting can never drift apart from each other. A mismatch
+# means the tree moved since this snapshot was taken and every derived field below needs
+# re-checking -- the file calls this out itself (derived_at.staleness_is_the_signal): "the
+# intended failure, not a maintenance chore".
+#
+# The recipe excludes claude/inventory.json's own path on purpose (derived_at.self_reference_note):
+# the file lives inside claude/, which the recipe scans, so without the exclusion the digest could
+# never match itself -- committing the file changes its own blob hash, which changes the digest
+# it is trying to record, a fixed point editing the file cannot reach.
+digest_cmd=$(jq -r '.derived_at.digest_recipe' "$INV")
+computed_digest=$(eval "$digest_cmd" 2>/dev/null | awk '{print $1}')
 stated_digest=$(jq -r '.derived_at.payload_digest' "$INV")
 if [ "$computed_digest" = "$stated_digest" ]; then
   pass "payload_digest matches the tree ($computed_digest)"
@@ -63,7 +69,7 @@ check_list(){ # label, jq path to the declared array, regeneration.derivations k
   # runner labels, settings keys...). ci_runners in particular derives from one grep line per
   # CI job, and two jobs sharing a runner label is not a second, distinct member.
   regen=$(eval "$cmd" 2>/dev/null | sort -u)
-  declared=$(jq -r "$target[]" "$INV" 2>/dev/null | sort -u)
+  declared=$(jq -r "${target}[]" "$INV" 2>/dev/null | sort -u)
   if [ "$regen" = "$declared" ]; then
     n=$(printf '%s\n' "$regen" | grep -c .)
     pass "$label ($n entries, tree and contract agree)"
