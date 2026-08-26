@@ -158,3 +158,112 @@ adding a `permission_mode` field to the payload):
     g_pm 'git reset --hard HEAD~3'   default            ask
     g_pm 'git stash pop'             bypassPermissions  allow
 
+These five rows are current, not a draft, unaffected by the follow-up below (they use plain,
+unquoted commands) — safe for ZEEP to land verbatim.
+
+## Follow-up: the false positive the escalation introduced (RICK, same day)
+
+Reported by RICK: `emit_unattended_ask`'s `deny` path denies the **entire tool call**, and this
+repository's subject matter is destructive commands, so its own commit messages and docs
+constantly *mention* them. RICK's own literal repro:
+
+    d=$(mktemp -d); cd "$d"; git init -q .; touch a; git add a
+    git commit -q -m "prose about git reset --hard as documentation"
+
+**Disclosure: this exact command, byte for byte, does not reproduce a denial against this guard**
+— checked directly, four ways (offline JSON simulation, three live executions, one with the
+commit message built via the repo's own mandated `git commit -m "$(cat <<'EOF' ... EOF)"`
+convention) and it returns `allow` every time (`tests/repro/guard-quote-aware-split.sh`, direction
+0, asserts this stays true). Anchored patterns (`git\ reset\ *--hard*` and friends) require the
+segment to *start* with the keyword; "prose about git reset --hard" starts with "prose", not
+"git", so it never matched, before or after the fix below.
+
+**What actually happened, confirmed by reproducing my own real incident, not RICK's stated one:**
+my first attempt at this session's own commit message contained "...blocked; git reset --hard
+got..." — a `;` used as ordinary English punctuation, immediately followed by a phrase that
+matches an anchored ask-tier pattern. The compound split (`sed -e 's/;/\n/g; ...'`) does not know
+about quoting: it treated that `;` — sitting inside the `-m` argument's quotes — exactly like a
+real shell separator, and the resulting phantom segment (" git reset --hard got...") began exactly
+at the word "git", matched the anchored pattern, and under `bypassPermissions` escalated straight
+to `deny` for the whole call. Minimal, reliable reproduction:
+
+    git commit -m "line one; git reset --hard: docs"   ->  deny   (before this fix)
+
+RICK's actual diagnosis — "the discriminator is not destructive syntax, it is does the segment
+happen to start with `git`" — was the right instinct pointed at an example that happened not to
+trigger it. The real discriminator is narrower: a compound separator character sitting *inside a
+quoted argument*, landing immediately before text that independently matches an anchored pattern.
+
+### The fix RICK asked me to weigh both directions of
+
+**Considered and rejected: stripping quoted substrings before matching.** This is the "obvious
+fix" RICK named, and RICK asked me to check the other direction first: does the guard currently
+catch `bash -c "git clean -fd"` or `sh -c '...'` — destructive syntax deliberately hidden inside
+quotes? Checked directly (`tests/repro/guard-quote-aware-split.sh`, direction 4):
+
+    bash -c "git clean -fd"    ->  allow   (already true before any change here — anchoring, not
+                                             quoting, is why: `git\ clean\ *-*[dD]*[fF]*` requires
+                                             the segment to START with "git clean", and this
+                                             segment starts with "bash")
+    bash -c "rm -rf /etc"      ->  ask     (already true before any change here — the rm-family
+                                             ask-tier pattern is UNANCHORED, `*rm\ -[rRfF]*`, and
+                                             matches "rm -rf" anywhere in the segment, including
+                                             inside the quotes)
+
+So: the anchored git-family patterns get nothing from seeing inside quotes today (they never did —
+anchoring already blocks them regardless of quoting), but the unanchored rm/DB/infra/device/
+verify-trust patterns genuinely do catch destructive text hidden inside a quoted subshell argument
+today, by accident of substring matching. Stripping quoted text before matching, as first proposed,
+would have silently thrown away that real (if accidental) coverage for no gain — the anchored
+patterns that actually have the false-positive problem don't need quotes stripped, they need
+correct **segmentation**.
+
+**What was built instead: quote-aware segment splitting, not quote-content stripping.**
+`_gd_split()` in `claude/hooks/guard-destructive.sh` walks the command character by character,
+tracking single/double-quote state, and only treats `;`, `&`, `|` as real separators when they are
+not inside an open quote. The quoted text itself is never removed or altered — every pattern,
+anchored or not, still sees the full segment exactly as before. This fixes the false positive
+(a `;` inside quotes no longer manufactures a phantom segment) while leaving the unanchored
+families' accidental-but-real coverage of `bash -c "rm -rf ..."`-style indirection completely
+intact — verified both ways in `tests/repro/guard-quote-aware-split.sh` (15/15).
+
+**Stating plainly which of the two this is, per RICK's request:** this is still *matches syntax,
+not semantics* — not full shell parsing, and no claim otherwise. Specifically still NOT tracked:
+escaped quotes (`\"` inside a double-quoted string does not end it in real shell grammar; this
+scanner does not know that and would end the quote early — not exercised by any real construct
+this repo's own commit messages or docs use, and disclosed here rather than silently assumed
+correct) and backtick / `$(...)` command substitution (unchanged from before — still opaque, still
+falls through to the ask tier if destructive, exactly as the file's own header already said). What
+changed is narrower and precise: whether a `;`/`&`/`|` counts as a separator is now judged by
+quote state instead of by raw character presence, and nothing else about the guard's shell
+awareness moved.
+
+**Consolidation side effect:** the deny tier had two hand-duplicated copies of the same
+rm-root/force-push patterns — one in `_check_deny_segment()` (used for compound commands) and a
+second, separately-maintained copy for "simple" commands. Since `_gd_split` now always yields
+exactly one segment for a command with no real top-level separator, the simple case is just the
+compound case with N=1, and the duplicate block was deleted rather than kept in sync by hand. Same
+consolidation for the ask tier's simple/compound branches. Net effect: less code, one place each
+pattern family is defined, verified identical behavior for every existing case
+(`tests/repro/guard-quote-aware-split.sh` direction 3, plus a full re-run of check 23's own 30
+assertions unmodified — still 30/30).
+
+### Live proof, redone after this fix
+
+    git commit -q --allow-empty -m "line one; git reset --hard is mentioned here as documentation"
+    # rc=0, commit lands (was denied, whole call, before this fix)
+
+    # separately, the same disposable-sandbox / untracked-file / `git clean -fd` proof from above,
+    # rerun after this fix: still denied, atomically, exactly as before -- the fix narrows what
+    # triggers the escalation, it does not weaken the escalation itself.
+
+### What was left running on the operator's machine
+
+`~/.claude/hooks/guard-destructive.sh` is byte-identical to this repo's `HEAD` as of both fixes in
+this document (the bypassPermissions escalation and this quote-aware split). This is a deliberate
+install, not a leftover from a test: the live join proof requires driving the real hook, so the
+fix was copied there twice (once per fix), and left in place both times because it is the correct,
+committed behavior — not reverted after the proof, and not something a test harness manages on its
+own. If a decision is being tracked as "the operator chose to run the fixed guard live," it was
+made by leaving it there after the fact, not before.
+

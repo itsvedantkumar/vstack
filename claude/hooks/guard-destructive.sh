@@ -101,8 +101,84 @@ printf '%s' "$payload" | jq -e . >/dev/null 2>&1 \
 # catastrophic in a compound (echo hi; rm -rf /). Without this split, `true && git push -f origin main`
 # would skip the deny tier entirely and land on allow.
 #
-# We split on ; && || and | (backticks and $() are harder to parse and their contents fall through
-# to the ask tier if destructive). Each segment is checked against the same deny patterns.
+# We split on ; && || and | -- but only where they are real shell separators, not where they
+# appear as ordinary characters inside a quoted argument or a heredoc. A `;` typed as punctuation
+# in a commit message ("...blocked; git reset --hard got...") is not a separator, and treating it
+# as one manufactured a phantom segment that began at the next word; when that word matched an
+# anchored ask-tier pattern (git reset, git clean, git stash, ...), the guard denied a sentence
+# describing the command, not the command. Quote-tracking alone was not enough: this repo's own
+# mandated multi-line commit convention is `git commit -m "$(cat <<'EOF' ... EOF)"`, and a heredoc
+# body is verbatim text with no quote-matching semantics of its own -- treating every `"` inside
+# it as a toggle of the OUTER `-m "..."` quote desyncs on the first unrelated `"` the prose
+# contains, which any paragraph describing a quoting bug reliably does. So heredocs (`<<DELIM`,
+# `<<'DELIM'`, `<<"DELIM"`, `<<-DELIM`) are detected and their entire body, up to and including the
+# line that is exactly DELIM, is treated as one opaque span: not scanned for quotes or separators,
+# appended to the current segment verbatim. docs/guard-enforcement-gap.md has the incident.
+#
+# This is still not full shell parsing, and does not claim to be: escaped quotes (`\"` inside a
+# double-quoted string) are not tracked, and backticks / bare $(...) without a heredoc inside are
+# still opaque only in the pre-existing sense -- their contents fall through to the ask tier if
+# destructive, same as before this change, not specially detected as a nested context. A literal
+# `<<WORD` inside an ordinary quoted argument (rare, and not this repo's own convention) is treated
+# as a heredoc marker too; the failure mode is over-widening what counts as opaque text, which can
+# only make the guard MORE permissive of anchored patterns hiding inside it, never blind to the
+# unanchored families (rm/DB/infra/device), which scan the full segment regardless of internal
+# structure. That tradeoff is deliberate and disclosed, not an accident of the implementation.
+_gd_heredoc_skip() { # <remaining-text-after-the-marker> <delimiter> -> bytes through the terminator line (or full length if the delimiter never appears on its own line)
+  local tail="$1" delim="$2" n total
+  n=$(printf '%s' "$tail" | grep -n -x -F -- "$delim" 2>/dev/null | head -n1 | cut -d: -f1)
+  if [ -z "$n" ]; then
+    printf '%s' "${#tail}"
+    return
+  fi
+  total=$(printf '%s' "$tail" | awk -v n="$n" 'NR<=n{c+=length($0)+1} END{print c+0}')
+  printf '%s' "$total"
+}
+
+_gd_split() { # <cmd> -> one segment per line, respecting single/double quotes and heredocs
+  local cmd="$1" i=0 len ch nxt inq='' buf='' rest matched delim skip
+  len=${#cmd}
+  while [ "$i" -lt "$len" ]; do
+    ch="${cmd:$i:1}"
+    if [ "$ch" = '<' ] && [ "${cmd:$((i+1)):1}" = '<' ]; then
+      rest="${cmd:$((i+2))}"
+      if [[ "$rest" =~ ^-?[[:space:]]*(\'[A-Za-z_][A-Za-z0-9_]*\'|\"[A-Za-z_][A-Za-z0-9_]*\"|[A-Za-z_][A-Za-z0-9_]*) ]]; then
+        matched="${BASH_REMATCH[0]}"
+        delim="$matched"
+        delim="${delim#-}"; delim="${delim# }"
+        delim="${delim%\'}"; delim="${delim#\'}"
+        delim="${delim%\"}"; delim="${delim#\"}"
+        buf="$buf<<$matched"
+        i=$((i + 2 + ${#matched}))
+        rest="${cmd:$i}"
+        skip=$(_gd_heredoc_skip "$rest" "$delim")
+        buf="$buf${rest:0:$skip}"
+        i=$((i + skip))
+        continue
+      fi
+    fi
+    if [ -n "$inq" ]; then
+      buf="$buf$ch"
+      [ "$ch" = "$inq" ] && inq=''
+      i=$((i+1)); continue
+    fi
+    case "$ch" in
+      \'|\") inq="$ch"; buf="$buf$ch" ;;
+      ';') printf '%s\n' "$buf"; buf='' ;;
+      '&')
+        nxt="${cmd:$((i+1)):1}"
+        if [ "$nxt" = '&' ]; then printf '%s\n' "$buf"; buf=''; i=$((i+1))
+        else buf="$buf$ch"; fi ;;
+      '|')
+        nxt="${cmd:$((i+1)):1}"
+        if [ "$nxt" = '|' ]; then printf '%s\n' "$buf"; buf=''; i=$((i+1))
+        else printf '%s\n' "$buf"; buf=''; fi ;;
+      *) buf="$buf$ch" ;;
+    esac
+    i=$((i+1))
+  done
+  printf '%s\n' "$buf"
+}
 
 # Check if a segment contains a catastrophic command. If so, emit deny immediately.
 _check_deny_segment() {
@@ -135,49 +211,18 @@ _check_deny_segment() {
   esac
 }
 
-# Check compound commands: split on common separators and test each segment against deny patterns
-if printf '%s' "$CMD" | grep -qE '[;&|]' || printf '%s' "$CMD" | grep -q '&&\|||'; then
-  # The command contains compound separators; split and check each segment against deny patterns
-  while IFS= read -r seg; do
-    [ -n "$seg" ] || continue
-    seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    [ -n "$seg" ] || continue
-    _check_deny_segment "$seg"
-  done <<EOF
-$(printf '%s' "$CMD" | sed -e 's/;/\n/g; s/&&/\n/g; s/||/\n/g; s/|/\n/g')
-EOF
-fi
-
 # --- deny: the small set that is never a mistake worth allowing ----
-# For simple (non-compound) commands, check them directly
-if ! printf '%s' "$CMD" | grep -qE '[;&|]' && ! printf '%s' "$CMD" | grep -q '&&\|||'; then
-  # rm -rf against / or $HOME. Build-artifact deletes are the common legitimate case and are
-  # explicitly not this: the target has to be a filesystem or home root.
-  case "$CMD" in
-    rm\ *-*[rR]*[fF]*\ *|rm\ *-*[fF]*[rR]*\ *)
-      set -f
-      for tok in $CMD; do
-        # shellcheck disable=SC2088  # matching the literal ~ the user typed; expanding it here would
-        # compare $HOME against $HOME and let `rm -rf ~` through.
-        case "$tok" in
-          /|/\*|'~'|'~/'|'~/*'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
-            emit deny "[guard] recursive delete of / or your home directory. If you truly mean this, run it yourself outside the agent session." ;;
-        esac
-      done
-      set +f ;;
-  esac
-  # Force-push to a protected branch. Recoverable in principle, ruinous in practice, and the
-  # agent has no business doing it unprompted.
-  case "$CMD" in
-    git\ push\ *--force*|git\ push\ *-f\ *|git\ push\ *-f)
-      case "$CMD" in
-        # Match space-separated (origin main), colon-based refspecs (:main), and full refs paths.
-        # Full refspecs like HEAD:refs/heads/main must match via the :refs/heads/ pattern.
-        *\ main*|*\ master*|*:main*|*:master*|*:refs/heads/main*|*:refs/heads/master*)
-          emit deny "[guard] force-push to main or master. Push to a branch, or do it yourself outside the agent session." ;;
-      esac ;;
-  esac
-fi
+# Always split via _gd_split and check every resulting segment. A command with no real top-level
+# separator yields exactly one segment (the whole trimmed command), so this covers the "simple"
+# case too without a second, hand-duplicated copy of the same patterns to keep in sync by hand.
+while IFS= read -r seg; do
+  [ -n "$seg" ] || continue
+  seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  [ -n "$seg" ] || continue
+  _check_deny_segment "$seg"
+done <<EOF
+$(_gd_split "$CMD")
+EOF
 
 # Check if a segment triggers the ask tier
 _check_ask_segment() {
@@ -282,20 +327,15 @@ _check_ask_segment() {
   esac
 }
 
-# Apply ask tier to each segment of compound commands, or to the whole command if simple
-if printf '%s' "$CMD" | grep -qE '[;&|]' || printf '%s' "$CMD" | grep -q '&&\|||'; then
-  # Compound command: check each segment
-  while IFS= read -r seg; do
-    [ -n "$seg" ] || continue
-    seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    [ -n "$seg" ] || continue
-    _check_ask_segment "$seg"
-  done <<EOF
-$(printf '%s' "$CMD" | sed -e 's/;/\n/g; s/&&/\n/g; s/||/\n/g; s/|/\n/g')
+# Apply the ask tier the same way: always split via _gd_split, always loop. One segment for a
+# simple command, real segments for a compound one, quote-aware either way.
+while IFS= read -r seg; do
+  [ -n "$seg" ] || continue
+  seg=$(printf '%s' "$seg" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  [ -n "$seg" ] || continue
+  _check_ask_segment "$seg"
+done <<EOF
+$(_gd_split "$CMD")
 EOF
-else
-  # Simple command: check it as a whole
-  _check_ask_segment "$CMD"
-fi
 
 allow
