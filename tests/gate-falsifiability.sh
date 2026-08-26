@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
+CHECKS="0 1 2 3 4 5 6 7 8 9 9b 10 11 12 13 14 14b 15 16 17 18 18b 18c 19 20 20b 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 35b 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -282,6 +282,7 @@ files_for(){ case "$1" in
   31)  printf '' ;;   # plants a new file rather than editing one
   32|33) printf 'claude/hooks/inject-session-context.sh' ;;
   35)  printf 'ui-gate/ui-gate.sh' ;;
+  35b) printf 'bin/doctor' ;;
   36)  printf 'tests/evals/lib/runlog.sh' ;;
   37)  printf 'tests/evals/optimize.sh' ;;
   38)  printf 'tests/README.md' ;;
@@ -340,6 +341,7 @@ label_for(){ case "$1" in
   33)  printf 'project overlay stands down when the user-scope hook is live' ;;
   34)  printf 'the policy document reaches a session exactly once' ;;
   35)  printf 'gates refuse a green on nothing measured' ;;
+  35b) printf 'gates refuse a green on nothing measured' ;;
   36)  printf 'run logs are opened append-safe' ;;
   37)  printf 'optimiser decides correctly' ;;
   38)  printf 'every repository path named in prose exists' ;;
@@ -569,6 +571,15 @@ exit 0
       # rule skipped. One comparison, which is all it took the first time.
       sed -i.t 's/\[ "\$RAN" -eq 0 \]/[ "$RAN" -lt 0 ]/' ui-gate/ui-gate.sh \
         && rm -f ui-gate/ui-gate.sh.t ;;
+
+  35b) # The same check has a second subject, and row 35 only ever mutated the first. Neuter
+      # doctor's per-family floor so a family that matched nothing is accepted: -ge 0 is true
+      # for every count, including zero. CLAUDE.md and statusline.sh are compared
+      # unconditionally, so COMPARED stays above zero and the total-count floor below cannot
+      # catch it -- the empty-family stub then prints "no drift" over four families that
+      # compared nothing, which is the state bin/doctor shipped in before 1.14.0.
+      sed -i.t 's/\[ "\$2" -gt 0 \] && return 0/[ "$2" -ge 0 ] \&\& return 0/' bin/doctor \
+        && rm -f bin/doctor.t ;;
 
   36) # Restore the truncation: treat every log as new, which is the line that shipped three
       # times and threw away the previous arm each time.
