@@ -400,7 +400,7 @@ different findings and both matter.
 
 ## vstack-cli.sh
 
-`vstack-cli.sh` exercises `bin/vstack`'s subcommands against `mktemp -d` sandboxes with `HOME`
+`tests/vstack-cli.sh` exercises `bin/vstack`'s subcommands against `mktemp -d` sandboxes with `HOME`
 reassigned: `self-test`, `explain`, `recover` and the local run log. It is the only functional
 coverage `bin/vstack` has — the gate lints that file but never ran it.
 
