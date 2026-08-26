@@ -1,6 +1,5 @@
 {
   "_read_me": "Ground truth for tests/evals/agent-pilot. Each fixture carries exactly one planted defect and a deterministic detect_all list: extended regexes (grep -Ei, case-insensitive) that must ALL match somewhere in the arm's own assistant-authored output (never a tool_result -- see scorer.sh) for the verdict to be FOUND. AND-of-substrings, not a full semantic check: see PREREGISTRATION.md 'What could still produce a confident wrong answer' for the false-positive risk this trades for determinism.",
-
   "fixtures": [
     {
       "id": "code-reviewer-1",
@@ -101,20 +100,19 @@
       ]
     }
   ],
-
   "canary": {
-    "id": "canary-security-auditor-specialist",
+    "id": "canary-security-auditor",
     "role": "security-auditor",
-    "arm": "specialist",
     "file": "canary/canary.py",
     "delivered_as": "canary.py",
     "task": "Security review of canary.py in the current directory before it ships. Name the specific vulnerability and the line it is on.",
-    "planted_defect": "A hardcoded AWS secret access key at module scope (AWS_SECRET_ACCESS_KEY = \"AKIA...\"). Chosen as the canary defect because it is the single most obvious, least model-dependent finding this pilot could plant -- see PREREGISTRATION.md for why an obvious defect is the correct choice for a plumbing check rather than a hard one.",
+    "planted_defect": "upload() calls requests.put(..., verify=False), disabling TLS certificate verification -- a man-in-the-middle risk on every call. Chosen as the canary defect (in place of an earlier hardcoded-AWS-key version, changed 2026-08-26) because it is equally obvious and model-independent while containing nothing shaped like a credential -- the earlier version collided with this repository's own committed-secrets scanner (.claude/verify.sh check 5, pattern AKIA[0-9A-Z]{16} and the generic KEY/TOKEN/SECRET/PASSWORD=<20+ chars> alternative). See PREREGISTRATION.md, 'The canary', for why this one was chosen and why it is not a secret.",
     "detect_all": [
-      "AKIA",
-      "(secret|hardcod|credential)"
+      "verify[[:space:]]*=[[:space:]]*False",
+      "(tls|ssl|certificate|cert)[a-z '\"]*(disab|skip|bypass|not verif|no verif|unverif|off)|disab[a-z]*[a-z '\"]*(tls|ssl|certificate|cert|verif)|mitm|man-in-the-middle"
     ],
     "expected_verdict": "FOUND",
-    "if_not_found_it_means": "See PREREGISTRATION.md, 'The canary'. In summary: NOT_FOUND on a defect this obvious means the harness, not the model, failed -- wrong arm activated, fixture not delivered, or the scorer's regex is broken. NOT_RUN means the call never completed (crash, timeout, wrong arm name rejected by the CLI). NOT_CAPTURED means the call completed but the capture pipeline lost the output."
+    "if_not_found_it_means": "See PREREGISTRATION.md, 'The canary'. In summary: NOT_FOUND on a defect this obvious means the harness, not the model, failed -- wrong arm activated, fixture not delivered, or the scorer's regex is broken. NOT_RUN means the call never completed (crash, timeout, wrong arm name rejected by the CLI). NOT_CAPTURED means the call completed but the capture pipeline lost the output.",
+    "note_on_arms": "Runs on all three arms (direct, generic, specialist), not just one -- see PREREGISTRATION.md, 'The canary', for why a single-arm canary was rejected as insufficient coverage."
   }
 }

@@ -4,7 +4,7 @@ See `tests/evals/agent-pilot/README.md` for how to reproduce everything below, i
 scorer's offline self-test, which is the only execution this instrument performs before an
 operator opts in.
 
-Written before any of the 25 calls exist. Nothing in this file has been adjusted after seeing a
+Written before any of the 27 calls exist. Nothing in this file has been adjusted after seeing a
 result, because no result exists yet -- `tests/evals/agent-pilot/run.sh` refuses to spend a call
 without an operator's explicit opt-in, and nobody has given one. If a future edit to this file
 follows a run, that edit should say so in its own words rather than silently rewriting a
@@ -114,54 +114,91 @@ seeing an arm's output.
 - The canary is never pooled into the 24-cell comparison. It exists to validate the harness, not
   to add a ninth data point to any arm.
 
-## The canary, and why it is the most important of the 25 calls
+## The canary, and why it is the most important 3 of the 27 calls
 
 Twenty-four scored cells look exactly like real data whether or not the harness actually worked --
 a wrong `subagent_type`, a fixture that never reached the model, a capture pipe that silently
 dropped output, or a `detect_all` regex that cannot match anything would each still produce 24
 rows of FOUND/NOT_FOUND that read as a result. The canary is designed so a broken harness produces
-a **visibly wrong** canary result instead.
+a **visibly wrong** canary result instead, cheaply, before the other 24 are spent.
 
-**The fixture:** `canary/canary.py`, a hardcoded AWS secret access key
-(`AWS_SECRET_ACCESS_KEY = "AKIA..."`) at module scope -- the well-known AWS documentation example
-key, not a real credential. This is deliberately the single most obvious, least model-dependent
-defect this pilot could plant. A hard defect would make a NOT_FOUND result ambiguous between "the
-harness is broken" and "the model missed a genuinely hard case". An obvious one removes that
-ambiguity: **any arm that is actually reading the file and saying anything about it will name a
-hardcoded secret.** That is exactly why the canary is not one of the 8 scored fixtures -- it is
-not testing whether a specialist beats a generic subagent, it is testing whether the pipe between
-"a file exists" and "a verdict gets recorded" works at all.
+**The fixture:** `canary/canary.py`, a `requests.put(..., verify=False)` call inside a plausible
+`upload()` helper -- disabled TLS certificate verification, a man-in-the-middle risk on every call.
+This is deliberately the single most obvious, least model-dependent defect this pilot could plant:
+a hard defect would make a NOT_FOUND result ambiguous between "the harness is broken" and "the
+model missed a genuinely hard case"; an obvious one removes that ambiguity. **Any arm that is
+actually reading the file and saying anything about it will name disabled certificate
+verification.** That is exactly why the canary is not one of the 8 scored fixtures -- it is not
+testing whether a specialist beats a generic subagent, it is testing whether the pipe between "a
+file exists" and "a verdict gets recorded" works at all.
 
-**The arm:** `security-auditor`, specialist, the single call ground-truth.json's `.canary` entry
-fixes it to. Chosen because it is the arm exercising the most machinery -- a sandboxed
-`PILOT_HOME`, a copied `claude/agents/security-auditor.md`, a forced `Task` dispatch naming that
-`subagent_type` -- so a canary that passes through this arm is stronger evidence the plumbing
-works than a canary through the direct arm, which has no delegation step to get wrong.
+**Why not the hardcoded-secret version this canary originally shipped as (changed 2026-08-26):**
+the first draft planted an `AWS_SECRET_ACCESS_KEY` assignment holding AWS's own documented public
+example access key ID -- the string starting `AKIA` that AWS's own docs use as a placeholder
+everywhere, not a real credential -- chosen for exactly the same "obvious and model-independent"
+reason. It collided with this repository's own gate: `.claude/verify.sh` check 5 (no committed
+secrets) matches that `AKIA`-prefixed shape on any tracked file, with no awareness that the string
+is a fixture rather than a leak, and turned the gate red on this branch (this paragraph itself
+does not spell the example key out contiguously, on purpose, so that describing the fix does not
+retrigger the same check). The fix was **not** a
+path-scoped exemption for `canary/canary.py` -- an exemption to the secret scanner is a permanent
+narrowing of a real security claim traded for one fixture's convenience, and it is also exactly the
+shape an attacker benefits from having present. The fix was to change the fixture. `verify=False`
+is chosen because it is equally unmistakable to any arm that reads the file, equally
+model-independent, and contains nothing shaped like a key, token, or password -- it cannot trip
+check 5's `AKIA[0-9A-Z]{16}` pattern or its generic `(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z_]*=[A-Za-z0-9_/+-]{20,}`
+alternative, confirmed by replaying both patterns against this fixture and against every other file
+in `tests/evals/agent-pilot/` before committing. **If a future editor is tempted to make this
+canary "more realistic" by swapping in something credential-shaped again, don't -- that is the
+exact change that broke the gate the first time, and the TLS-verification version is not a
+downgrade in how obvious or how model-independent it is, only in how much it resembles a secret.**
 
-**Expected verdict: FOUND.**
+**The arms: all three, not one.** The original design ran the canary only through `security-auditor`
+specialist, on the reasoning that it exercises the most machinery -- a sandboxed `PILOT_HOME`, a
+copied `claude/agents/security-auditor.md`, a forced `Task` dispatch naming that `subagent_type` --
+so a pass there is stronger evidence than a pass through the direct arm, which has no delegation
+step to get wrong. That reasoning is still true, but it proves too little: the specialist arm's
+`Task` dispatch names `subagent_type=security-auditor` and installs an agent file; the generic
+arm's `Task` dispatch names `subagent_type=general-purpose` and installs nothing. These are
+different code paths inside `run_cell()` and a different resolution inside the CLI, and a green
+specialist canary says nothing about whether the generic arm's dispatch resolves at all, or
+whether the direct arm's simpler no-delegation path (the one carrying the least apparatus, and by
+that same logic the least likely to be the one that's broken) actually delivers the fixture either.
+**Minimum coverage that answers "is the harness wired correctly" for all three arms this pilot
+compares is one canary call per arm -- three calls, not one.** That is the deviation from the
+original 25-call brief this file now runs: 24 scored + 3 canary = 27. `ground-truth.json`'s
+`.canary` entry no longer pins a single `arm`; `run.sh`'s `enumerate_canary_cells()` loops the same
+fixture across `direct`, `generic`, and `specialist`, producing `canary-direct`, `canary-generic`,
+`canary-specialist`.
 
-**What each other verdict means, stated in advance so nobody improvises an explanation after
-seeing one:**
+**Expected verdict: FOUND, on all three.**
 
-- **NOT_FOUND** -- the call ran, produced real output, and never named the secret. On a defect
-  this obvious, that is not a competence result, it is the strongest available signal that
-  something in the harness is broken: the wrong `subagent_type` was dispatched (so a
-  non-security-auditor persona answered without the review framing), the fixture file was never
-  actually delivered into the working directory the model saw, or `detect_all`'s patterns
-  (`AKIA` and one of secret/hardcod/credential) are broken and cannot match true positive text
-  either. **Do not read the other 24 rows if this happens; diagnose the harness first.**
-- **NOT_RUN** -- the call never completed. Likely candidates, in order of how this repository's
-  own history has hit them: authentication failing under the reassigned `PILOT_HOME` (see
-  `run.sh`'s header on credential carry-over, and RESULTS.md's own first documented benchmark
-  defect -- "every baseline run returned Not logged in, scored zero"), the `security-auditor`
-  `subagent_type` being rejected by the CLI (a typo, a stale agent file), or the per-call timeout
-  being too short for a nested subagent dispatch.
+**What each other verdict means, on any of the three arms, stated in advance so nobody improvises
+an explanation after seeing one:**
+
+- **NOT_FOUND** -- the call ran, produced real output, and never named the vulnerability. On a
+  defect this obvious, that is not a competence result, it is the strongest available signal that
+  something in that arm's harness plumbing is broken: for `specialist`, the wrong `subagent_type`
+  was dispatched or the copied agent file didn't land; for `generic`, the `Task` dispatch to
+  `general-purpose` didn't happen or didn't receive the fixture; for `direct`, the fixture was never
+  actually delivered into the working directory the model saw, or the tool grant blocked reading
+  it. It can also mean `detect_all`'s patterns are broken and cannot match true-positive text
+  either -- check that first, since it is the one explanation common to all three arms failing
+  together. **Do not read the 24 scored rows for an arm whose canary is not FOUND; diagnose that
+  arm's harness first.**
+- **NOT_RUN** -- the call never completed: authentication failing under the reassigned
+  `PILOT_HOME` (see "Precondition" below -- this is no longer a hypothetical for this pilot, it is
+  a confirmed failure mode this file's `AGENT_PILOT_AUTH_MODE` gate exists to make the operator
+  choose about explicitly), a `subagent_type` rejected by the CLI (a typo, a stale agent file), or
+  the per-call timeout being too short for a nested subagent dispatch.
 - **NOT_CAPTURED** -- the call finished but the capture pipeline lost the output. Look at the
   redirection in `run_cell()`, not at the model.
 
-A non-FOUND canary is not "one bad data point to discard" -- it invalidates interpretation of the
-24 scored cells until the specific cause is found and fixed, because the same plumbing produced
-all 25.
+A non-FOUND canary on any one arm is not "one bad data point to discard" -- it invalidates
+interpretation of that arm's 8 scored rows (2 fixtures x 4 roles) until the specific cause is found
+and fixed, because the same per-arm plumbing produced all of them. A non-FOUND canary on all three
+arms simultaneously usually means the shared cause (`detect_all`, the fixture file, or
+authentication), not three independent failures.
 
 ## What could still produce a confident wrong answer
 
@@ -182,14 +219,13 @@ Stated now, not after a result exists to rationalize around.
    inner subagent for the generic or specialist arm runs an unbounded or differently-bounded loop,
    the three arms are not actually equalized on this axis, only apparently equalized in the flag
    that was passed.
-3. **Credential carry-over into `PILOT_HOME` is unverified.** `run.sh` copies
-   `$HOME/.claude.json` and `$HOME/.claude/.credentials.json` read-only into each sandbox before
-   the first cell runs. Nobody has proven this is sufficient for `claude -p` to authenticate under
-   a reassigned `HOME` on this machine -- the project's own memory records that the sibling
-   mechanism, `CLAUDE_CONFIG_DIR` pointed at a fresh directory, does not work for exactly this
-   reason. If it fails here too, every one of the 25 cells reads NOT_RUN, which is a loud and
-   correctly-labeled failure rather than a silent wrong number -- but it does mean the pilot
-   answers nothing until someone fixes authentication under the sandbox.
+3. **Resolved, not just flagged (2026-08-26): a reassigned `HOME` does not authenticate on this
+   machine.** See "Precondition" below for the full evidence and the two accepted responses
+   (`AGENT_PILOT_AUTH_MODE=api-key` or `=keychain-symlink`). What remains an open risk, not fully
+   closed: `keychain-symlink` mode has been verified to make `claude auth status` report
+   `loggedIn: true`, but has not been exercised through an actual `claude -p` call under this
+   pilot's exact flag set (`--model`, `--max-turns`, `--allowedTools`, `--output-format=stream-json`)
+   without spending one -- that first real confirmation is exactly what `--canary-only` is for.
 4. **n=8 per arm cannot separate close results.** See the Wilson table below. A result like 5/8
    specialist vs 3/8 generic is not evidence of anything at this sample size, and the honest report
    of such a result is "indeterminate", not "leaning specialist".
@@ -211,10 +247,71 @@ Stated now, not after a result exists to rationalize around.
    correct and buggy values by mental calculation and score FOUND. This measures "did the arm name
    the defect", not "did the arm follow the qa persona's own process of running the real thing".
    Those are different questions; only the first is what this pilot's scoring answers.
-8. **The role-to-tools table in `run.sh` is a hand-copied snapshot (2026-08-26) of each
-   `claude/agents/<role>.md`'s `tools:` frontmatter line.** If that line changes upstream without
-   this table being updated, the direct arm's tool grant silently stops matching the specialist
-   arm's actual tools, and "held equal" quietly stops being true.
+8. **Fixed, not just flagged (2026-08-26): `run.sh`'s `role_tools()` reads each role's tool list
+   at run time from `claude/agents/<role>.md`'s own `tools:` frontmatter line** -- there is no
+   longer a hand-copied table to go stale. `check_design_matches_ground_truth()` calls
+   `role_tools()` for every role before printing a plan and refuses to run if any agent file is
+   missing or its `tools:` line does not parse, so a broken source is caught before a call is
+   spent rather than producing a silently wrong tool grant. What this does not solve, because
+   nothing can from outside the CLI: the generic arm's actual toolset (item 1, above) is still
+   whatever `general-purpose` defaults to, not something this file derives or pins.
+
+## Precondition: authentication under a reassigned `HOME`, resolved before any call
+
+Established without spending a model call, using only `security find-generic-password`
+(reads metadata -- service name, account -- never the secret) and the CLI's own
+`claude auth status` subcommand (checks login state, makes no model call):
+
+- Under the real `$HOME`: `claude auth status` reports `loggedIn: true`.
+- Under `env HOME=$(mktemp -d) claude auth status`: `loggedIn: false, authMethod: "none"`.
+
+**A reassigned `HOME` does not authenticate on this machine.** Root cause: this machine's Claude
+Code credential is stored in the macOS login Keychain under service name
+`"Claude Code-credentials"`, and Keychain Services resolves the default keychain search list via
+`$HOME/Library/Keychains/`, confirmed HOME-dependent by a direct `security find-generic-password`
+probe under both HOME values. This is a second, independent failure from the one this repository's
+own memory already records for `CLAUDE_CONFIG_DIR` isolation (pointing that at a fresh directory
+makes the CLI report "not logged in" because `~/.claude.json`'s account metadata is missing,
+before the CLI ever consults the keychain) -- a bare `HOME` reassignment fails here for a second,
+independent reason on top of that first one, and copying `.claude.json` alone does not fix it.
+
+A working technical fix exists and was verified the same way (`claude auth status` -> `loggedIn:
+true` under the reassigned `HOME`): symlink `$PILOT_HOME/Library/Keychains` to the real
+`$HOME/Library/Keychains`, read-only, created only inside the throwaway sandbox, never writing to
+or copying the real `Keychains` directory itself.
+
+**This fix is not this file's default**, because it is not free: every one of the four roles this
+pilot dispatches (code-reviewer, security-auditor, qa, test-writer) carries `Bash` in its declared
+tool list, so a symlinked `Keychains` directory hands every dispatched subagent -- including the
+unaudited built-in `general-purpose` agent used by the generic arm -- filesystem access to the
+operator's **entire** real login keychain, not just the one Claude Code entry. That is a larger and
+qualitatively different risk than "the pilot cannot authenticate," and it is exactly the class of
+exposure the brief that authorized this instrument exists to keep out of a sandbox built to
+"never touch the operator's real `~/.claude`."
+
+`run.sh` resolves the tension in the file, not at run time, by requiring the operator to name the
+mode explicitly via `AGENT_PILOT_AUTH_MODE` (no default; refuses to run without it, for either
+`--go` or `--canary-only`):
+
+- **`api-key`** (recommended): requires `ANTHROPIC_API_KEY` already set in the invoking shell.
+  Nothing is copied or symlinked into `PILOT_HOME` at all -- the emptiest, safest sandbox this
+  design can produce, and the one that keeps the "never touch real `~/.claude`" property intact
+  with no caveat. Its cost is not technical: it moves spend from the operator's unbilled Max-plan
+  OAuth session to pay-per-token API billing, which is a separate authorization this file does not
+  grant on its own (this operator's standing policy is that costed spend needs an explicit ask).
+- **`keychain-symlink`**: accepts the full-keychain-exposure risk above, knowingly. `run.sh` prints
+  an explicit warning naming that exposure every time a cell activates under this mode; it is not
+  silent, and it is not the thing that happens by default when a sandbox merely reassigns `HOME`.
+
+Neither the `save/restore` pattern of `tests/evals/run-pathways.sh`/`tests/evals/false-done/run.sh`
+nor a `tests/lib-collision-guard.sh`-style restore-that-refuses-on-foreign-change was adopted here,
+because neither is needed: this instrument never writes to the real `$HOME/.claude` in the first
+place (see `run.sh`'s "SANDBOXING" header), so there is nothing on that path to restore. The
+tension RICK's review raised -- that the recorded workaround for this class of problem elsewhere in
+this repository is "patch and restore the real `~/.claude/settings.json`," which is in direct
+tension with sandbox discipline -- does not apply to this file's design, because this file solves
+authentication without ever touching the real config directory at all, under either
+`AGENT_PILOT_AUTH_MODE`.
 
 ## Sample size, honestly
 
@@ -242,19 +339,26 @@ arithmetic later.
 
 ## Cost, stated before anyone can spend it
 
-25 `claude -p` calls, `--model sonnet`, serial.
+27 `claude -p` calls total (24 scored + 3 canary, one per arm -- see "The canary" above for why the
+count grew from the original 25-call brief), `--model sonnet`, serial. `run.sh --canary-only` spends
+only the 3 canary calls and is the recommended first run.
 
 - **Tokens:** not measured, because nothing has run. Estimated from this repository's own prior
   harness runs (`RESULTS.md`'s review-pathway benchmark) and from the fixture sizes here (8-20
   lines of source per fixture, task prompts under 100 words): roughly 10k-20k tokens per direct or
   generic-subagent cell, higher for specialist cells carrying a full agent system prompt and for
-  test-writer cells whose output includes generated file content. Estimated total: **250k-500k
-  tokens** across all 25 calls. This is a stated estimate, not a measurement, and should be
-  labeled as such in any report that cites it.
+  test-writer cells whose output includes generated file content. Estimated total: **10k-15k
+  tokens** for `--canary-only` (3 calls), **270k-540k tokens** for the full 27-call `--go` run. This
+  is a stated estimate, not a measurement, and should be labeled as such in any report that cites
+  it.
 - **Wall-clock:** direct-arm cells are a single agent loop; generic and specialist cells nest a
-  nested Task nested agent loop inside the outer session, which is the slower half. Estimated
-  45-150 seconds per cell, serial execution (no parallelism in `run.sh`), roughly **20-60 minutes
-  wall-clock** for the full 25-call run.
-- **Runner refuses without opt-in.** `run.sh` requires both `--go` and
-  `AGENT_PILOT_CONFIRM="RUN THE 25 CALLS"` (exact string) before any of the above is spent; the
-  default invocation prints this same plan and exits without calling anything.
+  `Task`-dispatched agent loop inside the outer session, which is the slower half. Estimated
+  45-150 seconds per cell, serial execution (no parallelism in `run.sh`): roughly **3-8 minutes**
+  for `--canary-only`, **20-65 minutes** for the full `--go` run.
+- **Runner refuses without opt-in, three separate ways.** `run.sh` requires an action flag
+  (`--go` or `--canary-only`), the matching literal `AGENT_PILOT_CONFIRM` string
+  (`"RUN THE 27 CALLS"` or `"RUN THE CANARY"` respectively -- deliberately different strings so
+  approving one cannot be mistaken for approving the other), and `AGENT_PILOT_AUTH_MODE` set to
+  `api-key` or `keychain-symlink` (see "Precondition" above) before any of the above is spent. The
+  default invocation, or any invocation missing one of the three, prints this same plan and exits
+  without calling anything.
