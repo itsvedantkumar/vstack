@@ -267,13 +267,26 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
   od=$(mktemp -d)
   git -C "$od" init -q 2>/dev/null
   mkdir -p "$od/.claude"
+  #
+  # The target's own Stop hook and its own skillOverrides entry must both be there afterwards,
+  # and vstack's must be there alongside them. This clause used to assert the opposite for
+  # skillOverrides -- that the target's `ghost-skill` entry was GONE -- which was the wholesale
+  # `.skillOverrides = $ship.skillOverrides` overwrite written down as a requirement. Overlay
+  # cannot tell a target's dead override from its live one, and auditing a project's own config
+  # was never its job; check 15 polices vstack's own entries, which is the separate claim.
   printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo repo-own"}]}]},"skillOverrides":{"ghost-skill":"off"},"permissions":{"allow":["Bash(ls)"]}}\n' > "$od/.claude/settings.json"
   if out=$(./overlay.sh "$od" 2>&1); then
-    if jq -e '.permissions.allow[0] == "Bash(ls)" and (.skillOverrides["ghost-skill"] // null) == null' \
+    if jq -e '.permissions.allow[0] == "Bash(ls)"
+              and (.skillOverrides["ghost-skill"] == "off")
+              and ((.skillOverrides | length) > 1)
+              and ([.hooks.Stop[]?.hooks[]?.command] | index("echo repo-own") != null)
+              and ([.hooks.Stop[]?.hooks[]?.command] | map(test("verify-gate\\.sh")) | any)' \
          "$od/.claude/settings.json" >/dev/null 2>&1; then
       ok "overlay merge path"
     else
-      bad "overlay merge path" "merged settings lost user keys or kept dead skillOverrides"
+      bad "overlay merge path" \
+          "$(printf 'the overlay did not merge by ownership. after overlay:\n%s' \
+             "$(jq -c '{permissions,skillOverrides,stop:[.hooks.Stop[]?.hooks[]?.command]}' "$od/.claude/settings.json" 2>&1)")"
     fi
   else
     bad "overlay merge path" "$out"

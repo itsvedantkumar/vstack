@@ -362,7 +362,10 @@ break_it(){ case "$1" in
       sed -i.t '1a\
 exit 7
 ' install.sh && rm -f install.sh.t ;;
-  9b) printf '\nexit 4\n' >> overlay.sh ;;
+  # `exit 4` only proved the check notices overlay crashing. The assertions that matter are the
+  # merge ones, so mutate the merge: go back to the wholesale array replace this check exists to
+  # catch, and the target repo's own Stop hook disappears.
+  9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
   11) # drop the PostToolUse key while PostToolUseFailure stays: the exact shape the old
       # substring grep could not see. Indentation-tolerant on purpose — this row silently
@@ -375,7 +378,7 @@ exit 7
   14) sed -i.t '1a\
 exit 0
 ' claude/hooks/verify-gate.sh && rm -f claude/hooks/verify-gate.sh.t ;;
-  15) sed -i.t 's/"skillOverrides": {/"skillOverrides": {\n    "claude-mem:do": "off",/' \
+  15) sed -i.t 's/"skillOverrides": {/"skillOverrides": {\n    "someplugin:do": "off",/' \
         claude/settings.json && rm -f claude/settings.json.t ;;
   18b) # Move the anchor the published-figure comparison keys on, without touching the figures
       # themselves. This is what cc76ba8 did by accident, and for eleven commits the check went on

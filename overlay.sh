@@ -45,20 +45,43 @@ if command -v jq >/dev/null; then
   # It writes the allowlisted keys and leaves everything else alone now. Cleaning up an old
   # overlay has to be an explicit, separate act: provenance is not recoverable from the file, and
   # guessing at it costs someone their settings.
-  clobbered=$(jq -rs '((.[0].hooks // {} | keys) - ((.[0].hooks // {} | keys) - (.[1].hooks // {} | keys))) | join(", ")' \
-    "$DEST/.claude/settings.json" "$SRC/claude/settings.json")
+  #
+  # hooks and skillOverrides are merged by OWNERSHIP, not by vocabulary. `$dest * $ship` (jq deep
+  # merge) replaces the whole array for any event key both sides populate, and
+  # `.skillOverrides = $ship.skillOverrides` is an unconditional overwrite — either one destroys
+  # a target repo's own hook on SessionStart/PreToolUse/etc. or its own skillOverrides entries
+  # the moment vstack also touches that key. install.sh/uninstall.sh already solved this: decide
+  # ownership by what a hook COMMAND points at (a path ending in .../hooks/<file vstack ships>),
+  # not by whether the event NAME collides.
+  #
+  # Basenames are derived from $ours here, which is $ship.hooks itself — overlay ships hooks
+  # verbatim from claude/settings.json (project scope, `"$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh"`,
+  # quoted), unlike install.sh's inline-built absolute unquoted user-scope paths. That trailing
+  # `"` matters: split("/")|last on a quoted command yields `x.sh"` with the quote still attached,
+  # so both the basename and the command under test are trimmed of a trailing `"` before
+  # comparing, or nothing ever matches and every ownership branch is silently dead code — the
+  # same mistake that left uninstall.sh's ownership checks inert for three releases.
   tmp=$(mktemp)
   jq -s --arg allow "$ALLOW" '
     ($allow | split(" ") | map(select(length > 0))) as $A
     | . as [$dest, $src]
     | ($src | with_entries(select(.key as $k | $A | index($k)))) as $ship
+    | ($ship.hooks // {}) as $ours
+    | ([$ours | .. | .command? // empty] | map(rtrimstr("\"") | split("/") | last) | unique) as $ourbasenames
+    | (($dest.hooks // {})
+        | with_entries(.value |= map(select(
+            [.hooks[]?.command // empty]
+            | map(. as $cmd | ($ourbasenames | any(. as $b | ($cmd | rtrimstr("\"")) | endswith("/hooks/" + $b))))
+            | any | not )))
+        | with_entries(select(.value | length > 0))) as $theirs
     | ($dest * $ship)
-    | .skillOverrides = ($ship.skillOverrides // {})
+    | .hooks = (reduce ($ours | to_entries[]) as $e
+                 ($theirs; .[$e.key] = (($theirs[$e.key] // []) + $e.value)))
+    | .skillOverrides = (($dest.skillOverrides // {}) + ($ship.skillOverrides // {}))
   ' "$DEST/.claude/settings.json" "$SRC/claude/settings.json" > "$tmp"
   jq -e . "$tmp" >/dev/null && cat "$tmp" > "$DEST/.claude/settings.json"
   rm -f "$tmp"
   echo "merged  .claude/settings.json ($(printf '%s' "$ALLOW" | wc -w | tr -d ' ') project keys)"
-  [ -n "$clobbered" ] && echo "        note: vstack's hook config replaced this repo's for: $clobbered"
 else
   # No jq means no way to take a subset, and copying the whole file is what this change
   # exists to stop. Refuse rather than ship someone's preferences into their repo.
