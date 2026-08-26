@@ -419,7 +419,9 @@ cmd_recover() {
     RC_ARGS="--from $RC_FROM"
     [ "$RC_DRY" -eq 1 ] && RC_ARGS="$RC_ARGS --dry-run"
     [ "$RC_YES" -eq 1 ] && RC_ARGS="$RC_ARGS --yes"
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086  # RC_ARGS is a built-up flag list (--dry-run, --yes) and has to
+    # word-split into separate arguments. Quoting it would hand uninstall.sh one argument spelled
+    # "--dry-run --yes", which it does not parse. Every value in it is a literal set above.
     "$REPO/uninstall.sh" $RC_ARGS
     return $?
   fi
@@ -479,7 +481,7 @@ cmd_recover() {
   RC_ARGS="--from $RC_TS"
   [ "$RC_DRY" -eq 1 ] && RC_ARGS="$RC_ARGS --dry-run"
   [ "$RC_YES" -eq 1 ] && RC_ARGS="$RC_ARGS --yes"
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086  # same as above: RC_ARGS must word-split into separate flags.
   "$REPO/uninstall.sh" $RC_ARGS
   RC_RC=$?
 

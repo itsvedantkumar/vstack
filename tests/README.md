@@ -381,8 +381,9 @@ manifest files, so a skill directory whose frontmatter the loader silently drops
 harness cross-references `claude plugin details`'s live component inventory against the tree and
 fails on that.
 
-Known gap: `hooks.json` names three of the six scripts under `claude/hooks/` directly. The other
-three are invoked from inside those, so renaming one of them is not caught here.
+Known gap: `hooks.json` names two of the eight scripts under `claude/hooks/` directly, because the
+plugin lane carries routing only. The rest are invoked from inside those or wired through
+`claude/settings.json` in the full install, so renaming one of them is not caught here.
 
 ## dispatch-fleet.sh
 
@@ -396,6 +397,16 @@ exit-code contract.
 Do not read a blended number off it. Recall and precision are reported apart on purpose, and the
 `AMBIGUOUS` cases are distributions rather than pass/fail — a 50/50 split and a 100/0 split are
 different findings and both matter.
+
+## vstack-cli.sh
+
+`vstack-cli.sh` exercises `bin/vstack`'s subcommands against `mktemp -d` sandboxes with `HOME`
+reassigned: `self-test`, `explain`, `recover` and the local run log. It is the only functional
+coverage `bin/vstack` has — the gate lints that file but never ran it.
+
+The case worth knowing about is `self-test` with every check skipped. `ran + skipped == declared`
+holds there, so the accounting footer alone would report success on a run that measured nothing;
+the suite asserts that `ran == 0` fails on its own.
 
 ## Reproductions
 

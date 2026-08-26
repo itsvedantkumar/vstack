@@ -19,6 +19,10 @@ gate.
 | `tests/repro/trust-closure.sh` | `vstack trust` hashes `.claude/verify.sh` and the `*.sh` paths it names literally. The generated gate also runs `npm run typecheck`, `uv run pytest` and `cargo test`, none of which the hash covers. | fixed 1.46.0 |
 | `tests/repro/formatter-config.sh` | `format.sh` fires on every `Edit`/`Write`/`MultiEdit`, and Prettier `require()`s any `.js` named in a static `.prettierrc.json` `plugins` array. Cloning a repo and editing one file ran that repo's JS, with the Stop gate's trust record never consulted. | fixed 1.46.0 |
 
+| `tests/repro/compat-canary.sh` | Every hook parsed Claude Code's payload with `jq ... // empty` and no else branch, so a renamed field or an unrecognised `hook_event_name` degraded to the same silent exit 0 as nothing happening. No hook or `bin/doctor` checked the Claude version at all. | fixed 1.46.0 |
+| `tests/repro/worktree-collision.sh` | Harness save/restore had no refusal on a changed file and the falsifiability lock is keyed on `git rev-parse --git-dir`, which differs per linked worktree, so two sessions each held a lock neither could see. | fixed 1.46.0 |
+| `tests/repro/lock-anchor.sh` | The three remaining `--git-dir` lock anchors, red until they move to `--git-common-dir`. | open |
+
 Run one directly. There are no arguments and no fixtures to prepare:
 
     bash tests/repro/lifecycle.sh; echo "rc=$?"
