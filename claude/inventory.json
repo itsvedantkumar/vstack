@@ -553,7 +553,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 52,
+      "declared_checks": 53,
       "check_ids": [
         "0",
         "1",
@@ -606,7 +606,8 @@
         "49",
         "50",
         "51",
-        "52"
+        "52",
+        "53"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
@@ -627,7 +628,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 77,
+        "rows": 78,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way."
       },
       {

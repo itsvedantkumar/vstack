@@ -3547,6 +3547,59 @@ else
   bad "the bin-scripts suite can actually fail" "tests/bin-scripts.sh or bin/claude-bg.sh is missing -- the suite this check proves falsifiable is gone, which is a failure and not an environment fact"
 fi
 
+# --- 53. no shell file hashes with a tool only one platform ships -----------------------------
+# macOS ships `shasum` and no `sha256sum`. BusyBox and most slim Linux images ship `sha256sum`
+# and no `shasum`. A file that calls exactly one of them works on exactly one of this
+# repository's three documented platforms, and the failure mode is the bad one: both commands
+# write nothing to stdout when absent, so the caller gets the EMPTY STRING rather than an error.
+#
+# Measured on 2026-08-27, on Alpine, after the lane stopped swallowing its own exit code:
+# tests/inventory-contract.sh computed an empty payload digest and reported "the tree's is ."
+# That one failed loudly only because the expected digest was non-empty. The same bug in
+# tests/gate-falsifiability.sh's no-op-mutation detector compares an empty before-hash against
+# an empty after-hash, and two empty strings are equal -- a detector whose entire job is to
+# notice that a mutation landed, reporting that none of them did.
+#
+# The rule is deliberately coarse and cheap: a tracked shell file that names one hasher must
+# also name the other. Every real fix here is a two-branch `command -v` fallback, so naming both
+# is what a correct file looks like, and naming one is what every instance of this bug looked
+# like. It cannot tell a good fallback from a bad one -- check 29 and the suites do that -- but
+# it makes the platform-specific call impossible to add without noticing.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  c53_bad=""
+  c53_n=0
+  for c53_f in $(git ls-files); do
+    case "$c53_f" in
+      *.sh|bin/*|claude/hooks/*|*.bash) ;;
+      *) continue ;;
+    esac
+    [ -f "$c53_f" ] || continue
+    c53_has_a=0; c53_has_b=0
+    grep -q 'shasum' "$c53_f" 2>/dev/null && c53_has_a=1
+    grep -q 'sha256sum' "$c53_f" 2>/dev/null && c53_has_b=1
+    [ "$c53_has_a" = 0 ] && [ "$c53_has_b" = 0 ] && continue
+    c53_n=$((c53_n + 1))
+    if [ "$c53_has_a" != "$c53_has_b" ]; then
+      if [ "$c53_has_a" = 1 ]; then
+        c53_bad="$c53_bad\n  $c53_f names shasum and not sha256sum -- returns the empty string on Alpine"
+      else
+        c53_bad="$c53_bad\n  $c53_f names sha256sum and not shasum -- returns the empty string on macOS"
+      fi
+    fi
+  done
+  # A selector that matches nothing passes this check trivially. There are hashers in this tree;
+  # if the census ever reads zero, the selector broke, not the tree.
+  if [ "$c53_n" -eq 0 ]; then
+    bad "hashers work on every documented platform" "no tracked shell file names shasum or sha256sum -- the census is empty, so the comparison above measured nothing"
+  elif [ -n "$c53_bad" ]; then
+    bad "hashers work on every documented platform" "$(printf 'a missing hasher writes nothing to stdout, so these hash to the empty string instead of failing:%b' "$c53_bad")"
+  else
+    ok "hashers work on every documented platform ($c53_n file(s), each naming both)"
+  fi
+else
+  bad "hashers work on every documented platform" "not inside a git work tree, so the file census could not run -- an empty census would pass this check while measuring nothing"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

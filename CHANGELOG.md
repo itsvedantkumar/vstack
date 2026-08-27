@@ -172,7 +172,7 @@ a local exit code, which is the only way this class of failure is visible at all
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
-The tree declares 52 checks and 80 falsifiability rows (77 mutation + 3 fixed). The old figures
+The tree declares 53 checks and 81 falsifiability rows (78 mutation + 3 fixed). The old figures
 were true on their run dates and are now marked as superseded with those dates attached, rather
 than replaced with a number nobody re-ran for this document — the document's own rule is that no
 claim appears without a source and a date.

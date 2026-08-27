@@ -21,6 +21,15 @@
 # Exit 1  -- hole open, or the harness itself is broken (permitted case did not fire).
 set -uo pipefail
 
+# macOS has `shasum` and no `sha256sum`; BusyBox has the reverse. A bare call to either returns
+# nothing on the other platform, and two empty strings compare equal -- which would make the
+# before/after comparison below pass on a file that changed. Refuse instead of hashing to "".
+_h(){
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  else echo "trust-closure: no sha256sum or shasum on PATH; refusing to compare empty hashes" >&2; exit 3; fi
+}
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 VSTACK_BIN="$REPO_ROOT/bin/vstack"
@@ -80,7 +89,7 @@ if [ "$trust_rc" -ne 0 ] || ! grep -qF "$REPO_DIR/.claude/verify.sh" "$HOME/.con
   exit 1
 fi
 rm -f /tmp/vstack-trust-closure-trust.out
-verify_hash_before=$(shasum -a 256 "$REPO_DIR/.claude/verify.sh" | cut -d' ' -f1)
+verify_hash_before=$(_h "$REPO_DIR/.claude/verify.sh")
 
 # --- permitted case: the gate must actually run the trusted, unmodified script -----------------
 # If this does not fire, either the mechanism is broken or someone disabled the hook to make
@@ -103,7 +112,7 @@ cat > "$REPO_DIR/package.json" <<EOF
   }
 }
 EOF
-verify_hash_after=$(shasum -a 256 "$REPO_DIR/.claude/verify.sh" | cut -d' ' -f1)
+verify_hash_after=$(_h "$REPO_DIR/.claude/verify.sh")
 if [ "$verify_hash_before" != "$verify_hash_after" ]; then
   bad "test bug: verify.sh hash changed when it should not have -- mutation touched the wrong file"
   exit 1

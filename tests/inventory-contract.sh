@@ -27,6 +27,21 @@ skipc(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
 PAYLOAD_PATHS='claude/ mcp/ bin/ shell/ conductor/ install.sh uninstall.sh overlay.sh bootstrap.sh setup-machine.sh :(exclude)claude/inventory.json'
 
+# macOS ships `shasum` and no `sha256sum`; BusyBox and most slim Linux images ship `sha256sum`
+# and no `shasum`. This file used bare `shasum` and produced an EMPTY digest on Alpine -- the
+# comparison then read "the tree's is ." and the contract failed for a reason that had nothing
+# to do with the tree. A missing tool must refuse, not return the empty string: an empty digest
+# compared against an empty expectation would have passed while measuring nothing at all, and
+# that shape is the entire subject of docs/checks-that-inherit-their-answer.md.
+sha256_of(){ # reads stdin -> hex digest, or dies naming what is missing
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  else
+    echo "inventory-contract: neither sha256sum nor shasum is on PATH; refusing to emit an empty digest" >&2
+    exit 3
+  fi
+}
+
 payload_digest_compute(){
   # -c -o --exclude-standard: tracked entries AND untracked-but-not-ignored files, so a new hook
   # dropped into claude/hooks/ counts as payload movement. A tracked file deleted from the working
@@ -45,7 +60,7 @@ payload_digest_compute(){
         if [ -L "$f" ]; then
           printf 'symlink %s -> %s\n' "$f" "$(readlink "$f")"
         elif [ -f "$f" ]; then
-          printf '%s %s %s\n' "$(shasum -a 256 < "$f" | cut -d' ' -f1)" \
+          printf '%s %s %s\n' "$(sha256_of < "$f")" \
                                "$([ -x "$f" ] && printf 'x' || printf -- '-')" "$f"
         elif [ -d "$f" ]; then
           # A path that is a directory in a file listing is a gitlink (submodule). There are none
@@ -56,7 +71,7 @@ payload_digest_compute(){
           printf 'absent - %s\n' "$f"
         fi
       done \
-    | shasum -a 256 | cut -d' ' -f1
+    | sha256_of
 }
 
 # `tests/inventory-contract.sh --print-digest` is the ONLY supported way to recompute the value
