@@ -1,6 +1,28 @@
 # agent-pilot -- a 27-call pilot on specialist-subagent routing
 
-**This instrument has not been run.** No model call has been made under this directory. See
+**This instrument has not been run, and on this machine it currently cannot be.** No model call
+has been made under this directory. Both authentication modes were declined by the operator on
+2026-08-27: no `ANTHROPIC_API_KEY` for `api-key`, and no keychain access for `keychain-symlink`.
+That is a standing decision, not an oversight, and it is recorded here so the next reader does not
+re-derive it.
+
+Three isolation paths were probed for a way around it, at a cost of zero model calls, using
+`claude auth status` (which reports `loggedIn` without spending anything):
+
+| sandbox | `loggedIn` |
+|---|---|
+| real `$HOME`, `CLAUDE_CONFIG_DIR` reassigned | `false` (`authMethod: none`) |
+| real `$HOME`, `CLAUDE_CONFIG_DIR` reassigned and seeded with a copy of `~/.claude.json` | `false` |
+| control: nothing reassigned | `true` (`authMethod: claude.ai`) |
+
+So `CLAUDE_CONFIG_DIR` isolation loses authentication **even under the correct `HOME`**, which
+rules it out as a substitute for the `HOME` sandbox rather than merely being untested. Running the
+pilot under an unmodified environment is not a fallback: the three arms differ only by the contents
+of `PILOT_HOME/.claude`, so a live real `~/.claude` puts every shipped skill and agent in scope for
+all three arms and there is nothing left to compare. That is the same flaw that produced
+`RESULTS.md`'s zero-skill-invocation rows.
+
+See
 `tests/evals/agent-pilot/PREREGISTRATION.md` for the question, the null, the scoring function, the
 exclusions, the canary, the cost estimate, and -- most importantly -- what could still produce a
 confident wrong answer, all written before any call exists.
