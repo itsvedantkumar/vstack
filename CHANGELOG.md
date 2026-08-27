@@ -40,6 +40,74 @@ Also pinned by `tests/repro/ci-lane-answers-for-head.sh`, which was watched fail
 of its five cases before the fix.
 
 
+### Check 49 graded a checkout it was not testing
+
+`resolve_vstack_repo()` prefers `~/.config/agents/vstack-repo`, wherever `install.sh` last ran
+from, over the location of `bin/doctor` itself. So check 49 computed this checkout's `HEAD` and
+wrote its `gh` stub for it, while doctor answered about the installed tree. The two agreed for
+exactly as long as they were the same directory. Running the gate from an isolated clone
+separated them: three of five cases went red, including both positive controls. Pinned with
+`VSTACK_DIR`.
+
+### Check 18 published a figure only one directory could reproduce
+
+The session hook splices `$root` twice, `$branch` once and `$base` three times into the block
+check 18 measures. The cap lane was normalized for the first two and deliberately left `$base`
+in, reasoning that the remote's default branch "does not vary with this checkout" -- it varies
+with the remote. The published-figure lane was never normalized at all and compared the README
+against the raw count. Measured 4077 B at a 25-character checkout path on `main`, which is
+3.9 KB and inside the 0.15 KB tolerance, against 4163 B in a clone three characters longer whose
+`origin/HEAD` named a 24-character branch, which is 4.1 KB and outside it. Same commit, same
+prose. All three splices are now subtracted; the invariant count is 3990 B in every checkout
+tested, and that is what the README publishes. Row 18d splices `$base` a fourth time so the
+correction cannot fall behind the hook again.
+
+### A CI job nothing requires is a verdict nobody reads
+
+`REQUIRED_CHECKS` was a hand-maintained list of four names sitting beside a workflow that
+defines four jobs, with nothing connecting them. Add a lane and it can be red on every commit
+while the release publishes over it, which is not hypothetical: `install-macos` was added, went
+red on its first run, and the failure was found by reading a job log by hand. Check 50 asserts
+both directions -- a job missing from the list is an unread verdict, a name with no job behind
+it leaves the release gate UNDECIDED forever.
+
+### The only step that destroys something had the only decision nobody could run
+
+`cleanup-on-failed-gate` force-deletes a candidate tag from origin, and its entire rule lived in
+a GitHub Actions `if:` expression, which no test can execute. It was wrong in production earlier
+the same day. The rule now lives in `.github/scripts/should-delete-candidate-tag.sh` with exit
+codes 0/10/2 so a crash cannot be mistaken for a verdict; `tests/release-cleanup.sh` is its
+truth table, including two join assertions so a tested decider the workflow does not call cannot
+pass. The job's `if:` is now deliberately broader than the rule and carries no part of it.
+
+### The bin-scripts suite had never been watched fail
+
+`tests/bin-scripts.sh` printed "38 passed, 0 failed" and nothing had asked whether it can print
+anything else -- in a file that shipped claiming it never reaches the real `claude` CLI while
+two of its cases did. Check 52 runs its `bg-args` case against a two-file copy both ways, and
+refuses if the control mutation stops matching. `tests/install-matrix.sh` gets no equivalent and
+that is stated rather than skipped: its cheapest case measures 2m10s and it was red for an
+unrelated reason, so a control against it would have passed without measuring anything.
+
+### A missing hasher wrote the empty string
+
+macOS ships `shasum` and no `sha256sum`; BusyBox ships the reverse. Both write nothing to stdout
+when absent, so a caller naming only one gets the empty string rather than an error.
+`tests/inventory-contract.sh` computed an empty payload digest on Alpine. The same bug in
+`tests/gate-falsifiability.sh`'s no-op-mutation detector compares an empty before-hash against
+an empty after-hash, and two empty strings are equal: a detector whose whole job is to notice
+that a mutation landed, reporting that none of them did. All three callers now try both and
+refuse by name. The recomputed digest is byte-identical, so the refactor changed no measurement.
+Check 53 requires any shell file naming one hasher to name the other.
+
+### The README pinned a tag that never shipped
+
+README pinned `v1.46.0` while the manifests declared `v1.47.0`. Check 24 caught it on CI and not
+locally, because this machine still held a local `v1.46.0` tag the remote did not: the gate read
+a tag that exists nowhere a stranger can reach. A related trap, worth writing down: with
+`push.followTags` set globally, `git push origin <branch>` republishes that local tag on every
+push, which restarted the release workflow on a red commit four times in an hour.
+
 ### Two published measurements had no surviving artifact
 
 `CHANGELOG.md` cited "80 samples" for the skill-collision suppression finding and "a uniform 0/5
