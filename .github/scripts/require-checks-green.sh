@@ -28,6 +28,29 @@
 # already this repository's rule; the missing half is that UNKNOWN must not trigger a
 # destructive remedy either.
 #
+# CANDIDATE_CREATED_AT (default empty) is when the candidate tag came into existence, RFC3339.
+# When set, a required check whose FAILING conclusion was recorded before that moment is
+# reported STALE and counted as undecided rather than as a decision against the commit.
+#
+# This is the other half of the exit-2 split above, and it cost two deleted tags on 2026-08-27
+# to find. bin/doctor's "declared release is fetchable" and verify.sh's check 24 both assert
+# that the version the README pins is a tag a stranger can reach. Before the tag is pushed,
+# those checks are therefore required to be red -- they are describing the world accurately.
+# Push the tag, and three minutes later this script read those pre-tag conclusions, called them
+# a decision against the candidate, and cleanup-on-failed-gate deleted the tag that would have
+# turned them green. Retrying reproduced it exactly, because the retry starts from the same
+# state.
+#
+# "Undecided" is the honest reading. Those runs did not judge this candidate and could not
+# have: the artefact under test did not exist while they ran. Note what this does NOT do -- a
+# stale red never becomes green. It becomes exit 2, which still withholds publication. The only
+# behaviour that changes is that the destructive remedy stops firing on a verdict about a world
+# that did not contain the tag. A red decided after the tag exists still exits 1 and still
+# deletes.
+#
+# Unset, everything below behaves exactly as before. A gate that softens itself when the caller
+# forgets to pass a field would be a worse defect than the one this fixes.
+#
 # REQUIRE_CHECKS_WAIT_SECONDS (default 0) bounds an optional wait for in-progress checks, so the
 # common case -- a tag pushed alongside its own commit -- resolves without a manual re-dispatch.
 # 0 keeps the single-read behaviour the pre-publish second call wants: by then the answer must
@@ -44,6 +67,20 @@ if [ "$#" -eq 0 ]; then
   echo "require-checks-green: no required check names given -- refusing to declare an empty gate satisfied"
   exit 1
 fi
+
+CANDIDATE_CREATED_AT=${CANDIDATE_CREATED_AT:-}
+
+# Both timestamps come from the GitHub API in the same zero-padded RFC3339 UTC shape
+# (2026-08-27T15:59:16Z), which orders correctly as plain text. awk rather than bash's [[ < ]]
+# so this keeps working under sh and busybox, per the repo's portability rule.
+predates_candidate(){ # <completed_at> -> 0 if it is strictly earlier than the candidate
+  [ -n "$CANDIDATE_CREATED_AT" ] || return 1
+  # A run with no completed_at cannot be SHOWN to predate the tag. Refuse to assume it does:
+  # the conservative direction here is the one that keeps deleting, not the one that grants a
+  # reprieve on a missing field.
+  [ -n "$1" ] && [ "$1" != "null" ] || return 1
+  awk -v a="$1" -v b="$CANDIDATE_CREATED_AT" 'BEGIN{exit !(a < b)}'
+}
 
 WAIT_SECONDS=${REQUIRE_CHECKS_WAIT_SECONDS:-0}
 POLL_SECONDS=${REQUIRE_CHECKS_POLL_SECONDS:-15}
@@ -76,7 +113,15 @@ if [ "$WAIT_SECONDS" -gt 0 ]; then
       m=$(printf '%s\n' "$runs_json" | jq -s --arg n "$name" --arg s "$sha" -f "$SCRIPT_DIR/latest-check-run.jq")
       if [ "$m" = "null" ] || [ -z "$m" ]; then _undecided=$((_undecided+1)); continue; fi
       if [ "$(printf '%s' "$m" | jq -r '.status')" != "completed" ]; then _undecided=$((_undecided+1))
-      elif [ "$(printf '%s' "$m" | jq -r '.conclusion')" != "success" ]; then _decided_bad=1; fi
+      elif [ "$(printf '%s' "$m" | jq -r '.conclusion')" != "success" ]; then
+        # A stale red keeps the wait alive rather than ending it. Ending here is what made the
+        # 5400s budget irrelevant on 2026-08-27: the checks were decided, just decided about a
+        # world without the tag, so the gate broke out of the wait in under a second and went
+        # straight to the deletion.
+        if predates_candidate "$(printf '%s' "$m" | jq -r '.completed_at // ""')"; then
+          _undecided=$((_undecided+1))
+        else _decided_bad=1; fi
+      fi
     done
     [ "$_decided_bad" = 1 ] && break
     [ "$_undecided" -eq 0 ] && break
@@ -125,8 +170,14 @@ for name in "$@"; do
     echo "PENDING  $name: status=$status on ${sha}${_deadline_note} -- not safe to publish while a required check is still running"
     undecided=1
   elif [ "$conclusion" != "success" ]; then
-    echo "FAILED   $name: conclusion=$conclusion on ${sha}"
-    fail=1
+    completed=$(printf '%s' "$match" | jq -r '.completed_at // ""')
+    if predates_candidate "$completed"; then
+      echo "STALE    $name: conclusion=$conclusion decided at ${completed}, before the candidate existed at ${CANDIDATE_CREATED_AT} -- counted as undecided, because a check that ran without the tag was not judging this release. Re-run it against ${sha} to get a verdict that means something."
+      undecided=1
+    else
+      echo "FAILED   $name: conclusion=$conclusion on ${sha}"
+      fail=1
+    fi
   else
     echo "green    $name: conclusion=success on ${sha}"
   fi

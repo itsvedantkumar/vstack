@@ -139,6 +139,70 @@ r=$(gate_rc "");          [ "$r" = 2 ] && ok "wrapper: no check-run at all exits
 r=$(gate_rc "$_red"); [ "$r" = 1 ] && ok "wrapper: failure outranks pending when both are present" \
                                    || bad "wrapper: failure did not outrank pending: got $r"
 
+# =================================================================================================
+# 10. A verdict that predates the candidate tag is not a verdict about the candidate.
+#
+# Measured 2026-08-27, v1.47.0, twice in one hour. The four required checks ran, found
+# README.md pinning a tag that was not on origin, and failed -- correctly, for the world they
+# ran in. The tag was then pushed. resolve read those conclusions three minutes later, called
+# them a decided failure, and cleanup-on-failed-gate deleted the tag. The next attempt
+# reproduced it exactly.
+#
+# This is the SAME deadlock the exit-2 split was written to break, arriving through the one
+# door that split left open. That fix taught the gate not to destroy a tag over "not yet"; it
+# still destroys one over "no, decided before the thing you are asking about existed". Both are
+# verdicts the candidate never had a chance to earn, and the second one is worse, because the
+# evidence it deletes is exactly what would have changed the answer.
+#
+# The remedy is narrow ON PURPOSE. A stale red becomes UNDECIDED, not green: publication is
+# still withheld, exit 2 still means nobody publishes, and a genuinely red commit cannot ship
+# through this door. All that changes is that the destructive remedy stops firing on a verdict
+# about a world that did not contain the tag.
+gate_rc_at(){ # <check-runs-json-lines> <candidate-created-at> -> exit code of the real wrapper
+  cat > "$STUBDIR/gh" <<STUB
+#!/bin/sh
+cat <<'PAYLOAD'
+$1
+PAYLOAD
+STUB
+  chmod +x "$STUBDIR/gh"
+  PATH="$STUBDIR:$PATH" REQUIRE_CHECKS_WAIT_SECONDS=0 CANDIDATE_CREATED_AT="$2" \
+    bash "$GATE" owner/repo abc123 verify >/dev/null 2>&1
+  echo $?
+}
+
+# The red run finished at 10:05; the tag was created at 11:00. It cannot have been a verdict
+# about that tag.
+r=$(gate_rc_at "$_red" "2026-08-26T11:00:00Z")
+[ "$r" = 2 ] && ok "a failure decided BEFORE the tag existed exits 2, so the tag is not deleted" \
+             || bad "a pre-tag failure exited $r, wanted 2 -- exit 1 deletes the candidate tag over a verdict rendered before it existed, which is the v1.47.0 deadlock"
+
+# The other direction, and the one that keeps this from being a bypass: a failure decided AFTER
+# the tag was created is a real verdict about the real candidate, and must still delete.
+r=$(gate_rc_at "$_red" "2026-08-26T09:00:00Z")
+[ "$r" = 1 ] && ok "a failure decided AFTER the tag was created still exits 1" \
+             || bad "a post-tag failure exited $r, wanted 1 -- staleness must not become a way for red commits to keep their tag"
+
+# A green is a green regardless of when it was decided. Staleness only ever downgrades a
+# failure to undecided; it must never touch the success path.
+r=$(gate_rc_at "$_green" "2026-08-26T11:00:00Z")
+[ "$r" = 0 ] && ok "a success predating the tag still exits 0 (staleness only downgrades failures)" \
+             || bad "a pre-tag success exited $r, wanted 0"
+
+# Unset means the caller did not tell us when the candidate was created, so nothing can be
+# judged stale and the old behaviour stands. No silent change for callers that never opt in.
+r=$(gate_rc_at "$_red" "")
+[ "$r" = 1 ] && ok "with no candidate timestamp the decided failure still exits 1" \
+             || bad "an empty CANDIDATE_CREATED_AT changed the verdict to $r; absence of a timestamp must not soften the gate"
+
+# A red run with no completed_at cannot be shown to predate anything. Refusing to call it stale
+# is the conservative reading: it keeps the deleting behaviour rather than inventing a reprieve
+# from a missing field.
+_red_no_end='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"failure","id":1,"started_at":"2026-08-26T10:00:00Z","completed_at":null}'
+r=$(gate_rc_at "$_red_no_end" "2026-08-26T11:00:00Z")
+[ "$r" = 1 ] && ok "a failure with no completed_at is not assumed stale (exits 1)" \
+             || bad "a failure with no completed_at exited $r, wanted 1 -- a missing timestamp must not be read as a reprieve"
+
 echo
 echo "require-checks-green selection: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

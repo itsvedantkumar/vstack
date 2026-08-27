@@ -110,6 +110,27 @@ jobs:
           # above if the suite grows again rather than nudging it.
           REQUIRE_CHECKS_WAIT_SECONDS: "5400"
         run: |
+          # When origin first had this tag, as closely as this workflow can observe it. On the
+          # ordinary path -- a tag push -- this run was CREATED BY that push, so its created_at
+          # is the moment the tag became fetchable, to within a second. That is exactly the
+          # boundary the gate needs: bin/doctor's "declared release is fetchable" and check 24
+          # are both required to be red before it and are able to be green after it, so a
+          # conclusion recorded earlier is a verdict about a repository that did not contain
+          # this release.
+          #
+          # Not the tag object's own tagger date, which is when someone typed `git tag` on their
+          # laptop and can precede the push by any amount. Not a lightweight tag's -- it has
+          # none. The push is the event that changes what a stranger can fetch, and this run is
+          # the push's own receipt.
+          #
+          # On a manual workflow_dispatch there was no push, so created_at is "now" and every
+          # earlier conclusion reads as stale. That direction is safe: stale means undecided,
+          # undecided means publication is withheld and the tag is left alone. A re-dispatch
+          # declining to delete a tag is a nuisance; deleting the right tag over the wrong
+          # verdict is what this is here to stop.
+          CANDIDATE_CREATED_AT=$(gh api "repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at' 2>/dev/null || true)
+          export CANDIDATE_CREATED_AT
+          echo "candidate tag observed on origin at ${CANDIDATE_CREATED_AT:-<unknown -- staleness disabled, every conclusion counts>}"
           set +e
           bash .github/scripts/require-checks-green.sh \
             "${{ github.repository }}" "${{ steps.pin.outputs.sha }}" ${{ env.REQUIRED_CHECKS }}
