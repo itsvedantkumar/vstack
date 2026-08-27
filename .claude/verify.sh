@@ -3320,6 +3320,63 @@ else
   skip "inventory contract matches the tree" "jq not installed"
 fi
 
+# --- 49. doctor's CI lane answers for the commit you are on, not for the branch ---------------
+# The network call stays in bin/doctor -- this file is offline and hermetic by design, which is
+# why the release-reachability and CI questions live there. What can be gated here is the
+# DECISION, exercised through a `gh` stub with no network and no repository state.
+#
+# Both directions, because the failure this catches was a green: `gh run list --branch main
+# --limit 1` reads a moving reference and takes whatever is newest under it, so a run belonging
+# to an older commit spoke for the one you were standing on. Three of this session's defects
+# reached main because a remote verdict was not read; this is the check that makes the reading
+# itself falsifiable.
+if command -v jq >/dev/null 2>&1 && [ -x bin/doctor ]; then
+  c49_errs=""
+  c49_dir=$(mktemp -d)
+  c49_head=$(git rev-parse HEAD 2>/dev/null)
+  c49_other=0000000000000000000000000000000000000000
+  c49_line(){ # <rows-json> -> doctor's CI line
+    cat > "$c49_dir/gh" <<C49STUB
+#!/bin/sh
+case "\$*" in
+  *"run list"*) printf '%s\n' '$1' ;;
+  *"api"*)      printf '%s\n' '$1' ;;
+  *)            exit 0 ;;
+esac
+C49STUB
+    chmod +x "$c49_dir/gh"
+    PATH="$c49_dir:$PATH" bash ./bin/doctor 2>&1 | grep -E '^CI' | head -1
+  }
+  c49_row(){ printf '[{"headSha":"%s","name":"verify","status":"%s","conclusion":"%s","displayTitle":"t","databaseId":1}]' "$1" "$2" "$3"; }
+
+  c49_n=0
+  c49_want(){ # <label> <line> <want-glyph-or-none>
+    c49_n=$((c49_n + 1))
+    case "$3" in
+      (green)  case "$2" in (*'✔'*) ;; (*) c49_errs="$c49_errs\n  $1: wanted a green verdict, got: $2" ;; esac ;;
+      (red)    case "$2" in (*'✖'*) ;; (*) c49_errs="$c49_errs\n  $1: wanted a failure verdict, got: $2" ;; esac ;;
+      (none)   case "$2" in (*'✔'*|*'✖'*) c49_errs="$c49_errs\n  $1: wanted no verdict, got: $2" ;; (*) ;; esac ;;
+    esac
+  }
+
+  if [ -z "$c49_head" ]; then
+    skip "doctor's CI lane answers for HEAD" "not a git checkout, so there is no HEAD to answer about"
+  else
+    c49_want "a green run for another commit"      "$(c49_line "$(c49_row "$c49_other" completed success)")" none
+    c49_want "a green run for this commit"         "$(c49_line "$(c49_row "$c49_head"  completed success)")" green
+    c49_want "a failed run for this commit"        "$(c49_line "$(c49_row "$c49_head"  completed failure)")" red
+    c49_want "a run still going for this commit"   "$(c49_line "$(c49_row "$c49_head"  in_progress '')")"    none
+    c49_want "no run for this commit at all"       "$(c49_line '[]')"                                        none
+    [ "$c49_n" -eq 5 ] || c49_errs="$c49_errs\n  only $c49_n of 5 cases were exercised; the case list has collapsed"
+    [ -z "$c49_errs" ] \
+      && ok "doctor's CI lane answers for HEAD ($c49_n cases, both directions, no network)" \
+      || bad "doctor's CI lane answers for HEAD" "$(printf '%b' "$c49_errs")"
+  fi
+  rm -rf "$c49_dir"
+else
+  skip "doctor's CI lane answers for HEAD" "jq not installed or bin/doctor not executable"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

@@ -1070,10 +1070,27 @@ fi
 [ "${1:-}" = "--mcp" ] && { echo "── mcp ──"; claude mcp list 2>/dev/null | grep -E 'Connected|Failed'; }
 section "CI"
 # GitHub Actions CI health is unverifiable locally — what runs green here may fail in the sandbox.
-# This check reaches GitHub to read the conclusion of the last run on main. If CI is failing, any
-# release built from that commit is unreliable, and any install from that release inherits the
-# unseen breakage. `gh run list` reports both the conclusion (success/failure/cancelled/timed_out)
-# and the status (completed/in_progress/requested/queued/stale); this check handles both.
+# This check reaches GitHub to read the conclusion of every run recorded against THE COMMIT YOU
+# ARE STANDING ON. If CI is failing, any release built from that commit is unreliable, and any
+# install from that release inherits the unseen breakage.
+#
+# It used to ask `gh run list --branch main --limit 1`. `--branch main` is a moving reference and
+# `--limit 1` takes whatever is newest under it; the projection carried no `headSha`, so nothing
+# downstream could have filtered by commit even if it had wanted to. Standing on a commit whose
+# CI had never run, or had failed, still printed
+#
+#   CI (main: an OLDER commit that passed)   ✔
+#
+# a true statement about a different commit. `--limit 1` also picked one workflow arbitrarily
+# when several run per commit: this repo runs `verify` and `release`, and on 2026-08-27 `release`
+# completed with a failure while `verify` was still going, so which one spoke for the commit
+# depended on timing. .github/workflows/release.yml's own header warns against exactly this
+# ("a moving branch ref ... silently drifts to a different commit"), and this check -- the one
+# whose job is to stop a release going out over red CI -- reproduced it.
+#
+# No run recorded for HEAD is a note, never a pass: an unpushed commit has no CI verdict, and the
+# newest run on the branch is not a stand-in for one. In progress is a note for the same reason.
+# Pinned by tests/repro/ci-lane-answers-for-head.sh.
 #
 # Skip honestly: each missing dependency (gh, jq, auth, network, GitHub remote) names itself.
 # A skip is reported as a note, not a pass: the output line appears with the dot notation used
@@ -1101,30 +1118,46 @@ else
     # Timeout chosen at 5s: slow enough for most networks, fast enough that a dead network
     # (blackholed DNS, wrong gateway) does not stall doctor for the underlying transport's 75s+
     # connect timeout. This is the same rationale as the release-reachability check's timeout.
-    _ci_out=$(run_with_timeout 5 gh run list --branch main --limit 1 --json conclusion,status,displayTitle,databaseId 2>&1)
+    _head=$(git -C "$_rr" rev-parse HEAD 2>/dev/null)
+    # 40 is a ceiling, not a page size: several workflows per commit times a few commits of
+    # history. Runs for other commits are filtered out below, so over-fetching costs one query.
+    _ci_out=$(run_with_timeout 5 gh run list --limit 40 \
+      --json headSha,name,conclusion,status,displayTitle,databaseId 2>&1)
     _rc=$?
     if [ "$_rc" -eq 124 ] || [ "$_rc" -eq 143 ]; then
       _ci_skip="gh timed out after 5s"
     elif [ "$_rc" -ne 0 ]; then
       _ci_skip="gh query failed"
     elif [ -z "$_ci_out" ]; then
-      _ci_skip="no runs found for main"
+      _ci_skip="no runs found"
+    elif [ -z "$_head" ]; then
+      _ci_skip="could not resolve HEAD in $_rr"
     else
-      _conclusion=$(printf '%s' "$_ci_out" | jq -r '.[0].conclusion // "null"' 2>/dev/null)
-      _status=$(printf '%s' "$_ci_out" | jq -r '.[0].status // "null"' 2>/dev/null)
-      _title=$(printf '%s' "$_ci_out" | jq -r '.[0].displayTitle // "?"' 2>/dev/null)
-      _id=$(printf '%s' "$_ci_out" | jq -r '.[0].databaseId // "?"' 2>/dev/null)
+      _mine=$(printf '%s' "$_ci_out" | jq -c --arg s "$_head" '[.[] | select(.headSha == $s)]' 2>/dev/null)
+      _n=$(printf '%s' "$_mine" | jq -r 'length' 2>/dev/null)
+      _title=$(printf '%s' "$_mine" | jq -r '.[0].displayTitle // "?"' 2>/dev/null)
+      _short=$(printf '%s' "$_head" | cut -c1-7)
 
-      if [ "$_status" = "null" ] || [ "$_title" = "?" ]; then
-        bad "CI" "could not parse run from gh output"
-      elif [ "$_status" != "completed" ]; then
-        note "CI" "run in progress: $_title"
-      elif [ "$_conclusion" = "success" ]; then
-        ok "CI (main: $_title)"
-      elif [ "$_conclusion" = "failure" ] || [ "$_conclusion" = "cancelled" ] || [ "$_conclusion" = "timed_out" ]; then
-        bad "CI" "$_conclusion on main: $_title (run $_id) — gh run view $_id --log-failed"
+      if [ -z "$_n" ] || [ "$_n" = "null" ]; then
+        bad "CI" "could not parse runs from gh output"
+      elif [ "$_n" = "0" ]; then
+        note "CI" "no run recorded for $_short yet — this commit has no CI verdict, and the newest run on the branch is not one"
       else
-        bad "CI" "unexpected conclusion '$_conclusion' on main: $_title"
+        # Order matters and is the point of the check. A single decided failure outranks any
+        # number of runs still going: one required workflow has answered no.
+        _redn=$(printf '%s' "$_mine" \
+          | jq -r '[.[] | select(.status == "completed") | select(.conclusion != "success")] | length' 2>/dev/null)
+        _pendn=$(printf '%s' "$_mine" | jq -r '[.[] | select(.status != "completed")] | length' 2>/dev/null)
+        if [ "$_redn" != "0" ]; then
+          _red=$(printf '%s' "$_mine" \
+            | jq -r '[.[] | select(.status == "completed") | select(.conclusion != "success")
+                     | "\(.name)=\(.conclusion) (run \(.databaseId))"] | join(", ")' 2>/dev/null)
+          bad "CI" "$_redn of $_n run(s) for $_short did not succeed: $_red — gh run view <id> --log-failed"
+        elif [ "$_pendn" != "0" ]; then
+          note "CI" "$_pendn of $_n run(s) for $_short still going ($_title) — no verdict yet, which is not a pass"
+        else
+          ok "CI ($_short: $_n run(s) green — $_title)"
+        fi
       fi
     fi
   fi

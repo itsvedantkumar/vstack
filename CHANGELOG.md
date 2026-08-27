@@ -6,6 +6,40 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.47.0 — 2026-08-27
 
+### `bin/doctor`'s CI check answered for the branch, not for your commit
+
+    gh run list --branch main --limit 1 --json conclusion,status,displayTitle,databaseId
+
+`--branch main` is a moving reference and `--limit 1` takes whatever is newest under it. The
+projection carried no `headSha`, so nothing downstream could have filtered by commit even if it
+had wanted to. Standing on a commit whose CI had never run, or had failed, printed
+
+    CI (main: an OLDER commit that passed)   ✔
+
+which is a true statement about a different commit. `--limit 1` also picked one workflow
+arbitrarily when several run per commit: this repo runs `verify` and `release`, and on 2026-08-27
+`release` completed with a failure while `verify` was still going, so which one spoke for the
+commit depended on timing.
+
+`.github/workflows/release.yml`'s own header warns against precisely this -- "a moving branch ref
+answers 'is the newest thing on this branch green', which silently drifts to a different commit"
+-- and the check whose job is to stop a release going out over red CI reproduced it. Three
+defects reached `main` in one day because a remote verdict went unread; this is the check that was
+supposed to catch that, reporting green about somebody else's commit.
+
+It now reads every run recorded against `HEAD` and orders the answer: a decided failure outranks
+any number of runs still going, in-progress is a note, and **no run for this commit is a note, not
+a pass**. An unpushed commit has no CI verdict and the newest run on the branch is not a stand-in
+for one.
+
+**Check 49** gates the decision offline, through a `gh` stub, five cases, both directions. The
+network call stays in `bin/doctor` -- `.claude/verify.sh` is hermetic by design, which is why the
+CI and release-reachability questions live there in the first place. What belongs in the gate is
+the decision, and now it is falsifiable: row 49 deletes the commit filter and check 49 goes red.
+Also pinned by `tests/repro/ci-lane-answers-for-head.sh`, which was watched failing on exactly two
+of its five cases before the fix.
+
+
 ### Two published measurements had no surviving artifact
 
 `CHANGELOG.md` cited "80 samples" for the skill-collision suppression finding and "a uniform 0/5
@@ -54,7 +88,7 @@ named condition, and no fleet-wide figure is derived here.
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
-The tree declares 48 checks and 73 falsifiability rows (70 mutation + 3 fixed). The old figures
+The tree declares 49 checks and 73 falsifiability rows (70 mutation + 3 fixed). The old figures
 were true on their run dates and are now marked as superseded with those dates attached, rather
 than replaced with a number nobody re-ran for this document — the document's own rule is that no
 claim appears without a source and a date.
