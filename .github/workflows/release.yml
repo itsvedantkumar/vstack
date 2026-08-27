@@ -95,7 +95,20 @@ jobs:
           # when this runs. Wait for them rather than refusing, because the refusal is not free:
           # it used to delete the tag, and even now it costs a manual re-dispatch. 25 minutes
           # covers this repo's slowest lane (verify's falsifiability sweep) with margin.
-          REQUIRE_CHECKS_WAIT_SECONDS: "1500"
+          # Derived from the workflow it waits for, not chosen. The last eight completed
+          # `verify` runs took 27, 27, 28, 36, 52, 52, 59 and 70 minutes -- the falsifiability
+          # suite dominates and grows with every check added. 1500s is 25 minutes, which is
+          # BELOW ALL EIGHT: this budget had never once been long enough, so every release
+          # timed out undecided and needed a manual re-dispatch. Measured on v1.47.0, which
+          # sat at "1 required check still undecided" for the entire 1500s and then gave up
+          # while the run it was waiting for was 20 minutes from finishing.
+          #
+          # 5400s is 90 minutes, comfortably above the 70-minute worst case, and well inside
+          # GitHub's 360-minute job ceiling. The cost is a runner minute per minute spent
+          # waiting; that is the price of not publishing over an unread verdict, and it is
+          # only paid when a release is actually in flight. Re-derive this from the numbers
+          # above if the suite grows again rather than nudging it.
+          REQUIRE_CHECKS_WAIT_SECONDS: "5400"
         run: |
           set +e
           bash .github/scripts/require-checks-green.sh \
