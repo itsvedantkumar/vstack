@@ -38,9 +38,17 @@ if [ $# -gt 2 ]; then
   echo "$self: ignoring extra argument(s): ${*:3}" >&2
 fi
 
-# PATH hardening: prepend known locations to the inherited PATH (never replace it) so a
-# cron-shaped minimal PATH still finds claude.
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# PATH hardening: APPEND known locations to the inherited PATH (never replace it, never
+# override it) so a cron-shaped minimal PATH still finds claude.
+#
+# These used to be prepended, which achieves the stated goal and one unstated thing besides:
+# it overrides the caller. A `claude` the caller deliberately put first -- a wrapper, a pinned
+# version, a test stub -- lost to whatever sits in /usr/local/bin. tests/bin-scripts.sh
+# advertises that "every claude in here is a local stub script, never the real CLI" and CI
+# proved otherwise the first time it ran: the real CLI dispatched and answered
+# "Not logged in - Please run /login". Appending serves the cron case exactly as well, because
+# a minimal PATH has no claude on it to win the race in the first place.
+export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 if ! command -v claude >/dev/null 2>&1; then
   echo "$self: claude not found on PATH ($PATH)" >&2
   exit 3

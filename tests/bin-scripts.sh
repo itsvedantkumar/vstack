@@ -23,6 +23,30 @@ SRC=$(pwd)
 ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/vstack-binscripts.XXXXXX")" && pwd)
 trap 'rm -rf "$ROOT"' EXIT
 
+# --- the no-model-calls claim, enforced rather than asserted -------------------------------------
+# The header above says every `claude` in here is a local stub, never the real CLI. That was a
+# description of the intent with no mechanism behind it, and it was false: bin/claude-bg.sh
+# PREPENDED /usr/local/bin and friends to the caller's PATH, so a case's stub lost to whatever
+# real CLI the machine had installed. CI ran the real binary and printed "Not logged in - Please
+# run /login". On a logged-in machine that is a real model call with a real prompt, from a test
+# suite whose whole selling point is that it costs nothing.
+#
+# Two things make the claim true. bin/claude-bg.sh and bin/claude-task.sh now append those
+# locations instead of prepending, so the caller's PATH wins; and this poison sits first on the
+# PATH every case inherits, so a case that reaches no stub of its own gets a loud refusal
+# instead of the operator's real CLI. The poison is not a substitute for the fix -- with the
+# prepend live it was shadowed too -- it is the backstop for the next script that forgets.
+POISON="$ROOT/poison"
+mkdir -p "$POISON"
+cat > "$POISON/claude" <<'PSN'
+#!/bin/sh
+echo "POISONED CLAUDE: tests/bin-scripts.sh reached a real CLI lookup with no stub in front of it." >&2
+echo "  argv: $*" >&2
+exit 97
+PSN
+chmod +x "$POISON/claude"
+export PATH="$POISON:$PATH"
+
 PASS=0; FAIL=0; SKIP=0
 ok(){   printf 'ok    %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){  printf 'FAIL  %s\n      %s\n' "$1" "$2"; FAIL=$((FAIL+1)); }
@@ -128,6 +152,21 @@ if want control; then
   else
     skip "positive control: shellcheck" "shellcheck not installed"
   fi
+
+  # The poison, watched firing. Without this the guard is exactly the shape this repository
+  # exists to catch: a safety net that is reported as present and has never been shown to hold
+  # anything. Resolve `claude` the way the shipped scripts do -- with the fallbacks appended --
+  # from a HOME that has none, and require the poison, not the machine's real CLI.
+  _pc_home="$ROOT/poison-control"; mkdir -p "$_pc_home"
+  _pc_out=$(env HOME="$_pc_home" PATH="$POISON:/usr/bin:/bin" sh -c \
+    'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"; claude -p hi' 2>&1)
+  _pc_rc=$?
+  if [ "$_pc_rc" = 97 ] && grep -q 'POISONED CLAUDE' <<<"$_pc_out"; then
+    ok "positive control: the poison outranks any real claude on this machine"
+  else
+    bad "positive control: the poison outranks any real claude on this machine" \
+        "exit $_pc_rc, output: $(printf '%s' "$_pc_out" | head -2 | tr '\n' ' ') -- every 'no model call' claim in this file is unenforced"
+  fi
 fi
 
 # =================================================================================================
@@ -203,7 +242,11 @@ if want task-args; then
   H="$ROOT/task-extra"; mkdir -p "$H/.local/bin" "$H/.claude/scheduled-tasks/mytask"
   stub_claude "$H/.local/bin/claude" 0
   printf -- '---\nname: mytask\n---\ndo the thing\n' > "$H/.claude/scheduled-tasks/mytask/SKILL.md"
-  HOME="$H" bash "$SRC/bin/claude-task.sh" mytask sonnet extra1 extra2 >/dev/null 2>&1
+  # PATH set explicitly. This case is about argument handling, not resolution order, and it
+  # used to reach its stub only because claude-task.sh prepended $HOME/.local/bin over the
+  # caller's PATH. Resolution order has exactly two cases of its own further down; every other
+  # case says where its stub is instead of inheriting the answer.
+  PATH="$H/.local/bin:$PATH" HOME="$H" bash "$SRC/bin/claude-task.sh" mytask sonnet extra1 extra2 >/dev/null 2>&1
   logf="$H/.claude/scheduled-tasks/mytask/last-run.log"
   if grep -q 'STUB CLAUDE args: -p --model sonnet' "$logf" 2>/dev/null; then
     ok "claude-task.sh: extra positional args do not corrupt the run"
@@ -265,7 +308,7 @@ if want cwd; then
   H="$ROOT/cwd-task"; mkdir -p "$H/.local/bin" "$H/.claude/scheduled-tasks/mytask" "$H/elsewhere"
   stub_claude "$H/.local/bin/claude" 0
   printf -- '---\nname: mytask\n---\ndo it\n' > "$H/.claude/scheduled-tasks/mytask/SKILL.md"
-  out=$( ( cd "$H/elsewhere" && HOME="$H" bash "$SRC/bin/claude-task.sh" mytask 2>&1 ) ); rc=$?
+  out=$( ( cd "$H/elsewhere" && PATH="$H/.local/bin:$PATH" HOME="$H" bash "$SRC/bin/claude-task.sh" mytask 2>&1 ) ); rc=$?
   grep -q 'STUB CLAUDE' "$H/.claude/scheduled-tasks/mytask/last-run.log" 2>/dev/null \
     && ok "claude-task.sh: works when invoked from an unrelated cwd" \
     || bad "claude-task.sh: works when invoked from an unrelated cwd" "rc=$rc, out=$out"

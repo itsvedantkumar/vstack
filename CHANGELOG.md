@@ -336,6 +336,32 @@ the push and was read fourteen hours later. Pinned by `tests/repro/backup-self-c
 asserts the copy's bytes rather than its existence, and which was watched going red against the
 unfixed `install.sh` in a detached worktree before the fix landed.
 
+### `claude-bg.sh` and `claude-task.sh` overrode the caller's PATH
+
+Both hardened PATH by *prepending* `$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:...`. The
+comment gives the reason as "so a cron-shaped minimal PATH still finds claude", which appending
+serves just as well, because a minimal PATH has no `claude` on it to win the race. Prepending also
+does something the comment does not mention: it overrides the caller. A `claude` someone
+deliberately put first -- a wrapper, a pinned version, a test stub -- lost to whatever sits in
+`/usr/local/bin`. For a script cron and launchd invoke unattended, silently running a different
+binary than the one the operator installed is the least debuggable failure available. Both now
+append.
+
+`tests/bin-scripts.sh` had never passed on CI. It was added to `verify.yml` in `e666f6c`, whose
+subject was killing three CI skips, and it went red on its first execution and stayed red: three
+`claude-bg.sh` cases reporting `no dispatch reached the stub`. The prepend is why. The CI log also
+carries the line `Not logged in - Please run /login`, which is the real Claude CLI answering a
+prompt from a suite whose header states that "every `claude` in here is a local stub script, never
+the real CLI". That was a description of the intent with no mechanism behind it; on a logged-in
+machine it is a real model call. A poison `claude` now sits first on the PATH every case inherits,
+so a case reaching no stub of its own gets `exit 97` and a loud line instead of the operator's real
+CLI -- with a positive control that watches the poison outrank the machine's actual `claude`,
+because a safety net nobody has seen hold anything is the shape this repository is about.
+
+Two `claude-task.sh` cases turned red under the fix and were not weakened to make them pass. Both
+test argument handling and cwd independence, and both reached their stub only via the prepend. They
+now name their own `PATH` explicitly. Resolution order still has two cases of its own, unchanged.
+
 ### `back()` asked a question it had already answered
 
 Separate from the catalogue entry, because the fix is worth stating on its own: the ordering is the

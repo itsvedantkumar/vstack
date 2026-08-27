@@ -80,7 +80,11 @@ if [ -z "$nvm_bin" ]; then
   done
   nvm_bin="$newest"
 fi
-export PATH="$HOME/.local/bin${nvm_bin:+:$nvm_bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# Appended, not prepended: see the paragraph on the same line in bin/claude-bg.sh. A caller
+# who puts a claude first on PATH means it, and this script is invoked unattended by cron and
+# launchd, where silently running a different binary than the one the operator installed is
+# the least debuggable failure available.
+export PATH="$PATH:$HOME/.local/bin${nvm_bin:+:$nvm_bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "$self: claude not found on PATH ($PATH)" >&2
