@@ -4,6 +4,62 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.47.0 — 2026-08-27
+
+### Two published measurements had no surviving artifact
+
+`CHANGELOG.md` cited "80 samples" for the skill-collision suppression finding and "a uniform 0/5
+across five fixtures" as the motivation for the 1.43.0 replay log. Neither number can be re-read.
+There is no 80-sample runlog in git history or on this machine; the only collision arm on record
+is 55 samples on `col-11` alone (`tests/README.md:188`), and its instrument was an uncommitted
+edit to `tests/dispatch-fleet.sh` — the fence comment at line 180 of that file already said so.
+Its runlog at `/private/tmp/vstack-dispatch-pilot-col.jsonl` no longer exists. The 0/5 figure is
+worse than unsourced: the harness cannot produce that shape at all, because at
+`tests/dispatch-fleet.sh:678-688` only `kind=="skill"` and `kind=="none"` fixtures receive a
+numeric `k`, so a `CHAIN:` or `AMBIGUOUS:` fixture returns `{k: null}` and never prints a
+fraction. Two of the five fixtures in that arm are exactly those kinds.
+
+This is the repository's own subject applied to its own evidence base. A check that inherits its
+answer returns a true statement about the wrong question; a citation whose artifact is gone is the
+same defect one level up — it reads as measured, and there is nothing left to disagree with. Both
+lines are kept in place with a retraction note attached rather than deleted, which is how
+`tests/evals/RESULTS.md` already handles its retracted pathway run. The direction each arm reported
+stands as what it reported. The n is withdrawn from both.
+
+### Replacement arm, pre-registered before it runs
+
+`tests/evals/collision/PREREGISTRATION.md`. The question is deliberately not "why did those
+fixtures score zero" — that is unanswerable now — but the one a single arm structurally cannot
+answer: when a skill fails to fire on a collision-framed prompt, was it the collision, or does that
+skill not fire under this harness on any prompt? Matched pairs, 5 arms × n=5 = 25 model calls:
+`swarm` and `principle-encode-lessons-in-structure` each on their clean `pos-*` fixture and their
+`col-*` fixture, plus `col-01` ("Tear this apart.") which is a literal trigger string in both
+`grill-me`'s and `interrogate`'s descriptions.
+
+Thresholds, void conditions and named invalidators are fixed in that file before the first sample.
+The fixture file is pinned by `sha256`, not by path, because `~/vstack-dispatch/` is not a git
+repository and the path alone does not identify what ran. `tests/dispatch-fleet.sh` is **not
+edited**: every parameter goes through the committed env overrides, which exist precisely because
+a source edit is what destroyed the previous arm. The runlog is written to a tracked path in the
+repository and committed with the results, and `KEEP_WORKDIRS=1` retains the transcripts.
+
+The arm also bears on H11 at no extra cost. `swarm`'s affordance is the `Agent` tool, which the
+harness's own guard (`dispatch-fleet.sh:195-224`) requires to be denied;
+`principle-encode-lessons-in-structure` produces prose and needs no denied tool. If `swarm` is
+silent on both its fixtures while the prose skill fires on its positive, the fence explains that
+zero and collision does not. This does not discharge the publication gate at
+`dispatch-fleet.sh:277-283`; arm A5 of `tests/evals/build-the-lever/PREREGISTRATION.md` remains its
+named condition, and no fleet-wide figure is derived here.
+
+### Stale counts in `docs/what-this-actually-does.md`
+
+The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
+The tree declares 48 checks and 73 falsifiability rows (70 mutation + 3 fixed). The old figures
+were true on their run dates and are now marked as superseded with those dates attached, rather
+than replaced with a number nobody re-ran for this document — the document's own rule is that no
+claim appears without a source and a date.
+
+
 ## 1.46.0 — 2026-08-27
 
 ### claude-mem removed
@@ -22,6 +78,14 @@ read path is a skill, `mem-search`, which would arrive with 18 others — `do`, 
 `smart-explore`, `learn-codebase` — sharing trigger frames with `executing-plans`, `writing-plans`
 and `find-skills`. Colliding triggers were measured over 80 samples to suppress both skills, not
 one, so the trade was working skills for a store nothing read back.
+
+> **Retraction note added in 1.47.0: the "80 samples" above is unsourced.**
+> No 80-sample runlog exists in git history or on this machine. The only collision arm on record
+> is 55 samples on `col-11` alone (`tests/README.md:188`), produced by an uncommitted edit to
+> `tests/dispatch-fleet.sh` — its own fence comment at line 180 says so — and its runlog at
+> `/private/tmp/vstack-dispatch-pilot-col.jsonl` is gone. The direction of the finding is what
+> that arm reported; its n is withdrawn. Replacement arm pre-registered at
+> `tests/evals/collision/PREREGISTRATION.md`.
 
 Removed from `setup-machine.sh` (the plugin list and the whole `hooks.json` async-flipper),
 `install.sh` (the `enabledPlugins` presence probe; the entry is now deleted unconditionally),
@@ -601,6 +665,14 @@ unchanged in line count before and after every run, and `~/.claude/vstack-replay
 created by any test in this suite. One gap stated rather than left to be discovered: this hook's
 matcher never sees `PostToolUseFailure`, which carries `error` instead of `tool_response`, so a
 dispatch that *failed* is invisible to the replay log. The rows record what ran, not what broke.
+
+> **Retraction note added in 1.47.0: the "uniform 0/5 across five fixtures" above is unsourced.**
+> No runlog, no transcripts and no fixture list survive for that arm, and the harness cannot
+> produce that shape: at `tests/dispatch-fleet.sh:678-688` only `kind=="skill"` and
+> `kind=="none"` fixtures receive a numeric `k`, so a `CHAIN:` or `AMBIGUOUS:` fixture returns
+> `{k: null}` and can never print `0/5`. The defect this paragraph describes is real and the fix
+> shipped; the measurement quoted as its motivation cannot be re-read. Kept with the reason
+> attached rather than deleted, as `tests/evals/RESULTS.md` keeps its retracted run.
 
 ## 1.42.0 — 2026-08-23
 
