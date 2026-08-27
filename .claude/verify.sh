@@ -1707,6 +1707,19 @@ if command -v git >/dev/null && command -v jq >/dev/null; then
   # at any real-but-not-newest tag is stale too. Sorted by git itself (--sort=-v:refname) rather
   # than by `sort -V`, which busybox does not have. Only asserted where the checkout has tags at
   # all -- a shallow clone has none, and the branch below already declines to measure in that case.
+  #
+  # LOCAL TAGS ONLY, stated because it cost a day. This file is hermetic by design and makes no
+  # network call, so "is a tag in this repository" means "is a tag in THIS CHECKOUT" -- and a tag
+  # you created locally and never pushed is invisible to every stranger following the README.
+  # Measured 2026-08-27: this machine held a v1.46.0 the remote did not, so the pin at v1.46.0
+  # read as valid here while CI, whose clone has only what origin has, reported the documented
+  # install URL as a 404. The gate was green and the install path was broken at the same moment,
+  # which is the exact pair this check was written to make impossible.
+  #
+  # The remote half is bin/doctor's "declared release is fetchable", which does `git ls-remote`
+  # and therefore lives outside this file. Neither check is sufficient alone: this one catches a
+  # stale or unreleased pin without a network, that one catches a pin whose tag exists nowhere a
+  # stranger can reach. A green here is evidence about your checkout, not about the internet.
   newest_tag=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | head -1)
   pins=""
   for f in README.md docs/*.md; do

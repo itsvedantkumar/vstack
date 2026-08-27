@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The fifteen
+## The sixteen
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -168,6 +168,18 @@ broken" control against it would pass without measuring anything. A vacuous cont
 an absent one, because the absent one is visible in this paragraph and the vacuous one reads as
 coverage. Anyone closing this gap should give install-matrix a scoped mode that can run in seconds
 against a deliberately broken payload, and should confirm the matrix is green first.
+
+**The tag that existed on one machine.** Check 24 asks whether the version the README pins is
+a real tag, and answers with `git tag -l` -- this checkout's tags. `.claude/verify.sh` is hermetic
+by design and makes no network call, so a tag created locally and never pushed counts as evidence
+that the documented install URL resolves. On 2026-08-27 this machine held a `v1.46.0` the remote
+did not, because the release workflow had deleted it from origin four times while a local
+`push.followTags` kept recreating it. The gate was green here and CI, whose clone has only what
+origin has, reported the README's install URL as a 404 for the same commit. Inherited from: which
+tags the operator happens to have fetched or created. The remote half of the question lives in
+`bin/doctor`'s "declared release is fetchable", which does `git ls-remote`; neither check is
+sufficient alone, and check 24 now says so in its own comment rather than leaving the next reader
+to infer that a green is evidence about the internet.
 
 ## The test
 
