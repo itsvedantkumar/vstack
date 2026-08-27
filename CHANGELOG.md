@@ -104,6 +104,29 @@ answer to a different question" sub-shape covers two entries and not three. The 
 path-existence scan, so neither gate would have caught any of them. A document about checks that
 measure nothing is not covered by the checks.
 
+### A red gate has never failed CI on macOS or Alpine
+
+Two of the three platform lanes ran the gate as `./.claude/verify.sh | tee "$RUNNER_TEMP/gate.txt"`.
+GitHub's default shell for a `run:` block is `bash -e` with no `pipefail`, so the step's exit status
+is `tee`'s, and `tee` succeeds whatever the gate did. Measured both directions on 2026-08-27 against
+a seeded gate that prints `FAIL` and exits 1: `bash -e -c 'gate | tee f'` exits **0**, the same
+command unpiped exits **1**. The one downstream step that reads the captured log,
+`.github/scripts/require-no-unexpected-skips.sh`, exits **0** on a log full of `FAIL` lines, because
+it only inspects skip lines. So a failing gate on macOS or Alpine passed the job, passed the audit,
+and was never visible.
+
+This is the rule the repository already wrote down after a local `./verify.sh | tail` produced a
+false green, applied everywhere except the two lanes that needed it. Both now redirect to a file,
+capture the status with `|| rc=$?` so `-e` cannot exit before the code is read, print the log, and
+`exit "$rc"` on its own line.
+
+The macOS lane also stopped linting. `macos-latest` no longer ships `shellcheck`, so check 29
+skipped, and the lane's approved-skip list did not cover it. That skip is what the lane's own audit
+caught, and it is the reason this was found at all. Fixed by installing `shellcheck` rather than by
+approving the skip, matching the alpine lane, whose comment already says a check that skips is
+measuring nothing. Approving it would have left 71 scripts unlinted on the one platform whose BSD
+tools this job exists to exercise, with the lane still green.
+
 ### v1.46.0 was tagged locally and never pushed
 
 CI had been red on `main` for three commits for one reason: `install-macos` and `install-linux` both
