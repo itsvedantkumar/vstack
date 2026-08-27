@@ -479,11 +479,32 @@ if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
   if [ -f "$LOGF" ]; then
     line=$(tail -1 "$LOGF")
     keys=$(printf '%s' "$line" | jq -r 'keys | sort | join(",")' 2>/dev/null)
+    # An ALLOWLIST, not an exact key list. This assertion used to be a string comparison against
+    # `checkpoint_index,dir_count,ext_count,named,session_id,task_count,ts`, and it broke the day
+    # the hook grew two benign counters (`latched`, `task_fail_count`) -- failing on every
+    # container for a reason that had nothing to do with what it protects. Worse than the false
+    # alarm is the repair it invites: paste in whatever the current keys are, which launders a
+    # leaked key into the expectation the moment one appears.
+    #
+    # So: every key must be declared here, and adding one is a deliberate edit. That half is
+    # unchanged in spirit.
+    DLOG_ALLOWED_KEYS='checkpoint_index dir_count ext_count latched named session_id task_count task_fail_count ts'
+    undeclared=$(printf '%s' "$line" \
+      | jq -r --arg a "$DLOG_ALLOWED_KEYS" '($a|split(" ")) as $ok | [keys[] | . as $k | select(($ok|index($k))==null)] | join(",")' 2>/dev/null)
+    # The property this test actually exists for, asserted on VALUES rather than on three literal
+    # strings. `grep -c '/tmp/dlog/benign.jsonl\|"command"\|"file_path"'` only ever caught the one
+    # leak somebody had already thought of; any other absolute path sailed through. A path is a
+    # string value containing a slash, and no legitimate field here is one: the counters are
+    # numbers, the flags are booleans, `ts` is an ISO timestamp and `session_id` is an opaque id.
+    # This fires even on a key that has been added to the allowlist above, which is the point --
+    # the allowlist governs shape, this governs content, and neither is sufficient alone.
+    pathshaped=$(printf '%s' "$line" \
+      | jq -r '[to_entries[] | select((.value|type)=="string" and (.value|test("/")))|.key] | join(",")' 2>/dev/null)
     has_path=$(printf '%s' "$line" | grep -c '/tmp/dlog/benign.jsonl\|"command"\|"file_path"' || true)
-    if [ "$keys" = "checkpoint_index,dir_count,ext_count,named,session_id,task_count,ts" ] && [ "${has_path:-0}" = 0 ]; then
-      res PASS "20-delegation-log-counts-only" "row keys: $keys; no path/command/file content in the line"
+    if [ -z "$undeclared" ] && [ -z "$pathshaped" ] && [ "${has_path:-0}" = 0 ]; then
+      res PASS "20-delegation-log-counts-only" "row keys: $keys; every key declared, no string value carries a path"
     else
-      res FAIL "20-delegation-log-counts-only" "keys=$keys, path/command leakage matches=$has_path, line: $(printf '%s' "$line" | cut -c1-200)"
+      res FAIL "20-delegation-log-counts-only" "undeclared keys=[$undeclared], path-shaped values=[$pathshaped], literal leakage matches=$has_path, keys=$keys, line: $(printf '%s' "$line" | cut -c1-200)"
     fi
   else
     res FAIL "20-delegation-log-counts-only" "no log file written to configured VSTACK_DELEGATION_LOG=$LOGF"
