@@ -159,6 +159,16 @@ name, and the remote's default branch. Fixed by subtracting all three and publis
 count, which is 3990 B in every checkout tested. Row 18d splices `$base` a fourth time so the
 correction can never again fall behind what the hook adds.
 
+**Not covered, named rather than skipped.** `tests/install-matrix.sh` has no falsifiability
+control. Check 52 gives `tests/bin-scripts.sh` one -- break the argument guard its `bg-args` case
+is about, and the suite must notice -- but the same treatment does not fit the install matrix. Its
+cheapest single case measured 2m10s, which does not belong in an offline gate, and it is red at
+time of writing for an unrelated reason (a declared-but-untagged release), so a "must fail when
+broken" control against it would pass without measuring anything. A vacuous control is worse than
+an absent one, because the absent one is visible in this paragraph and the vacuous one reads as
+coverage. Anyone closing this gap should give install-matrix a scoped mode that can run in seconds
+against a deliberately broken payload, and should confirm the matrix is green first.
+
 ## The test
 
 Before believing any check, ask: **what in the environment could make this print `ok` without

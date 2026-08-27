@@ -3506,6 +3506,47 @@ else
   bad "release cleanup decides correctly" "tests/release-cleanup.sh is not executable or .github/scripts/should-delete-candidate-tag.sh is missing -- the destructive step is back to having no test, which is a failure and not an environment fact"
 fi
 
+# --- 52. the bin-scripts suite can actually fail ----------------------------------------------
+# tests/bin-scripts.sh prints "38 passed, 0 failed" and nothing had ever asked whether it can
+# print anything else. That is the same question tests/gate-falsifiability.sh asks of every gate
+# check, and this repository's own history says a suite that has never been watched red is a
+# suite nobody has evidence about: bin-scripts itself shipped claiming it never reaches the real
+# `claude` CLI while two of its cases did exactly that, undetected until a poison stub was added.
+#
+# Scoped to the `bg-args` case and to a two-file copy of the tree, which runs in about two
+# seconds. The full suite is 17s and the point here is falsifiability, not coverage -- coverage
+# is what CI's own bin-scripts step is for.
+#
+# NOT COVERED, stated rather than skipped: tests/install-matrix.sh has no equivalent control.
+# Its cheapest single case measured 2m10s, which does not belong in an offline gate, and it is
+# currently red for an unrelated reason (a declared-but-untagged release), so a "must fail when
+# broken" control against it would pass without measuring anything. That gap is real and is
+# named in docs/checks-that-inherit-their-answer.md rather than papered over here.
+if [ -f tests/bin-scripts.sh ] && [ -f bin/claude-bg.sh ]; then
+  c52_errs=""
+  c52_dir=$(mktemp -d)
+  mkdir -p "$c52_dir/bin" "$c52_dir/tests"
+  cp bin/claude-bg.sh bin/claude-task.sh "$c52_dir/bin/" 2>/dev/null
+  cp tests/bin-scripts.sh "$c52_dir/tests/"
+  # Direction one: the suite passes on the tree as it stands. If this fails the suite is telling
+  # the truth about a real defect, and the control below would be meaningless anyway.
+  ( cd "$c52_dir" && bash tests/bin-scripts.sh bg-args >/dev/null 2>&1 ) \
+    || c52_errs="$c52_errs\ntests/bin-scripts.sh bg-args fails against the tree as it stands -- run it directly; either bin/claude-bg.sh has a defect or the suite does"
+  # Direction two: break the argument guard the case is about, and the suite must notice.
+  sed 's/^if \[ $# -eq 0 \]; then/if false; then/' bin/claude-bg.sh > "$c52_dir/bin/claude-bg.sh"
+  if cmp -s "$c52_dir/bin/claude-bg.sh" bin/claude-bg.sh; then
+    c52_errs="$c52_errs\nthe control mutation changed nothing -- the no-args guard in bin/claude-bg.sh was reworded, so this check's falsifiability claim is vacuous until the pattern is repointed"
+  elif ( cd "$c52_dir" && bash tests/bin-scripts.sh bg-args >/dev/null 2>&1 ); then
+    c52_errs="$c52_errs\ntests/bin-scripts.sh passed against a claude-bg.sh whose no-args guard was deleted -- the suite is not reading the script it names"
+  fi
+  rm -rf "$c52_dir"
+  [ -z "$c52_errs" ] \
+    && ok "the bin-scripts suite can actually fail (bg-args, both directions; install-matrix uncovered by design, see the check comment)" \
+    || bad "the bin-scripts suite can actually fail" "$(printf '%b' "$c52_errs")"
+else
+  bad "the bin-scripts suite can actually fail" "tests/bin-scripts.sh or bin/claude-bg.sh is missing -- the suite this check proves falsifiable is gone, which is a failure and not an environment fact"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently

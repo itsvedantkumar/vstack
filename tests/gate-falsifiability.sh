@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -262,6 +262,7 @@ files_for(){ case "$1" in
   50b) printf '.github/workflows/release.yml' ;;
   51)  printf '.github/scripts/should-delete-candidate-tag.sh' ;;
   51b) printf '.github/workflows/release.yml' ;;
+  52)  printf 'bin/claude-bg.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -336,6 +337,7 @@ label_for(){ case "$1" in
   50b) printf 'every CI job is a required check' ;;
   51)  printf 'release cleanup decides correctly' ;;
   51b) printf 'release cleanup decides correctly' ;;
+  52)  printf 'the bin-scripts suite can actually fail' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -478,6 +480,13 @@ exit 7
       # notice, because the truth table alone would still pass.
       sed -i.t 's|should-delete-candidate-tag\.sh|should-delete-candidate-tag-DISCONNECTED.sh|g' \
         .github/workflows/release.yml && rm -f .github/workflows/release.yml.t ;;
+
+  52) # Delete the no-args guard the bg-args case is about. Check 52's first direction requires
+      # tests/bin-scripts.sh to pass against the tree as it stands, so this turns it red -- and
+      # it turns the shipped suite red too, which is the point: the guard is real behaviour.
+      sed -i.t 's/^if \[ $# -eq 0 \]; then/if false; then/' bin/claude-bg.sh \
+        && rm -f bin/claude-bg.sh.t ;;
+
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
 
