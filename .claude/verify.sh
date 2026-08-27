@@ -3345,7 +3345,9 @@ case "\$*" in
 esac
 C49STUB
     chmod +x "$c49_dir/gh"
-    PATH="$c49_dir:$PATH" bash ./bin/doctor 2>&1 | grep -E '^CI' | head -1
+    # VSTACK_DIR pins doctor to this checkout; resolve_vstack_repo() otherwise prefers the path
+    # install.sh last recorded, and the gate would grade a tree it is not testing.
+    PATH="$c49_dir:$PATH" VSTACK_DIR="$PWD" bash ./bin/doctor 2>&1 | grep -E '^CI' | head -1
   }
   c49_row(){ printf '[{"headSha":"%s","name":"verify","status":"%s","conclusion":"%s","displayTitle":"t","databaseId":1}]' "$1" "$2" "$3"; }
 

@@ -43,7 +43,12 @@ case "\$*" in
 esac
 STUB
   chmod +x "$S/gh"
-  PATH="$S:$PATH" bash "$SRC/bin/doctor" 2>&1 | grep -E '^CI' | head -1
+  # VSTACK_DIR pins doctor to the tree under test. Without it resolve_vstack_repo() prefers
+  # ~/.config/agents/vstack-repo -- wherever install.sh last ran from -- so this harness stubbed
+  # THIS checkout's HEAD while doctor answered about a different one. It passed for as long as
+  # the two paths happened to be the same directory, which is the whole fake-green shape: the
+  # test agreed with itself because the machine was arranged so it could not disagree.
+  PATH="$S:$PATH" VSTACK_DIR="$SRC" bash "$SRC/bin/doctor" 2>&1 | grep -E '^CI' | head -1
 }
 
 check(){ # <name> <ok?> <detail>
