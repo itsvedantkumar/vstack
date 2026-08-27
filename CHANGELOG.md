@@ -88,7 +88,7 @@ named condition, and no fleet-wide figure is derived here.
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
-The tree declares 49 checks and 73 falsifiability rows (70 mutation + 3 fixed). The old figures
+The tree declares 50 checks and 77 falsifiability rows (74 mutation + 3 fixed). The old figures
 were true on their run dates and are now marked as superseded with those dates attached, rather
 than replaced with a number nobody re-ran for this document — the document's own rule is that no
 claim appears without a source and a date.

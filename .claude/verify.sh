@@ -3420,6 +3420,54 @@ else
   skip "doctor's CI lane answers for HEAD" "jq not installed or bin/doctor not executable"
 fi
 
+# --- 50. every CI job is a required check, and every required check is a CI job --------------
+# The release gate reads the conclusion of each name in release.yml's REQUIRED_CHECKS. Nothing
+# connected that list to the workflow that produces the jobs, so adding a lane to verify.yml
+# shipped a lane whose verdict no gate ever read: it could be red on every commit and the
+# release would still publish. That is not hypothetical here -- `install-macos` was added, went
+# red on its first run, and the failure was noticed by reading a log by hand.
+#
+# Both directions, because each is a different lie. A job missing from REQUIRED_CHECKS is an
+# unread verdict. A name in REQUIRED_CHECKS with no job behind it never produces a run at all,
+# and require-checks-green.sh reports that as UNDECIDED forever -- a release that can never
+# publish, which is the deadlock this session already fixed once from the other end.
+_c50_wf=.github/workflows/verify.yml
+_c50_rl=.github/workflows/release.yml
+if [ -f "$_c50_wf" ] && [ -f "$_c50_rl" ]; then
+  c50_errs=""
+  # Job keys are the two-space-indented mapping keys inside the top-level `jobs:` block. Scoped
+  # to that block on purpose: `on:` carries `push:` and `pull_request:` at the same indent, and
+  # a selector that only matched indentation would call those two CI jobs.
+  _c50_jobs=$(awk '
+    /^jobs:[[:space:]]*$/ {inj=1; next}
+    inj && /^[^[:space:]#]/ {inj=0}
+    inj && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {gsub(/[: ]/,""); print}
+  ' "$_c50_wf" | sort)
+  _c50_req=$(sed -n 's/^  REQUIRED_CHECKS:[[:space:]]*//p' "$_c50_rl" | head -1 | tr ' ' '\n' | sed '/^$/d' | sort)
+  # Neither list may be empty: an empty selector makes both comparisons below vacuously true,
+  # which is the exact shape this file catalogues.
+  if [ -z "$_c50_jobs" ]; then
+    c50_errs="$c50_errs\nno jobs parsed out of $_c50_wf -- the selector matched nothing, so the comparison below would pass on any workflow at all"
+  fi
+  if [ -z "$_c50_req" ]; then
+    c50_errs="$c50_errs\nno names parsed out of $_c50_rl's REQUIRED_CHECKS -- the release gate would be comparing against an empty list"
+  fi
+  if [ -n "$_c50_jobs" ] && [ -n "$_c50_req" ]; then
+    _c50_unread=$(comm -23 <(printf '%s\n' "$_c50_jobs") <(printf '%s\n' "$_c50_req"))
+    _c50_phantom=$(comm -13 <(printf '%s\n' "$_c50_jobs") <(printf '%s\n' "$_c50_req"))
+    [ -z "$_c50_unread" ] \
+      || c50_errs="$c50_errs\nCI job(s) no gate reads: $(printf '%s' "$_c50_unread" | tr '\n' ' ') -- add them to REQUIRED_CHECKS in $_c50_rl or the release publishes over their red"
+    [ -z "$_c50_phantom" ] \
+      || c50_errs="$c50_errs\nREQUIRED_CHECKS name(s) with no job behind them: $(printf '%s' "$_c50_phantom" | tr '\n' ' ') -- nothing will ever report for these, so the gate stays UNDECIDED forever"
+  fi
+  _c50_njobs=$(printf '%s' "$_c50_jobs" | grep -c . )
+  [ -z "$c50_errs" ] \
+    && ok "every CI job is a required check ($_c50_njobs jobs, both directions)" \
+    || bad "every CI job is a required check" "$(printf '%b' "$c50_errs")"
+else
+  bad "every CI job is a required check" "$_c50_wf or $_c50_rl is missing -- CI itself is gone, which is a failure and not an environment fact"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
