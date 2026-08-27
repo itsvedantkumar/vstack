@@ -1088,9 +1088,25 @@ if command -v jq >/dev/null; then
   # remote's default branch, not this checkout's path or branch, so it does not vary with either
   # and is left out of the normalization on purpose. A fork whose remote default branch has an
   # unusually long name is a real, separate source of noise this does not cover.)
+  # Mirrors the hook's own resolution exactly, fallbacks included (inject-session-context.sh
+  # around the `symbolic-ref ... origin/HEAD` line): whatever the hook would splice is what has
+  # to be subtracted back out, or the correction is for a different string than the one in the
+  # output being measured.
+  _base_of(){ # dir -> the $base string the hook would splice, post-sanitization
+    _bb=$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null \
+          | tr -cd 'A-Za-z0-9._/-' | head -c 80)
+    if [ -z "$_bb" ]; then
+      for _bc in origin/main origin/master; do
+        git -C "$1" rev-parse --verify --quiet "$_bc" >/dev/null 2>&1 && { _bb="$_bc"; break; }
+      done
+    fi
+    [ -n "$_bb" ] || _bb="origin/main"
+    printf '%s' "$_bb"
+  }
   _root_now=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null | tr -cd 'A-Za-z0-9 ._/-' | head -c 160)
   _branch_now=$(git -C "$PWD" branch --show-current 2>/dev/null | tr -cd 'A-Za-z0-9._/-' | head -c 80)
   [ -n "$_branch_now" ] || _branch_now='<detached>'
+  _base_now=$(_base_of "$PWD")
   _baseline_raw=$(probe SessionStart '' '')
   # Floor stays on the raw byte count -- "did the hook say anything at all" does not depend on
   # checkout path, and this never fires from trimming a sentence.
@@ -1099,16 +1115,22 @@ if command -v jq >/dev/null; then
   # Worst-case normalized bytes: this checkout's raw measurement, with its own root/branch
   # contribution removed and the hook's documented worst case (root padded to 160, branch to 80)
   # added back. Identical regardless of where the repo sits on disk or what the branch is called.
-  _baseline_worst=$(awk -v raw="$_baseline_raw" -v rl="${#_root_now}" -v bl="${#_branch_now}" \
-    'BEGIN{print raw - 2*rl - bl + 2*160 + 80}')
-  # Cap derived, not chosen: worst-case measured 4423 B on this commit (invariant text 4023 B +
-  # the hook's own 320+80 B worst-case root/branch padding), +25% headroom to match the
-  # philosophy stated at the top of this check. 5632 is that number rounded up to a clean
+  # Two derived numbers, one subtraction. _baseline_inv is the raw count with EVERY
+  # environment-dependent splice removed -- $root twice, $branch once, $base three times -- so it
+  # is the same integer on every machine and is the only count fit to compare against a published
+  # figure. _baseline_worst adds back the hook's documented truncation ceilings (160/80/80) to
+  # give the cap something invariant to bound.
+  _baseline_inv=$(awk -v raw="$_baseline_raw" -v rl="${#_root_now}" -v bl="${#_branch_now}" \
+    -v gl="${#_base_now}" 'BEGIN{print raw - 2*rl - bl - 3*gl}')
+  _baseline_worst=$(awk -v inv="$_baseline_inv" 'BEGIN{print inv + 2*160 + 80 + 3*80}')
+  # Cap derived, not chosen: worst-case measured 4630 B on this commit (invariant text 3990 B +
+  # the hook's own 320+80+240 B worst-case root/branch/base padding), +25% headroom to match the
+  # philosophy stated at the top of this check. 5888 is that number rounded up to a clean
   # multiple of 128. Recompute _baseline_worst by hand if this ever needs re-deriving -- it is
   # not a magic constant, it is this formula's output on the day it was set. Below this cap: the
   # WORKSPACE CONVENTIONS block's structural text is bounded. Above it: something added prose
-  # there, on every checkout, regardless of path length.
-  _baseline_cap=5632
+  # there, on every checkout, regardless of path length or remote default branch.
+  _baseline_cap=5888
   [ "$_baseline_worst" -le "$_baseline_cap" ] \
     || errs="$errs\nsession baseline: normalized $_baseline_worst bytes (raw $_baseline_raw B at this checkout) exceeds the $_baseline_cap byte worst-case cap"
 
@@ -1125,9 +1147,19 @@ if command -v jq >/dev/null; then
   _inv_short="$_inv_root/a"
   _inv_long="$_inv_root/a-much-longer-directory-name-chosen-to-move-the-prefix-by-a-lot"
   mkdir -p "$_inv_short" "$_inv_long"
+  # The two repos differ in path length AND in remote default branch name. $base is spliced
+  # three times into the same block, so a checkout whose origin/HEAD is `origin/a-long-name`
+  # carries ~60 more bytes than one on `origin/main` -- environment text this normalization used
+  # to ignore on the stated grounds that it "does not vary with this checkout." It varies with
+  # the remote, which is no less environmental. Vary both here so neither source can rot unproven.
+  _inv_i=0
   for _id in "$_inv_short" "$_inv_long"; do
     git -C "$_id" init -q >/dev/null 2>&1
     git -C "$_id" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+    _inv_i=$((_inv_i + 1))
+    if [ "$_inv_i" = 1 ]; then _inv_b=main
+    else _inv_b=a-deliberately-long-default-branch-name-to-move-the-base-splice; fi
+    git -C "$_id" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$_inv_b" >/dev/null 2>&1
   done
   _inv_worst(){ # dir -> worst-case normalized byte count for a SessionStart probe run there
     _wd="$1"
@@ -1137,13 +1169,15 @@ if command -v jq >/dev/null; then
     _wr=$(git -C "$_wd" rev-parse --show-toplevel 2>/dev/null | tr -cd 'A-Za-z0-9 ._/-' | head -c 160)
     _wb=$(git -C "$_wd" branch --show-current 2>/dev/null | tr -cd 'A-Za-z0-9._/-' | head -c 80)
     [ -n "$_wb" ] || _wb='<detached>'
-    awk -v raw="$_wraw" -v rl="${#_wr}" -v bl="${#_wb}" 'BEGIN{print raw - 2*rl - bl + 2*160 + 80}'
+    _wg=$(_base_of "$_wd")
+    awk -v raw="$_wraw" -v rl="${#_wr}" -v bl="${#_wb}" -v gl="${#_wg}" \
+      'BEGIN{print raw - 2*rl - bl - 3*gl + 2*160 + 80 + 3*80}'
   }
   _wc_short=$(_inv_worst "$_inv_short")
   _wc_long=$(_inv_worst "$_inv_long")
   rm -rf "$_inv_root"
   [ "$_wc_short" = "$_wc_long" ] \
-    || errs="$errs\npath invariance: normalized byte count disagreed by checkout path length ($_wc_short B at a short prefix vs $_wc_long B at a long one) -- the normalization above is not honest until these agree"
+    || errs="$errs\npath invariance: normalized byte count disagreed by checkout path length and remote default branch ($_wc_short B at a short prefix on origin/main vs $_wc_long B at a long one on a long default branch) -- the normalization above is not honest until these agree"
 
   chk "skills profile"         "$(probe SessionStart skills 1)"  512 2560
   # The README publishes these byte counts as the cost column of its comparison table. A number
@@ -1163,7 +1197,14 @@ if command -v jq >/dev/null; then
   # Three outcomes, three messages. The row missing and the row present with an unparseable
   # value are different repairs, and conflating them sends the next reader looking for a row
   # that is sitting in front of them.
-  _full=$_baseline_raw
+  # The INVARIANT count, not the raw one. Comparing a published figure against a raw measurement
+  # made the README's number a property of the author's directory: this repo measured 4077 B in
+  # a 25-character checkout path on `main` and 4163 B in a clone three characters longer whose
+  # origin/HEAD pointed at a 24-character branch, which is 3.9 KB and 4.1 KB against a 0.15 KB
+  # tolerance. The cap lane above was fixed for exactly this and the figure lane was left reading
+  # raw, so the check passed on one machine and failed everywhere else -- a green that was a
+  # property of where it ran. A published number has to be one a reader can reproduce.
+  _full=$_baseline_inv
   _sk=$(probe SessionStart skills 1)
   _label='Context spent per session'
   _row=$(grep -F "| $_label " README.md 2>/dev/null | head -1)
@@ -1187,7 +1228,7 @@ if command -v jq >/dev/null; then
       || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
   fi
   [ -z "$errs" ] \
-    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_full B raw / $_baseline_worst B worst-case)" \
+    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_baseline_raw B raw / $_baseline_inv B invariant / $_baseline_worst B worst-case)" \
     || bad "injected context bounded" "$(printf '%b' "$errs")"
 else
   skip "injected context bounded" "jq not installed"

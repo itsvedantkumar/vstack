@@ -20,7 +20,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -272,6 +272,7 @@ files_for(){ case "$1" in
   18)  printf 'claude/hooks/inject-session-context.sh' ;;
   18b) printf 'README.md' ;;
   18c) printf 'claude/hooks/inject-session-context.sh' ;;
+  18d) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   20c) printf 'install.sh' ;;
@@ -342,6 +343,7 @@ label_for(){ case "$1" in
   18)  printf 'injected context bounded' ;;
   18b) printf 'injected context bounded' ;;
   18c) printf 'injected context bounded' ;;
+  18d) printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   20b) printf 'referenced install paths exist' ;;
@@ -506,6 +508,13 @@ exit 0
       perl -0pi -e 's/\| \(\$dest \* \$ship\)/| (\$dest * \$ship)\n    | delpaths([(keys - \$A)[] | [.]])/' overlay.sh ;;
   18) # The cap lane: pad the per-prompt digest past its 512 byte ceiling.
       perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
+  18d) # The path-invariance lane. Check 18 normalizes every environment-dependent string out of
+      # the WORKSPACE CONVENTIONS block before capping or publishing it -- $root twice, $branch
+      # once, $base three times. Splice $base a fourth time and the correction subtracts less
+      # than the hook added, so two checkouts on differently-named default branches stop
+      # agreeing. This is the lane that was missing when the published figure was compared
+      # against a raw count: the check passed on the author's directory and failed in a clone.
+      perl -0pi -e 's/Open PRs against \$base\./Open PRs against \$base (see \$base)./' claude/hooks/inject-session-context.sh ;;
   19) # A schema type violation, which is what check 19 is actually for.
       #
       # This used to rename "version" to "verzion", and that never tested check 19 directly:

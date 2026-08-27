@@ -624,7 +624,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 71,
+        "rows": 72,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way."
       },
       {

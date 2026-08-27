@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The thirteen
+## The fifteen
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -135,6 +135,29 @@ fourteen hours later. The check worked; nobody read the remote. Pinned by
 [`../tests/repro/backup-self-claim.sh`](../tests/repro/backup-self-claim.sh), which asserts the
 copy's *bytes*, because a directory containing a post-overwrite copy is the same lie one level
 down.
+
+**The check that graded a different copy of the thing than the one it set up.** Check 49 stubs
+`gh`, computes this checkout's `HEAD`, and asks `bin/doctor` whether the CI verdict it reports
+belongs to that commit. `resolve_vstack_repo()` prefers `~/.config/agents/vstack-repo` -- wherever
+`install.sh` last ran from -- over the location of `bin/doctor` itself, so doctor answered about the
+installed tree while the harness had stubbed the tree under test. The two agreed for exactly as long
+as they were the same directory. Running the check from an isolated clone separated them and three
+of five cases went red, including both positive controls. Inherited from: which checkout the
+operator happened to have installed. Fixed by pinning `VSTACK_DIR` to the tree under test.
+
+**The published figure compared against a machine-dependent measurement.** Check 18's cap lane was
+fixed once already for exactly this: the session hook splices `$root`, `$branch` and `$base` into
+the block it measures, so a raw byte count is partly a measurement of the operator's directory name.
+The fix normalized `$root` and `$branch` out and explicitly left `$base` in, on the stated grounds
+that the remote's default branch "does not vary with this checkout." It varies with the remote,
+which is no less environmental, and it is spliced three times. Meanwhile the published-figure lane
+was never converted at all and went on comparing the README against the raw count. The result: the
+check passed at 4077 B on the author's directory on `main` (3.9 KB, inside a 0.15 KB tolerance) and
+failed at 4163 B in a clone three characters longer whose `origin/HEAD` named a 24-character branch
+(4.1 KB). A green that was a property of where it ran. Inherited from: the checkout path, the branch
+name, and the remote's default branch. Fixed by subtracting all three and publishing the invariant
+count, which is 3990 B in every checkout tested. Row 18d splices `$base` a fourth time so the
+correction can never again fall behind what the hook adds.
 
 ## The test
 
