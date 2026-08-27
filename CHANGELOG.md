@@ -85,6 +85,90 @@ zero and collision does not. This does not discharge the publication gate at
 `dispatch-fleet.sh:277-283`; arm A5 of `tests/evals/build-the-lever/PREREGISTRATION.md` remains its
 named condition, and no fleet-wide figure is derived here.
 
+### The arm reported, and the collision explanation did not survive it
+
+25 samples, every one `subtype=success`, no fence violations, `--score-only` reproduces every figure
+from the committed runlog with no model calls. `tests/evals/collision/RESULTS.md` carries the full
+report; `tests/evals/collision/runlog-2026-08-27.jsonl` is committed beside it.
+
+`swarm` fired 0/5 on its clean positive fixture and 0/5 on its collision fixture.
+`principle-encode-lessons-in-structure` did the same. `col-01`, whose prompt is a literal trigger
+string in two competing skill descriptions, fired `interrogate` once in five and nothing in the
+other four. One `Skill` call in 25 samples. H-C2 falsified for both skills; H-C3 confirmed for both.
+
+`KEEP_WORKDIRS=1` kept all 25 transcripts, which is the thing the lost arm could not do, and they
+name the mechanism. The harness runs every sample in an empty `mktemp -d`, so a prompt that refers
+to a repository, a diff or a prior turn has no referent: all five `pos-19` samples globbed, found no
+packages and asked which repository held them. The fence denies `Write`, so a skill whose action is
+to write a file gets as far as the attempt: all five `pos-11` samples called `Write` and were
+refused. The routing was never missing. The model named `swarm` in prose without calling it in 7 of
+10 `swarm` samples, and named `interrogate` or `grill-me` in 4 of 5 `col-01` samples.
+
+One mechanism therefore explains both arms of the anomaly, and it is the instrument.
+`tests/dispatch-fleet.sh` records `fired=[]` identically for "the dispatcher did not route" and "the
+model asked which repository you meant", and it deleted the transcripts that tell them apart until
+`KEEP_WORKDIRS` existed. Every dispatch rate taken through it inherits that confound.
+
+H11 is confirmed wider than it was registered. The publication gate asks whether denying `Write`
+suppresses skills whose output is an artifact. This arm picked
+`principle-encode-lessons-in-structure` as the fence-immune control because its output is prose, and
+5 of 5 samples disproved that premise by calling `Write`. The gate stays closed and its priority
+goes up.
+
+**H-C1's threshold was mis-specified, in the pre-registration written to prevent that.** It was a
+bare bound on one arm: empty in ≥4/5 confirms suppression. `col-01` returned empty in 4/5, so the
+threshold was met, and it means nothing, because both controls returned empty in 5/5 and empty was
+the modal outcome of every fixture in the run. Written without a control clause, H-C1 returns
+CONFIRM on any run in which nothing fires at all. That is the fourteenth instance of the defect in
+`docs/checks-that-inherit-their-answer.md`, and it is in the instrument written to measure the
+thirteenth. The corrected form is recorded in `tests/evals/collision/RESULTS.md` and is not applied
+retroactively to score this run.
+
+### The whole evidence base, as one document
+
+`docs/research/fake-greens-2026-08.md`. What was measured, what the numbers do not support, and the
+thirteen checks that passed while measuring nothing, each with the path and date it came from.
+Numbers without a surviving artifact are marked unsourced and support nothing.
+
+A `code-reviewer` pass against the tree caught four wrong figures in the draft before it landed:
+`guard-quote-aware-split.sh` is 18/18 and not 15/15, the SWE-bench row is 4 instances and not 3, the
+catalogue grew by six in the 2026-08-26/27 window and not seven, and the "true statement read as the
+answer to a different question" sub-shape covers two entries and not three. The same pass found that
+`docs/research/` is excluded by construction from check 12's doc-count extractor and check 38's
+path-existence scan, so neither gate would have caught any of them. A document about checks that
+measure nothing is not covered by the checks.
+
+### A red gate has never failed CI on macOS or Alpine
+
+Two of the three platform lanes ran the gate as `./.claude/verify.sh | tee "$RUNNER_TEMP/gate.txt"`.
+GitHub's default shell for a `run:` block is `bash -e` with no `pipefail`, so the step's exit status
+is `tee`'s, and `tee` succeeds whatever the gate did. Measured both directions on 2026-08-27 against
+a seeded gate that prints `FAIL` and exits 1: `bash -e -c 'gate | tee f'` exits **0**, the same
+command unpiped exits **1**. The one downstream step that reads the captured log,
+`.github/scripts/require-no-unexpected-skips.sh`, exits **0** on a log full of `FAIL` lines, because
+it only inspects skip lines. So a failing gate on macOS or Alpine passed the job, passed the audit,
+and was never visible.
+
+This is the rule the repository already wrote down after a local `./verify.sh | tail` produced a
+false green, applied everywhere except the two lanes that needed it. Both now redirect to a file,
+capture the status with `|| rc=$?` so `-e` cannot exit before the code is read, print the log, and
+`exit "$rc"` on its own line.
+
+The macOS lane also stopped linting. `macos-latest` no longer ships `shellcheck`, so check 29
+skipped, and the lane's approved-skip list did not cover it. That skip is what the lane's own audit
+caught, and it is the reason this was found at all. Fixed by installing `shellcheck` rather than by
+approving the skip, matching the alpine lane, whose comment already says a check that skips is
+measuring nothing. Approving it would have left 71 scripts unlinted on the one platform whose BSD
+tools this job exists to exercise, with the lane still green.
+
+### v1.46.0 was tagged locally and never pushed
+
+CI had been red on `main` for three commits for one reason: `install-macos` and `install-linux` both
+failed `doctor is green on a clean install` with "v1.46.0 is declared and pinned in the README but is
+not on origin". The tag existed at `cc5bf690`, which is `origin/main`'s own head, so pushing it
+published no commits and turned the lane green. Read from `gh run list --json conclusion`, not from
+a local exit code, which is the only way this class of failure is visible at all.
+
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.

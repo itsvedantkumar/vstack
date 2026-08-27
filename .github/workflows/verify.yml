@@ -323,8 +323,29 @@ jobs:
       - name: Install matrix on macOS
         run: ./tests/install-matrix.sh
 
+      # check 29 ("shellcheck clean") skips without a validator on PATH, and a skip is not a pass.
+      # macos-latest stopped shipping shellcheck, so this lane silently stopped linting all 71
+      # scripts on the one platform whose BSD tools this job exists to exercise. Installed here
+      # rather than added to the approved-skip list below, for the same reason the alpine lane
+      # installs it: approving the skip would make the check disappear and the lane still green.
+      - name: shellcheck for macOS, or fail naming it
+        run: |
+          brew install shellcheck
+          shellcheck --version
+
+      # NOT piped into tee. Under this workflow's default `bash -e` shell there is no pipefail, so
+      # `verify.sh | tee` returns tee's status and a red gate exits 0. Measured on 2026-08-27:
+      # `bash -e -c 'red-gate | tee f'` exits 0, the same command unpiped exits 1, and the skip
+      # audit below exits 0 on a log full of FAIL lines because it only reads skip lines. A failing
+      # gate on this lane has therefore never failed this job. The redirect keeps the log for the
+      # skip audit, `|| rc=$?` keeps `-e` from exiting before the code is read, and the exit is on
+      # its own line where it can be seen.
       - name: Run the verification gate
-        run: ./.claude/verify.sh | tee "$RUNNER_TEMP/gate-macos.txt"
+        run: |
+          rc=0
+          ./.claude/verify.sh > "$RUNNER_TEMP/gate-macos.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/gate-macos.txt"
+          exit "$rc"
 
       # This lane declares, out loud, the only two checks it accepts as skips: the CLI is not
       # installed here on purpose (only the ubuntu `verify` job proves check 19 runs, per the
@@ -380,7 +401,13 @@ jobs:
         run: bash ./tests/install-matrix.sh
 
       - name: Run the verification gate
-        run: bash ./.claude/verify.sh | tee "$RUNNER_TEMP/gate-alpine.txt"
+        # Not piped, for the reason spelled out on the macOS lane above: no pipefail under this
+        # shell means `gate | tee` reports tee's status and a red gate passes.
+        run: |
+          rc=0
+          bash ./.claude/verify.sh > "$RUNNER_TEMP/gate-alpine.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/gate-alpine.txt"
+          exit "$rc"
 
       # Same declaration as the macOS lane: the CLI is deliberately absent here too, and the
       # version-tag check is expected to skip pre-release. shellcheck is no longer on this list
