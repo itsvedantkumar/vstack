@@ -149,14 +149,38 @@ jobs:
     # Every other refusal -- a decided failure, a bad tag name, a commit that is not an ancestor
     # of main, a gate step that never ran -- still deletes, so "a failed required job cannot
     # produce a tag" holds exactly as before.
-    if: always() && ((needs.resolve.result == 'failure' && needs.resolve.outputs.gate != 'undecided') || needs.container-matrix.result == 'failure')
+    # Deliberately BROADER than the delete rule. This condition only decides whether the job
+    # gets a runner; .github/scripts/should-delete-candidate-tag.sh decides whether anything is
+    # deleted, and check 51 asserts this expression carries no part of that rule. An `if:`
+    # expression cannot be executed by a test, so the one destructive step in this workflow had
+    # the one decision nobody could exercise -- and it was wrong in production on 2026-08-27.
+    # Broad here is safe: a job that runs and then declines to delete costs a runner minute. A
+    # condition narrower than the script would silently skip deletions the rule requires.
+    if: always() && (needs.resolve.result != 'success' || needs.container-matrix.result != 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Has anything actually decided against this tag?
+        id: decide
+        run: |
+          set +e
+          bash .github/scripts/should-delete-candidate-tag.sh \
+            "${{ needs.resolve.result }}" \
+            "${{ needs.resolve.outputs.gate }}" \
+            "${{ needs.container-matrix.result }}"
+          rc=$?
+          set -e
+          case "$rc" in
+            0)  echo "delete=yes" >> "$GITHUB_OUTPUT" ;;
+            10) echo "delete=no"  >> "$GITHUB_OUTPUT" ;;
+            *)  echo "should-delete-candidate-tag.sh exited $rc, which is neither verdict; refusing to guess"; exit 1 ;;
+          esac
+
       - name: Delete the candidate tag; it did not earn publication
+        if: steps.decide.outputs.delete == 'yes'
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"

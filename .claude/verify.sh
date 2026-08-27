@@ -3468,6 +3468,44 @@ else
   bad "every CI job is a required check" "$_c50_wf or $_c50_rl is missing -- CI itself is gone, which is a failure and not an environment fact"
 fi
 
+# --- 51. the one destructive step in the release workflow decides correctly -------------------
+# cleanup-on-failed-gate force-deletes a candidate tag from origin. It is the only step in this
+# repository that destroys something a human might not be able to reconstruct, and until now it
+# was also the only step whose decision could not be run: the whole rule lived in a GitHub
+# Actions `if:` expression. It was wrong in production on 2026-08-27 -- it deleted the tag for a
+# gate that was UNDECIDED rather than failed, and since verify cannot go green until the tag is
+# on origin, no tag could survive long enough to earn the green it needed.
+#
+# The rule now lives in .github/scripts/should-delete-candidate-tag.sh and tests/release-cleanup.sh
+# is its truth table. This check runs that table BOTH WAYS: against the real decider, which must
+# pass, and against a copy with the undecided carve-out removed, which must fail. A truth table
+# that cannot go red proves nothing about the decider it points at -- and that is not a
+# hypothetical concern in this file, it is entry after entry in
+# docs/checks-that-inherit-their-answer.md.
+if [ -x tests/release-cleanup.sh ] && [ -f .github/scripts/should-delete-candidate-tag.sh ]; then
+  c51_errs=""
+  ./tests/release-cleanup.sh >/dev/null 2>&1 \
+    || c51_errs="$c51_errs\nthe release-cleanup truth table fails against the real decider: $(./tests/release-cleanup.sh 2>&1 | grep '^FAIL' | head -3 | tr '\n' ' ')"
+  # Positive control. Remove the carve-out that keeps an undecided tag alive; the table must
+  # notice. If it still passes, the table is not reading the decider and nothing above is
+  # evidence of anything.
+  c51_dir=$(mktemp -d)
+  sed 's/if \[ "$gate" = undecided \]; then/if false; then/' \
+    .github/scripts/should-delete-candidate-tag.sh > "$c51_dir/broken.sh"
+  chmod +x "$c51_dir/broken.sh"
+  if cmp -s "$c51_dir/broken.sh" .github/scripts/should-delete-candidate-tag.sh; then
+    c51_errs="$c51_errs\nthe control mutation changed nothing -- the sed pattern no longer matches the decider, so the both-directions claim below is vacuous"
+  elif RELEASE_CLEANUP_SCRIPT="$c51_dir/broken.sh" ./tests/release-cleanup.sh >/dev/null 2>&1; then
+    c51_errs="$c51_errs\nthe truth table passed against a decider with the undecided carve-out deleted -- it is not reading the script it names"
+  fi
+  rm -rf "$c51_dir"
+  [ -z "$c51_errs" ] \
+    && ok "release cleanup decides correctly (truth table both directions)" \
+    || bad "release cleanup decides correctly" "$(printf '%b' "$c51_errs")"
+else
+  bad "release cleanup decides correctly" "tests/release-cleanup.sh is not executable or .github/scripts/should-delete-candidate-tag.sh is missing -- the destructive step is back to having no test, which is a failure and not an environment fact"
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
