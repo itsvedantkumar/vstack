@@ -12,6 +12,27 @@
 # was re-run for that same SHA -- which is the one case release.yml calls this script twice to
 # catch (once on entry, once immediately before publication).
 #
+# EXIT CODES. Three, not two, and the difference is load-bearing: release.yml's
+# cleanup-on-failed-gate DELETES the candidate tag from origin when this gate says no.
+#
+#   0  every required check completed with conclusion=success
+#   1  a required check has decided against the commit (conclusion != success)
+#   2  UNDECIDED -- a required check is still running, has no run recorded yet, or has runs
+#      that cannot be ordered. Nothing has been decided, so nothing destructive may follow.
+#
+# These used to be one code. "Not finished yet" and "failed" both exited 1, the caller deleted
+# the tag on either, and on 2026-08-27 that deleted v1.46.0 seconds after it was pushed while
+# verify was still running -- then deadlocked, because bin/doctor's "declared release is
+# fetchable" check reads the README pin, so verify cannot go green until the tag is on origin
+# and the tag could not stay on origin until verify was green. A gate reporting UNKNOWN was
+# already this repository's rule; the missing half is that UNKNOWN must not trigger a
+# destructive remedy either.
+#
+# REQUIRE_CHECKS_WAIT_SECONDS (default 0) bounds an optional wait for in-progress checks, so the
+# common case -- a tag pushed alongside its own commit -- resolves without a manual re-dispatch.
+# 0 keeps the single-read behaviour the pre-publish second call wants: by then the answer must
+# already exist, and waiting for one would be waiting for a check to change its mind.
+#
 # Usage: require-checks-green.sh <repo:owner/name> <sha> <required-check-name> [<name> ...]
 set -uo pipefail
 
@@ -24,19 +45,51 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+WAIT_SECONDS=${REQUIRE_CHECKS_WAIT_SECONDS:-0}
+POLL_SECONDS=${REQUIRE_CHECKS_POLL_SECONDS:-15}
+_deadline_note=""
+
 # id, started_at and completed_at are in the projection because the selection below orders on
 # them. They were absent, and their absence was invisible: the selection sorted on .name, which
 # is constant across the set it sorts, so nothing ever noticed the ordering keys were not there.
-runs_json=$(gh api "repos/${repo}/commits/${sha}/check-runs" --paginate \
-  --jq '.check_runs[] | {name, head_sha, status, conclusion, id, started_at, completed_at}' 2>&1)
-rc=$?
-if [ "$rc" -ne 0 ]; then
-  echo "require-checks-green: gh api check-runs failed for ${sha}:"
-  echo "$runs_json"
-  exit 1
+fetch_runs(){
+  runs_json=$(gh api "repos/${repo}/commits/${sha}/check-runs" --paginate \
+    --jq '.check_runs[] | {name, head_sha, status, conclusion, id, started_at, completed_at}' 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "require-checks-green: gh api check-runs failed for ${sha}:"
+    echo "$runs_json"
+    exit 1
+  fi
+}
+fetch_runs
+
+# Wait only while every required check is undecided-but-alive. A decided failure ends the wait
+# immediately: one required check has answered no, and no amount of waiting on the others
+# changes that answer. An absent check-run counts as alive, because verify.yml queues a moment
+# after the push that triggered this workflow.
+if [ "$WAIT_SECONDS" -gt 0 ]; then
+  _waited=0
+  while [ "$_waited" -lt "$WAIT_SECONDS" ]; do
+    _undecided=0; _decided_bad=0
+    for name in "$@"; do
+      m=$(printf '%s\n' "$runs_json" | jq -s --arg n "$name" --arg s "$sha" -f "$SCRIPT_DIR/latest-check-run.jq")
+      if [ "$m" = "null" ] || [ -z "$m" ]; then _undecided=$((_undecided+1)); continue; fi
+      if [ "$(printf '%s' "$m" | jq -r '.status')" != "completed" ]; then _undecided=$((_undecided+1))
+      elif [ "$(printf '%s' "$m" | jq -r '.conclusion')" != "success" ]; then _decided_bad=1; fi
+    done
+    [ "$_decided_bad" = 1 ] && break
+    [ "$_undecided" -eq 0 ] && break
+    echo "waiting  ${_undecided} required check(s) still undecided on ${sha}; ${_waited}s of ${WAIT_SECONDS}s elapsed"
+    sleep "$POLL_SECONDS"
+    _waited=$((_waited + POLL_SECONDS))
+    fetch_runs
+  done
+  [ "$_waited" -ge "$WAIT_SECONDS" ] && _deadline_note=" (after waiting ${WAIT_SECONDS}s)"
 fi
 
 fail=0
+undecided=0
 for name in "$@"; do
   # jq -s reduces the (possibly repeated, e.g. a manual re-run) check-runs for this exact name
   # and this exact SHA to the single latest one, keyed on nothing but what the remote reports
@@ -45,8 +98,8 @@ for name in "$@"; do
   match=$(printf '%s\n' "$runs_json" \
     | jq -s --arg n "$name" --arg s "$sha" -f "$SCRIPT_DIR/latest-check-run.jq")
   if [ "$match" = "null" ] || [ -z "$match" ]; then
-    echo "MISSING  $name: no check-run recorded against ${sha} -- verify.yml has never run for this exact commit"
-    fail=1
+    echo "MISSING  $name: no check-run recorded against ${sha}${_deadline_note} -- verify.yml has never run for this exact commit"
+    undecided=1
     continue
   fi
   status=$(printf '%s' "$match" | jq -r '.status')
@@ -65,12 +118,12 @@ for name in "$@"; do
   if [ "$attempts" != "1" ] \
      && [ "$(printf '%s' "$match" | jq -r '.started_at // ""')" = "" ]; then
     echo "UNKNOWN  $name: $attempts runs for ${sha} and none carries a timestamp, so the latest cannot be identified"
-    fail=1
+    undecided=1
     continue
   fi
   if [ "$status" != "completed" ]; then
-    echo "PENDING  $name: status=$status on ${sha} -- not safe to publish while a required check is still running"
-    fail=1
+    echo "PENDING  $name: status=$status on ${sha}${_deadline_note} -- not safe to publish while a required check is still running"
+    undecided=1
   elif [ "$conclusion" != "success" ]; then
     echo "FAILED   $name: conclusion=$conclusion on ${sha}"
     fail=1
@@ -79,4 +132,10 @@ for name in "$@"; do
   fi
 done
 
-exit "$fail"
+# A decided failure outranks any number of undecided checks: one required check has answered no.
+if [ "$fail" -ne 0 ]; then exit 1; fi
+if [ "$undecided" -ne 0 ]; then
+  echo "UNDECIDED  nothing has been decided for ${sha}; exiting 2 so the caller withholds publication WITHOUT deleting anything"
+  exit 2
+fi
+exit 0

@@ -91,6 +91,54 @@ r=$(printf '' | jq -s -r --arg n verify --arg s abc123 -f "$JQP")
 [ "$r" = "null" ] && ok "control: an empty stream selects nothing" \
                   || bad "control: an empty stream did not select null: got '$r'"
 
+# =================================================================================================
+# 9. The WRAPPER's exit code, not just the selection. Everything above exercises the jq program;
+#    nothing exercised require-checks-green.sh itself, and its caller takes a DESTRUCTIVE action
+#    on the result. release.yml's cleanup-on-failed-gate deletes the candidate tag from origin
+#    when the gate job fails -- and the script collapsed four distinct verdicts into exit 1, so
+#    "the checks have not finished yet" was indistinguishable from "the checks failed". On
+#    2026-08-27 that deleted v1.46.0 seconds after it was pushed, while verify was still running,
+#    and produced a deadlock: verify cannot go green until the tag is on origin (bin/doctor's
+#    "declared release is fetchable" check reads the README pin), and the tag cannot stay on
+#    origin until verify is green.
+#
+#    So: undecided is exit 2, a decided failure is exit 1, green is 0. The caller deletes on 1
+#    and never on 2. These cases drive the real script through a `gh` stub, because the exit code
+#    is the whole contract and a test of the selection alone could not see it.
+# =================================================================================================
+GATE="$(dirname "$JQP")/require-checks-green.sh"
+STUBDIR=$(mktemp -d); trap 'rm -rf "$STUBDIR"' EXIT
+
+gate_rc(){ # <check-runs-json-lines> -> exit code of the real wrapper
+  cat > "$STUBDIR/gh" <<STUB
+#!/bin/sh
+cat <<'PAYLOAD'
+$1
+PAYLOAD
+STUB
+  chmod +x "$STUBDIR/gh"
+  PATH="$STUBDIR:$PATH" REQUIRE_CHECKS_WAIT_SECONDS=0 \
+    bash "$GATE" owner/repo abc123 verify >/dev/null 2>&1
+  echo $?
+}
+
+_green='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"success","id":1,"started_at":"2026-08-26T10:00:00Z","completed_at":"2026-08-26T10:05:00Z"}'
+_red='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"failure","id":1,"started_at":"2026-08-26T10:00:00Z","completed_at":"2026-08-26T10:05:00Z"}'
+_pending='{"name":"verify","head_sha":"abc123","status":"in_progress","conclusion":null,"id":1,"started_at":"2026-08-26T10:00:00Z","completed_at":null}'
+
+r=$(gate_rc "$_green");   [ "$r" = 0 ] && ok "wrapper: a completed success exits 0" \
+                                       || bad "wrapper: a completed success exited $r, wanted 0"
+r=$(gate_rc "$_red");     [ "$r" = 1 ] && ok "wrapper: a decided failure exits 1 (the caller deletes the tag on this)" \
+                                       || bad "wrapper: a decided failure exited $r, wanted 1"
+r=$(gate_rc "$_pending"); [ "$r" = 2 ] && ok "wrapper: a check still running exits 2, distinct from a failure" \
+                                       || bad "wrapper: a still-running check exited $r, wanted 2 -- undecided is indistinguishable from failed, and the caller deletes the tag on failed"
+r=$(gate_rc "");          [ "$r" = 2 ] && ok "wrapper: no check-run at all exits 2 (never ran is not a failure to publish over)" \
+                                       || bad "wrapper: a missing check-run exited $r, wanted 2"
+# A decided failure alongside an undecided one is still a failure: one required check has
+# answered no, and no amount of waiting on the other changes that.
+r=$(gate_rc "$_red"); [ "$r" = 1 ] && ok "wrapper: failure outranks pending when both are present" \
+                                   || bad "wrapper: failure did not outrank pending: got $r"
+
 echo
 echo "require-checks-green selection: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

@@ -47,6 +47,11 @@ jobs:
     outputs:
       tag: ${{ steps.pin.outputs.tag }}
       sha: ${{ steps.pin.outputs.sha }}
+      # 'green' | 'failed' | 'undecided'. cleanup-on-failed-gate deletes the tag, so it needs to
+      # tell a check that answered no from a check that has not answered. Empty when this job
+      # failed before the gate step ran, which cleanup treats as a failure -- the conservative
+      # direction for every refusal that is not specifically "not yet".
+      gate: ${{ steps.gate.outputs.verdict }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,11 +87,27 @@ jobs:
           echo "ok  ${{ steps.pin.outputs.sha }} is on origin/main"
 
       - name: Every required job succeeded for this exact commit
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
+          # A tag push and the push of its own commit trigger verify.yml and this workflow within
+          # seconds of each other, so on the ordinary path the required checks are still queued
+          # when this runs. Wait for them rather than refusing, because the refusal is not free:
+          # it used to delete the tag, and even now it costs a manual re-dispatch. 25 minutes
+          # covers this repo's slowest lane (verify's falsifiability sweep) with margin.
+          REQUIRE_CHECKS_WAIT_SECONDS: "1500"
         run: |
+          set +e
           bash .github/scripts/require-checks-green.sh \
             "${{ github.repository }}" "${{ steps.pin.outputs.sha }}" ${{ env.REQUIRED_CHECKS }}
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "verdict=green"     >> "$GITHUB_OUTPUT" ;;
+            2) echo "verdict=undecided" >> "$GITHUB_OUTPUT" ;;
+            *) echo "verdict=failed"    >> "$GITHUB_OUTPUT" ;;
+          esac
+          exit "$rc"
 
       - name: tests/bin-scripts.sh runs clean against the candidate commit
         run: ./tests/bin-scripts.sh
@@ -121,7 +142,14 @@ jobs:
   # nothing this run's own SHA-pin did not already record.
   cleanup-on-failed-gate:
     needs: [resolve, container-matrix]
-    if: always() && (needs.resolve.result == 'failure' || needs.container-matrix.result == 'failure')
+    # 'undecided' is carved out and nothing else is. A gate that has not been answered has not
+    # decided against this tag, and deleting on it produced a deadlock on 2026-08-27: verify
+    # cannot go green until the tag is on origin (bin/doctor's "declared release is fetchable"
+    # reads the README pin), and the tag could not survive long enough for verify to finish.
+    # Every other refusal -- a decided failure, a bad tag name, a commit that is not an ancestor
+    # of main, a gate step that never ran -- still deletes, so "a failed required job cannot
+    # produce a tag" holds exactly as before.
+    if: always() && ((needs.resolve.result == 'failure' && needs.resolve.outputs.gate != 'undecided') || needs.container-matrix.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
       contents: write
