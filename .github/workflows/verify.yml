@@ -308,6 +308,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      # macos-latest stopped shipping shellcheck preinstalled, and check 29 answers "skip
+      # (shellcheck not installed)" without it. The lane's skip audit caught that correctly and
+      # turned the release gate red, which is the audit working. The fix is to restore the
+      # measurement, not to widen the approved-skip list below: the whole point of running the
+      # gate on macOS is that this is the platform the repo calls primary, and dropping its only
+      # static analysis is a coverage loss dressed as an environment fact. Fail here, by name, if
+      # the formula does not resolve -- never a silent fallback to running without it.
+      - name: shellcheck for macOS, or fail naming it
+        run: |
+          brew install shellcheck
+          shellcheck --version
+
       - name: Install matrix on macOS
         run: ./tests/install-matrix.sh
 
