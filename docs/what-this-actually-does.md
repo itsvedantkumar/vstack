@@ -8,6 +8,10 @@ SWE-bench Lite scoring tied all four arms at zero. A false-completion pilot tied
 small, well-specified, single-file tasks a frontier model is already near ceiling, and a ceiling
 leaves no headroom for a config layer to show up in.
 
+`docs/research/fake-greens-2026-08.md` reports the whole evidence base as one document: what
+was measured, what the numbers do not support, and the thirteen checks that passed while
+measuring nothing.
+
 What this repository can show is narrower and checkable. Specific mechanisms do specific things,
 each with the evidence that proves it and the date it was measured. That is what follows, in
 three categories kept strictly apart: a number that exists, a mechanism that runs with no
