@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Re-runnable by hand against whatever main points at now. Without this, the only way to get a
+  # fresh verdict for a commit already on main was `gh run rerun <id>` against one specific past
+  # run -- which is not available while that run is still in flight, and re-checks out the tree
+  # at the moment the rerun starts. On 2026-08-27 that cost two deleted tags: check 24 and
+  # bin/doctor's fetchable check are both required to be red until the release tag is on origin,
+  # so the tag has to land and the checks have to be asked again, in that order. Being able to
+  # ask again is the whole operation.
+  workflow_dispatch:
 
 jobs:
   verify:
