@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -278,6 +278,8 @@ files_for(){ case "$1" in
   51b) printf '.github/workflows/release.yml' ;;
   52)  printf 'bin/claude-bg.sh' ;;
   53)  printf 'tests/inventory-contract.sh' ;;
+  54)  printf '.github/workflows/release.yml' ;;
+  54b) printf '.github/scripts/require-checks-green.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -354,6 +356,8 @@ label_for(){ case "$1" in
   51b) printf 'release cleanup decides correctly' ;;
   52)  printf 'the bin-scripts suite can actually fail' ;;
   53)  printf 'hashers work on every documented platform' ;;
+  54)  printf "the release gate's inputs are supplied by the workflow" ;;
+  54b) printf "the release gate's inputs are supplied by the workflow" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -507,6 +511,21 @@ exit 7
       # fallback and the file names only `shasum` again -- which is exactly what it looked like
       # when it computed an empty payload digest on Alpine.
       sed -i.t '/sha256sum/d' tests/inventory-contract.sh && rm -f tests/inventory-contract.sh.t ;;
+
+  54) # Unwire the input. The gate keeps reading CANDIDATE_CREATED_AT and its own test keeps
+      # passing, because that test supplies the variable itself -- which is the whole reason
+      # check 54 exists. Renaming it in the workflow is precisely how this would rot: nothing
+      # errors, the export just stops reaching the reader, and the staleness rule silently
+      # turns off while every suite stays green.
+      sed -i.t 's/CANDIDATE_CREATED_AT/RENAMED_AWAY/g' .github/workflows/release.yml \
+        && rm -f .github/workflows/release.yml.t ;;
+
+  54b) # The other direction: break the extractor rather than the wiring. Switching the gate's
+      # defaults from ${VAR:-x} to ${VAR-x} changes nothing about how it runs and empties the
+      # derived census, so the check would have nothing left to compare and must say so instead
+      # of printing ok on a list of length zero.
+      sed -i.t 's/=\${\([A-Z][A-Z0-9_]*\):-/="${\1-/; s/:-0}$/-0}"/' .github/scripts/require-checks-green.sh \
+        && rm -f .github/scripts/require-checks-green.sh.t ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;

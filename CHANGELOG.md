@@ -4,6 +4,56 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.48.0 — 2026-08-27
+
+### A verdict decided before the tag existed no longer deletes the tag
+
+The release gate has two ways to say no, and only one of them was safe.
+
+Exit 2, "nothing has decided yet", was taught not to delete the candidate tag after that deadlocked
+`v1.46.0`. Exit 1, "a required check decided against this commit", still deletes -- and on
+2026-08-27 that deleted `v1.47.0` twice within an hour, over verdicts the candidate never had a
+chance to earn.
+
+`bin/doctor`'s "declared release is fetchable" and check 24's pin loop both assert that the version
+`README.md` pins is a tag a stranger can fetch. Before the tag is pushed, those checks are required
+to be red, and they are right to be. Push the tag, and `resolve` reads those pre-tag conclusions
+three minutes later, calls them a decision against the candidate, and deletes the tag that would
+have turned them green. The retry starts from the same state and reproduces it exactly.
+
+`require-checks-green.sh` now takes `CANDIDATE_CREATED_AT` -- when origin first had the tag, which
+for a tag-push run is that workflow run's own `created_at`, the push's own receipt. A failing
+conclusion recorded before that moment is reported `STALE` and counted undecided.
+
+The narrowness is the point. A stale red does not become green; it becomes exit 2, which still
+withholds publication, so nothing red ships through this door. The only behaviour that changes is
+that the destructive remedy stops firing on a verdict about a repository that did not contain the
+release. A red decided after the tag exists still exits 1 and still deletes, and with the variable
+unset every path behaves exactly as before.
+
+### Check 54, the release gate's inputs are supplied by the workflow
+
+The fix above has the two-halves problem this repo keeps finding.
+`tests/require-checks-green.sh` proves the gate honours `CANDIDATE_CREATED_AT` by setting it
+itself. Nothing in that test can notice that `release.yml` never sets it in production, and the
+gate reads it through a `:-` default, so unwired it is silently empty and the whole rule is inert
+behind a green suite.
+
+Check 54 derives the census rather than listing it: every environment variable
+`require-checks-green.sh` reads with a default must be named in `release.yml` or carry an
+exemption with a stated reason. A knob added to the gate is therefore unwired-and-red by
+construction instead of unwired-and-quiet. `REQUIRE_CHECKS_POLL_SECONDS` is the one exemption, on
+the grounds that it changes how often the gate asks and never what answer it gets.
+
+Rows 54 and 54b watch it fail in both directions: rename the variable in the workflow, and break
+the extractor so the derived census empties.
+
+Also catalogued as the seventeenth entry in `docs/checks-that-inherit-their-answer.md`, where it
+is the first one that runs the other way -- nothing printed `ok`. Four checks printed `FAIL`,
+correctly, and the damage was in what the workflow did with an accurate red. A check can inherit a
+red as easily as a green, and a red wired to a destructive remedy is the one that costs you
+something on the way past.
+
 ## 1.47.0 — 2026-08-27
 
 ### `bin/doctor`'s CI check answered for the branch, not for your commit
@@ -240,7 +290,7 @@ a local exit code, which is the only way this class of failure is visible at all
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
-The tree declares 53 checks and 81 falsifiability rows (78 mutation + 3 fixed). The old figures
+The tree declares 54 checks and 83 falsifiability rows (80 mutation + 3 fixed). The old figures
 were true on their run dates and are now marked as superseded with those dates attached, rather
 than replaced with a number nobody re-ran for this document — the document's own rule is that no
 claim appears without a source and a date.

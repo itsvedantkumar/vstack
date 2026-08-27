@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The sixteen
+## The seventeen
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -180,6 +180,36 @@ tags the operator happens to have fetched or created. The remote half of the que
 `bin/doctor`'s "declared release is fetchable", which does `git ls-remote`; neither check is
 sufficient alone, and check 24 now says so in its own comment rather than leaving the next reader
 to infer that a green is evidence about the internet.
+
+**The verdict that predated the thing it judged.** The seventeenth runs the other way and is worth
+the space for that reason: nothing here printed `ok`. Four checks printed `FAIL`, correctly, and
+the damage came from what the release workflow did with that accurate red.
+
+`bin/doctor`'s "declared release is fetchable" and check 24's pin loop both assert that the version
+`README.md` pins is a tag a stranger can reach. Before the tag is pushed they are *required* to be
+red. They are describing the repository accurately. Push the tag, and `resolve` reads those pre-tag
+conclusions minutes later, sees `conclusion=failure`, calls it a decision against the candidate, and
+`cleanup-on-failed-gate` deletes the tag -- the tag whose absence was the entire finding. On
+2026-08-27 that destroyed `v1.47.0` twice inside an hour, and the second time was a faithful retry
+of the first, because retrying starts from the same state.
+
+The exit-2 split had already been written for the near-identical deadlock that killed `v1.46.0`, and
+it works: "nothing has decided yet" no longer deletes anything. It just does not cover "decided, and
+decided before the tag existed." Both are verdicts the candidate never had a chance to earn. The
+second is worse, because the evidence it destroys is precisely what would have changed the answer.
+
+Inherited from: **when the check ran, relative to the artefact it was asked about.** Same shape as
+the sixteen above -- a verdict scoped to the machine, the directory, or the moment it was produced
+in, rather than to the thing it names -- with the sign flipped. A check can inherit a *red* as
+easily as a green, and a red that triggers a destructive remedy is the one that costs you something
+on the way past.
+
+The fix is `CANDIDATE_CREATED_AT`, and its narrowness is the load-bearing part. A stale red is
+reported as undecided, not as success: publication is still withheld, and nothing red ships through
+that door. All that stops is the deletion. Check 54 exists because the fix has the standard
+two-halves problem -- `tests/require-checks-green.sh` proves the gate honours the variable by
+setting it itself, and would go on passing forever if `release.yml` never set it in production, so
+the check derives the gate's inputs and requires each one to be wired by its caller.
 
 ## The test
 

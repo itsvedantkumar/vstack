@@ -3613,6 +3613,43 @@ else
   bad "hashers work on every documented platform" "not inside a git work tree, so the file census could not run -- an empty census would pass this check while measuring nothing"
 fi
 
+# --- 54. the release gate's inputs are actually supplied by the release workflow ---------------
+# A reader tested against a hand-made fixture passes forever while its writer does not exist.
+# tests/require-checks-green.sh proves the gate honours CANDIDATE_CREATED_AT by setting it
+# itself; nothing there can notice that release.yml never sets it in production, and the gate
+# reads it with a `:-` default, so unwired it is silently empty and the whole rule is inert.
+# That is the shape this file exists to catch, one layer up: a green about a half.
+#
+# So the census is DERIVED, not listed. Every environment variable require-checks-green.sh
+# reads with a default must be named in release.yml, or carry an exemption here with a reason.
+# A new knob added to the script is therefore unwired-and-red by construction rather than
+# unwired-and-quiet, which is the only ordering that survives someone adding one in a hurry.
+c54_s=".github/scripts/require-checks-green.sh"
+c54_w=".github/workflows/release.yml"
+# Reading the poll cadence is not reading a verdict: REQUIRE_CHECKS_POLL_SECONDS changes how
+# often the gate asks, never what answer it gets or what the caller does with it. Exempt with
+# that reason stated, so the exemption can be argued with rather than inferred from silence.
+C54_EXEMPT="REQUIRE_CHECKS_POLL_SECONDS"
+if [ ! -f "$c54_s" ] || [ ! -f "$c54_w" ]; then
+  bad "the release gate's inputs are supplied by the workflow" "$c54_s or $c54_w is missing, so the join between the gate and its caller could not be read at all"
+else
+  c54_vars=$(sed -n 's/^[A-Za-z_][A-Za-z0-9_]*=\${\([A-Z][A-Z0-9_]*\):-.*/\1/p' "$c54_s" | sort -u)
+  c54_n=0; c54_unwired=""
+  for c54_v in $c54_vars; do
+    case " $C54_EXEMPT " in (*" $c54_v "*) continue ;; esac
+    c54_n=$((c54_n + 1))
+    grep -q "$c54_v" "$c54_w" 2>/dev/null \
+      || c54_unwired="$c54_unwired\n  $c54_v is read by ${c54_s##*/} but never set in ${c54_w##*/} -- it defaults to empty in production, so the behaviour it controls is off while its test is green"
+  done
+  if [ "$c54_n" -eq 0 ]; then
+    bad "the release gate's inputs are supplied by the workflow" "the gate reads no defaulted environment variable at all -- the extractor stopped matching, so this compared nothing"
+  elif [ -n "$c54_unwired" ]; then
+    bad "the release gate's inputs are supplied by the workflow" "$(printf 'the gate reads inputs its caller never supplies:%b' "$c54_unwired")"
+  else
+    ok "the release gate's inputs are supplied by the workflow ($c54_n variable(s) read and wired, 1 exempt)"
+  fi
+fi
+
 echo
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
