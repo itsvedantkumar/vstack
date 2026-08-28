@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "vstack",
-      "version": "1.49.0",
+      "version": "1.50.0",
       "source": "./claude",
       "description": "28 skills that fire without a slash command, 14 agents, 15 commands, and the session hook that routes situations to skills. Most skills are ported from pstack and Superpowers — see claude/skills/ATTRIBUTION.md for per-skill source and license.",
       "category": "workflow"

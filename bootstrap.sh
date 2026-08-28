@@ -93,8 +93,21 @@ if command -v git >/dev/null 2>&1; then
     git -C "$DIR" update-ref "$watermark_ref" HEAD
   else
     echo "bootstrap: cloning into $DIR"
-    git clone -q --depth 1 --branch "$REF" "$REPO" "$DIR" 2>/dev/null \
-      || git clone -q --depth 1 "$REPO" "$DIR"
+    # No fallback to the default branch. `git clone --branch` resolves a tag as readily as a
+    # branch, and $REF defaults to main, so this only ever failed when $REF genuinely did not
+    # exist -- and substituting another ref there is the one answer nobody asked for. It exited
+    # 0, then planted refs/vstack/synced-$REF on a commit that is not $REF, so every later run
+    # compared HEAD against a watermark that never described $REF. The tarball lane below has
+    # 404'd on this same input since 1.5.0; this lane kept guessing.
+    clone_err=$(mktemp)
+    if ! git clone -q --depth 1 --branch "$REF" "$REPO" "$DIR" 2>"$clone_err"; then
+      echo "bootstrap: could not clone $REPO at $REF" >&2
+      sed 's/^/           /' "$clone_err" >&2
+      echo "           VSTACK_REF must name a branch or a tag that exists on the remote." >&2
+      rm -f "$clone_err"
+      exit 1
+    fi
+    rm -f "$clone_err"
     # Plant the same watermark a fresh clone would end an update at, so the very next
     # `bootstrap.sh` run already has one to compare HEAD against instead of falling back to
     # ancestry.

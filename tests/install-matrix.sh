@@ -645,6 +645,44 @@ if want bootstrap-dirty; then
   fi
 fi
 
+# --- bootstrap refuses a ref that does not exist -----------------------------------------------
+# The two lanes disagreed about the same input. Ask for a ref that is not there and the tarball
+# lane 404s and exits 1 naming the URL; the git lane discarded the clone's stderr, fell through
+# to `git clone` of the default branch, exited 0, and then planted refs/vstack/synced-$REF on a
+# commit that is not $REF. The watermark's whole job is to answer "has anything been added since
+# bootstrap last touched this checkout for $REF", so from then on every run compared HEAD against
+# a mark that never described $REF at all.
+#
+# `git clone --branch` resolves tags as well as branches, and $REF defaults to main, so the
+# fallback fired only when the ref genuinely did not exist -- which is exactly when substituting
+# another one silently is the wrong answer. Offline: clones from $SRC, no network.
+if want bootstrap-badref; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "bootstrap refuses a ref that does not exist" "git not installed"
+  else
+    H="$ROOT/btr"; V="$H/.vstack"; mkdir -p "$H"
+    out=$(HOME="$H" VSTACK_DIR="$V" VSTACK_REF=v0.0.0-not-a-real-ref \
+      bash "$SRC/bootstrap.sh" --skip-deps 2>&1); rc=$?
+    e=""
+    [ "$rc" = 0 ] && e="$e; bootstrap exited 0 for a ref that does not exist"
+    case "$out" in *v0.0.0-not-a-real-ref*) ;; *) e="$e; the failure never named the ref that could not be resolved" ;; esac
+    if [ -d "$V/.git" ]; then
+      git -C "$V" rev-parse -q --verify refs/vstack/synced-v0.0.0-not-a-real-ref >/dev/null 2>&1 \
+        && e="$e; it planted a synced-<ref> watermark for a ref it never checked out"
+    fi
+    # Positive control, offline: the same lane with a ref that DOES exist must still clone and
+    # must still plant the watermark. A refusal that refuses everything is not a fix, and this
+    # is the branch the deleted fallback used to cover.
+    H2="$ROOT/btr-ok"; V2="$H2/.vstack"; mkdir -p "$H2"
+    HOME="$H2" VSTACK_DIR="$V2" VSTACK_REF=main \
+      bash "$SRC/bootstrap.sh" --skip-deps >/dev/null 2>&1; rc2=$?
+    [ "$rc2" = 0 ] || e="$e; a ref that exists (main) no longer clones: exit=$rc2"
+    git -C "$V2" rev-parse -q --verify refs/vstack/synced-main >/dev/null 2>&1 \
+      || e="$e; the watermark was not planted for a ref that resolved"
+    [ -z "$e" ] && ok "bootstrap refuses a ref that does not exist" || bad "bootstrap refuses a ref that does not exist" "${e#; }"
+  fi
+fi
+
 # --- the overlay lane, end to end ----------------------------------------------------------------
 # The fourth lane, and the only one that reaches a cloud sandbox, had no case here. Checks 9b and
 # 17 exercise its settings merge and prove it strips personal keys, but nothing overlaid into a

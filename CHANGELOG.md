@@ -4,6 +4,33 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.50.0 — 2026-08-28
+
+### Asking for a ref that does not exist installed a different one and called it that
+
+`bootstrap.sh` had two lanes that disagreed about the same input. Without git, `VSTACK_REF=v9.9.9`
+resolved to a `/archive/v9.9.9.tar.gz` URL, 404'd, and exited 1 naming the URL. With git, the
+clone's stderr went to `/dev/null`, the `||` fell through to `git clone` of the default branch,
+and the run exited 0.
+
+Then it planted `refs/vstack/synced-v9.9.9` on that commit. That watermark exists to answer one
+question -- has anything been added since bootstrap last touched this checkout for `$REF` -- so
+from that point on every run compared HEAD against a mark that had never described `$REF`.
+
+`git clone --branch` resolves a tag as readily as a branch, and `$REF` defaults to `main`, so the
+fallback fired only when the ref genuinely did not exist. That is exactly the case where quietly
+substituting another one is the wrong answer. It is gone; the lane now reports git's own error,
+names the ref, and exits 1, which is what the tarball lane has done since 1.5.0.
+
+New `bootstrap-badref` lane in `tests/install-matrix.sh`, both directions and entirely offline:
+a ref that does not exist must exit non-zero, must name the ref, and must not leave a watermark;
+a ref that does exist must still clone and must still plant one. Watched red both ways.
+
+Found by `opencode/mimo-v2.5-free` reading `bootstrap.sh` and `overlay.sh`. Five of its six
+findings were rejected on inspection -- one contradicted an explicit `SC2086` disable whose
+comment states the word-splitting is required, and three called it a defect that an empty
+`$SRC/claude/hooks/` aborts the overlay, which is the correct answer to a broken source tree.
+
 ## 1.49.0 — 2026-08-28
 
 ### `stat -f %m` measures the filesystem on Linux, and exits 0 doing it
