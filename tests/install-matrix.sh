@@ -1074,6 +1074,58 @@ if want doctor-no-mutate; then
   fi
 fi
 
+# --- doctor reads names as names, not as syntax --------------------------------------------------
+# Two ways the same value stopped being a value. The MCP comparison built its expected side with
+# `sed "s|__HOME__|$HOME|g"`, where sed gives & and \ meaning inside the REPLACEMENT and | is the
+# delimiter: a home path containing & came out with the ampersand replaced by the literal text
+# __HOME__, one containing | made sed exit "bad flag in substitute command", and the comparison
+# then reported drift or cleanliness about a path nobody has. And the leftover list was
+# space-joined then re-split on whitespace, so
+# ~/.claude/skills/my skill became two entries, neither of which git had ever heard of.
+#
+# The second one decides what the operator is told is "safe to remove", so getting it wrong in
+# either direction is expensive: their own file recommended for deletion, or a genuine leftover
+# that is never reported because both halves of its name are unknown paths.
+#
+# The home directory here really does contain an ampersand. Asserting on a fixture string would
+# not have caught it -- the corruption happens in the expansion of $HOME itself.
+if want doctor-names; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "doctor reads names as names" "git or jq not installed"
+  else
+    N="$ROOT/dnames"; mkdir -p "$N/work"
+    cp -R "$SRC"/. "$N/work"/ 2>/dev/null
+    rm -rf "$N/work/.git"
+    git -C "$N/work" init -q
+    git -C "$N/work" config user.email t@example.com; git -C "$N/work" config user.name t
+    git -C "$N/work" add -A >/dev/null 2>&1
+    git -C "$N/work" commit -qm probe >/dev/null 2>&1
+    H="$N/home&dir"; mkdir -p "$H"
+    HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+    mkdir -p "$H/.claude/skills/my skill"
+    printf -- '---\nname: my skill\ndescription: theirs\n---\n' > "$H/.claude/skills/my skill/SKILL.md"
+    out=$(HOME="$H" VSTACK_DIR="$N/work" "$SRC/bin/doctor" --drift 2>&1)
+    e=""
+    # Controls first. Both of these have to hold or every assertion below is vacuous.
+    [ -d "$H/.claude/skills" ] || e="$e; install never created ~/.claude/skills, so nothing was compared"
+    grep -q 'no vstack repo found' <<<"$out" \
+      && e="$e; --drift refused to run, so it never reached either code path"
+    # The planted directory must be named in full, on one line.
+    grep -qF 'skills/my skill' <<<"$out" \
+      || e="$e; the planted 'skills/my skill' was never reported under its real name"
+    grep -qE '^[[:space:]]+skills/my$' <<<"$out" \
+      && e="$e; the name was split on its space into 'skills/my'"
+    grep -qE '^[[:space:]]+skill$' <<<"$out" \
+      && e="$e; the name was split on its space into 'skill'"
+    # And the placeholder must not survive an ampersand in HOME.
+    grep -q '__HOME__' <<<"$out" \
+      && e="$e; the __HOME__ placeholder survived into doctor output -- sed ate the ampersand"
+    grep -q 'bad flag in substitute command' <<<"$out" \
+      && e="$e; sed failed outright on the home path"
+    [ -z "$e" ] && ok "doctor reads names as names" || bad "doctor reads names as names" "${e#; }"
+  fi
+fi
+
 # --- overlay does not delete settings the target repo owns -------------------------------------
 # It used to delete every key vstack ships that is not on the project allowlist, on the theory
 # that it was cleaning up its own past overlays. It cannot know that. A repository that

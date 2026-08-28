@@ -152,7 +152,15 @@ run_drift() {
   # unchanged). Same family_floor discipline as every glob above: an empty or missing
   # mcp/servers.json is a drift finding, not a silent zero.
   if [ -f "$REPO/mcp/servers.json" ] && command -v jq >/dev/null 2>&1; then
-    mcp_want=$(sed "s|__HOME__|$HOME|g" "$REPO/mcp/servers.json")
+    # sed gives & and \ special meaning in the REPLACEMENT text, and | is the delimiter here,
+    # so a home directory containing any of them does not survive the substitution. Measured
+    # 2026-08-28: a home path containing & comes out with the ampersand replaced by the literal
+    # text __HOME__ (& expands to the matched text), one containing | makes sed exit with "bad
+    # flag in substitute command", and a literal \n inserts a newline. Every one of those
+    # corrupts the JSON this comparison is made against,
+    # and the comparison then reports drift or cleanliness about a value nobody typed.
+    home_esc=$(printf '%s' "$HOME" | sed 's/[&|\\]/\\&/g')
+    mcp_want=$(sed "s|__HOME__|$home_esc|g" "$REPO/mcp/servers.json")
     for m in $(printf '%s' "$mcp_want" | jq -r 'keys[]' 2>/dev/null); do
       nfam=$((nfam + 1))
       COMPARED=$((COMPARED + 1))
@@ -278,12 +286,19 @@ run_drift() {
     _rtn=$(grep -ohE 'vstack-[a-z-]+\.jsonl' "$_rt" 2>/dev/null | sort -u | tr '\n' ' ')
     [ -n "$_rtn" ] && RUNTIME_TOP="$RUNTIME_TOP $_rtn"
   done
+  # Newline-separated, not space-separated. The entries are filenames, and this list decides
+  # whether a file is a leftover the operator is told is "safe to remove" or their own work.
+  # A single space in a name -- ~/.claude/skills/my skill -- split one entry into two, and both
+  # halves then failed the git-history lookup below and were reported as the user's own files.
+  # The other direction is the harmful one: a genuine leftover whose name contains a space gets
+  # split into two paths git has never heard of, so it is never reported at all.
+  NL=$(printf '\nx'); NL=${NL%x}
   stale=""
   for p in "$CDIR"/* "$CDIR"/.[!.]*; do
     [ -e "$p" ] || continue
     b=$(basename "$p")
     case " $RUNTIME_TOP " in *" $b "*) continue ;; esac
-    stale="$stale $b"
+    stale="${stale:+$stale$NL}$b"
   done
   for kind in hooks:'*.sh' agents:'*.md' commands:'*.md' agents/reference:'*.ref'; do
     d=${kind%%:*}; pat=${kind#*:}
@@ -291,14 +306,14 @@ run_drift() {
       [ -e "$p" ] || continue
       [ -L "$p" ] && continue
       b=$(basename "$p")
-      [ -e "$REPO/claude/$d/$b" ] || stale="$stale $d/$b"
+      [ -e "$REPO/claude/$d/$b" ] || stale="${stale:+$stale$NL}$d/$b"
     done
   done
   for p in "$CDIR"/skills/*/; do
     [ -d "$p" ] || continue
     s=$(basename "$p")
     [ -L "${p%/}" ] && continue
-    [ -d "$REPO/claude/skills/$s" ] || stale="$stale skills/$s"
+    [ -d "$REPO/claude/skills/$s" ] || stale="${stale:+$stale$NL}skills/$s"
   done
   # Two very different things end up in that list, and calling both "drift" would be wrong.
   # A file the repo USED to ship and later deleted is a genuine leftover: the deletion never
@@ -307,7 +322,11 @@ run_drift() {
   # to call that an error. Git history is what separates them, so ask it instead of guessing.
   if [ -n "$stale" ]; then
     leftover=""; theirs=""
-    for b in $stale; do
+    # A here-string, not a pipe: `printf ... | while read` puts the loop in a subshell and both
+    # accumulators below would be discarded when it exits, which is the same bug in the other
+    # direction -- a classification loop that runs and reports nothing.
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
       case "$b" in
         hooks/*|agents/*|commands/*|skills/*) rel="claude/$b" ;;
         *)                                    rel="claude/$b" ;;
@@ -323,20 +342,22 @@ run_drift() {
       # match. Piping inverted the test: every leftover was classified as the user's own file.
       hist=$(git -C "$REPO" log --all --oneline -- "$rel" 2>/dev/null)
       if [ -n "$hist" ]; then
-        leftover="$leftover $b"
+        leftover="${leftover:+$leftover$NL}$b"
       else
-        theirs="$theirs $b"
+        theirs="${theirs:+$theirs$NL}$b"
       fi
-    done
+    done <<STALE_EOF
+$stale
+STALE_EOF
     if [ -n "$leftover" ]; then
       echo "left over from a version this repo used to ship (the delete never reached this machine):"
-      printf '          %s\n' $leftover
+      printf '%s\n' "$leftover" | sed 's/^/          /'
       echo "          safe to remove — git history shows the repo dropped them"
       DRIFT=1
     fi
     if [ -n "$theirs" ]; then
       echo "note: in ~/.claude but never shipped by this repo, so presumed yours:"
-      printf '          %s\n' $theirs
+      printf '%s\n' "$theirs" | sed 's/^/          /'
     fi
   fi
 

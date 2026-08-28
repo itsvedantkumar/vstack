@@ -6,6 +6,65 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.50.0 — 2026-08-28
 
+### Check 56 recognised bash 3.2's wording for an aborted script, and no other
+
+The check runs every shipped hook with HOME, TMPDIR, USER and LANG absent and asserts that none
+of them emits a shell-level error, because a hook that stops on one has not allowed or blocked
+anything. It decided that by matching the text bash prints. macOS bash 3.2 says `parameter null
+or not set`; bash 5 says `parameter not set`. Only the first was in the list.
+
+So row 56b -- which breaks `format.sh` on purpose to prove the census reaches every file -- passed
+on every Linux runner against a hook that aborts on line 36. It passed here too, for a different
+reason: the falsifiability suite refuses to start while the gate is red, the gate was red on the
+pre-tag pin, and the row was proved by hand instead. Hand-proving has no no-op detector. CI found
+it on the first run where both halves could execute, and the v1.50.0 tag was withdrawn for it.
+
+The rule is now derived rather than enumerated. A runtime error from the shell is reported as
+`<the script as invoked>: line N: ...`, and nothing a hook chooses to print carries that prefix,
+because it names the path this check invoked it by. Matching the prefix asks whether the shell
+stopped the script instead of whether we recognise the complaint. The old substrings stay as a
+union, not as the criterion: they cover a message a CHILD process wrote to the same stderr, which
+carries the child's prefix and not the hook's.
+
+Measured with the fix, three arms on both platforms: unmutated `ok`; `format.sh` broken, FAIL
+naming `parameter not set` on Ubuntu and `parameter null or not set` on macOS; `verify-gate.sh`
+restored to a bare `$HOME`, FAIL naming `unbound variable`.
+
+### An ampersand in your home directory silently unregistered every MCP server
+
+`install.sh` and `bin/doctor` both expanded `$HOME` into a sed REPLACEMENT, where `&` means the
+matched text, `\` escapes, and `|` was the delimiter:
+
+    sed "s|__HOME__|$HOME|g" mcp/servers.json
+
+Measured 2026-08-28: a home directory whose name contains `&` registers every server with a
+command path where the ampersand has been replaced by the literal text `__HOME__` -- a directory
+that does not exist, so the server never starts and nothing says why. A `|` in the same position
+makes sed exit with `bad flag in substitute command`. The
+install side is the one that matters -- it writes the file Claude Code reads -- and doctor's copy
+then compared against an equally corrupted expectation, so the two agreed and reported no drift.
+
+Both now escape the three characters before substituting. Found by `opencode/big-pickle` reading
+`bin/doctor`; it named doctor's copy, and install.sh's turned up because the new lane stayed red
+after doctor was fixed.
+
+### doctor told you a file of yours was safe to remove, if its name had a space in it
+
+The leftover list was built by string concatenation on spaces and then re-split on whitespace, so
+`~/.claude/skills/my skill` became `skills/my` and `skill`. That list decides which of two things
+the operator is told: a leftover the repo used to ship and dropped, printed with "safe to remove",
+or a file the repo has never had, presumed theirs. Both halves of a split name fail the git-history
+lookup, so a genuine leftover with a space in it is never reported at all, and a user's own file
+lands in whichever bucket the fragments fall into.
+
+Newline-separated now, read back with `while IFS= read -r` from a here-string rather than a pipe,
+because a pipe puts the loop in a subshell and both accumulators would be discarded when it exits.
+
+New lane `install-matrix.sh doctor-names` proves all three, in a home directory that really
+contains an ampersand -- asserting against a fixture string would not have caught it, because the
+corruption happens in the expansion of `$HOME` itself. Falsifiable per fix: revert `install.sh`
+alone and it reddens on `__HOME__`; revert `bin/doctor` alone and it reddens on both splits.
+
 ### One failed fetch retired `vstack update` on a pinned install
 
 `update` repairs the shape `VSTACK_REF=vX.Y.Z bash bootstrap.sh` leaves behind: a shallow clone

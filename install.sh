@@ -838,7 +838,14 @@ elif [ "$DRY" = 0 ]; then
   # says these ship. They did not. bin/doctor now checks the same thing from the other side.
   if [ -f "$CJ" ]; then cp "$CJ" "$BK/claude.json"; else printf '{}\n' > "$CJ"; fi
   tmp=$(mktemp)
-  sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$tmp.servers"
+  # sed gives & and \ special meaning in the REPLACEMENT text and | is the delimiter here, so a
+  # home directory containing any of them does not survive. This is the side that gets WRITTEN:
+  # a home path containing & registered every MCP server with a command path in which the
+  # ampersand had become the literal text __HOME__ -- a directory that does not exist, so the
+  # server never starts, and nothing says why. A | in the same position made sed exit outright.
+  # Measured 2026-08-28.
+  home_esc=$(printf '%s' "$HOME" | sed 's/[&|\\]/\\&/g')
+  sed "s|__HOME__|$home_esc|g" "$SRC/mcp/servers.json" > "$tmp.servers"
   jq -s '.[0] as $cur | .[1] as $new | $cur | .mcpServers = (($cur.mcpServers // {}) * $new)' \
      "$CJ" "$tmp.servers" > "$tmp"
   commit_json "$tmp" "$CJ" "MCP servers in $CJSON" \
