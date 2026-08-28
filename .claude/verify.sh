@@ -769,15 +769,52 @@ fi
   && ok "doc counts match tree ($nsk skills, $nag agents, $ncm commands, $nhk hooks, $nck checks, $ncs test cases)" \
   || bad "doc counts match tree" "$(printf '%b' "$errs")"
 
-# --- 13. the two plugin manifests agree on a version -------------------------------------------
-# marketplace.json and plugin.json each carry their own version string and nothing has ever
+# --- 13. every file that declares the version agrees ------------------------------------------
+# marketplace.json and plugin.json each carry their own version string and nothing had ever
 # compared them. A release that bumps one and forgets the other publishes a marketplace entry
 # pointing at a differently-numbered plugin.
+#
+# claude/inventory.json carries a THIRD copy, `product.version`, and names the other two in its
+# own `product.version_source` array -- an explicit written claim that its number is derived
+# from theirs. Nothing enforced that claim, so it drifted: measured 2026-08-28, the manifests
+# were at 1.48.0 and inventory said 1.46.0, wrong across two shipped releases. inventory.json is
+# payload, so that number is what a stranger reads to find out what they installed, and the
+# check that validates the rest of the file walked past it. A field that documents where its
+# truth comes from and is never compared against that source is the same defect as a check that
+# names what it measures and does not measure it.
+#
+# So the census is derived from version_source rather than listed here. Add a fourth manifest to
+# that array and it is compared from that moment, without anyone remembering to widen this.
 if command -v jq >/dev/null; then
-  mv_=$(jq -r '.plugins[0].version // "missing"' .claude-plugin/marketplace.json 2>/dev/null)
-  pv_=$(jq -r '.version // "missing"' claude/.claude-plugin/plugin.json 2>/dev/null)
-  [ "$mv_" = "$pv_" ] && ok "plugin manifests agree (v$mv_)" \
-    || bad "plugin manifest versions" "marketplace.json says $mv_, plugin.json says $pv_"
+  c13_inv=claude/inventory.json
+  c13_srcs=$(jq -r '.product.version_source[]?' "$c13_inv" 2>/dev/null)
+  c13_n=0; c13_ref=""; c13_reff=""; c13_dis=""
+  for c13_f in $c13_srcs; do
+    if [ ! -f "$c13_f" ]; then
+      c13_dis="$c13_dis\n  $c13_f is named in version_source but is not in the tree"
+      continue
+    fi
+    # .version for a plugin manifest, .plugins[0].version for the marketplace entry. Trying both
+    # keeps this generic over what a source file happens to look like.
+    c13_v=$(jq -r '(.version // .plugins[0].version) // "missing"' "$c13_f" 2>/dev/null)
+    c13_n=$((c13_n + 1))
+    if [ -z "$c13_reff" ]; then c13_ref="$c13_v"; c13_reff="$c13_f"
+    elif [ "$c13_v" != "$c13_ref" ]; then
+      c13_dis="$c13_dis\n  $c13_f says $c13_v, $c13_reff says $c13_ref"
+    fi
+  done
+  # The file's own claim about itself, checked against the sources it nominated.
+  c13_own=$(jq -r '.product.version // "missing"' "$c13_inv" 2>/dev/null)
+  if [ -n "$c13_reff" ] && [ "$c13_own" != "$c13_ref" ]; then
+    c13_dis="$c13_dis\n  $c13_inv says $c13_own, but names $c13_reff as its version_source, which says $c13_ref"
+  fi
+  if [ "$c13_n" -eq 0 ]; then
+    bad "plugin manifest versions" "$c13_inv declares no readable product.version_source, so there was no set of files to compare and this check measured nothing"
+  elif [ -n "$c13_dis" ]; then
+    bad "plugin manifest versions" "$(printf 'the version is declared in more than one place and they disagree:%b' "$c13_dis")"
+  else
+    ok "every file that declares the version agrees (v$c13_ref, $c13_n source(s) plus inventory's own claim)"
+  fi
 else
   skip "plugin manifest versions" "jq not installed"
 fi

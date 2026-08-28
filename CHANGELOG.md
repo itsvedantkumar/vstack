@@ -41,6 +41,23 @@ that the destructive remedy stops firing on a verdict about a repository that di
 release. A red decided after the tag exists still exits 1 and still deletes, and with the variable
 unset every path behaves exactly as before.
 
+### Check 13 covers every file that declares the version, derived from the file that names them
+
+`claude/inventory.json` carries a third copy of the version in `product.version` and names the two
+plugin manifests in its own `product.version_source` array -- a written claim that its number comes
+from theirs. Nothing compared it, and it drifted: the manifests were at 1.48.0 while inventory said
+1.46.0, wrong across two shipped releases. `inventory.json` is payload, so that number is what a
+stranger reads to find out what they installed, and `tests/inventory-contract.sh` validated the rest
+of the file while walking past it.
+
+A field that documents where its truth comes from and is never checked against that source is the
+same defect as a check that names what it measures and does not measure it.
+
+Check 13 now derives its file set from `version_source` rather than naming the two manifests
+inline, and compares inventory's own claim against them. Add a fourth manifest to that array and it
+is covered from that moment. An empty or unreadable `version_source` is refused rather than passed
+as agreement over a list of length zero. Rows 13b and 13c watch both lanes.
+
 ### Check 54, the release gate's inputs are supplied by the workflow
 
 The fix above has the two-halves problem this repo keeps finding.
@@ -300,7 +317,7 @@ a local exit code, which is the only way this class of failure is visible at all
 ### Stale counts in `docs/what-this-actually-does.md`
 
 The document stated 44 gate checks and falsifiability totals of `60 declared` and `61 declared`.
-The tree declares 54 checks and 83 falsifiability rows (80 mutation + 3 fixed). The old figures
+The tree declares 54 checks and 85 falsifiability rows (82 mutation + 3 fixed). The old figures
 were true on their run dates and are now marked as superseded with those dates attached, rather
 than replaced with a number nobody re-ran for this document — the document's own rule is that no
 claim appears without a source and a date.

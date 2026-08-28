@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -285,6 +285,8 @@ files_for(){ case "$1" in
   10b) printf 'claude/agents/debugger.md' ;;
   12)  printf 'README.md' ;;
   13)  printf 'claude/.claude-plugin/plugin.json' ;;
+  13b) printf 'claude/inventory.json' ;;
+  13c) printf 'claude/inventory.json' ;;
   14)  printf 'claude/hooks/verify-gate.sh' ;;
   14b) printf '.claude/verify.sh' ;;
   14c) printf '.claude/verify.sh' ;;
@@ -364,6 +366,8 @@ label_for(){ case "$1" in
   11)  printf 'hook wiring' ;;
   12)  printf 'doc counts match tree' ;;
   13)  printf 'plugin manifest versions' ;;
+  13b) printf 'plugin manifest versions' ;;
+  13c) printf 'plugin manifest versions' ;;
   14)  printf 'stop-hook gate blocks' ;;
   14b) printf 'the gate refuses a tree under mutation' ;;
   14c) printf 'the gate refuses a tree under mutation' ;;
@@ -541,6 +545,17 @@ exit 7
       # lands nowhere reports the check as unfalsifiable while proving nothing about it.
       perl -0pi -e 's/^[ ]*PostToolUse: \[\n.*?\n.*?\n//m' install.sh ;;
   12) sed -i.t 's/| Commands | [0-9]* |/| Commands | 99 |/' README.md && rm -f README.md.t ;;
+  13b) # The lane that was live and unwatched. inventory.json's product.version names the two
+      # manifests as its version_source and was 1.46.0 while they said 1.48.0, wrong across two
+      # shipped releases, because nothing compared the number against the files it cites.
+      sed -i.t 's/"version": "[0-9][^"]*"/"version": "0.0.1"/' claude/inventory.json \
+        && rm -f claude/inventory.json.t ;;
+
+  13c) # Empty the derived census. version_source is what the check builds its file list from, so
+      # emptying it leaves nothing to compare -- which must be refused, not reported as ok over a
+      # list of length zero.
+      perl -0pi -e 's/"version_source":\s*\[[^\]]*\]/"version_source": []/' claude/inventory.json ;;
+
   13) sed -i.t 's/"version": "[^"]*"/"version": "9.9.9"/' claude/.claude-plugin/plugin.json \
         && rm -f claude/.claude-plugin/plugin.json.t ;;
   14) sed -i.t '1a\
