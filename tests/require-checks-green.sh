@@ -171,8 +171,8 @@ STUB
   echo $?
 }
 
-# The red run finished at 10:05; the tag was created at 11:00. It cannot have been a verdict
-# about that tag.
+# The red run started at 10:00; the tag was created at 11:00. It checked out a tree that could
+# not contain the tag, so it cannot have been a verdict about it.
 r=$(gate_rc_at "$_red" "2026-08-26T11:00:00Z")
 [ "$r" = 2 ] && ok "a failure decided BEFORE the tag existed exits 2, so the tag is not deleted" \
              || bad "a pre-tag failure exited $r, wanted 2 -- exit 1 deletes the candidate tag over a verdict rendered before it existed, which is the v1.47.0 deadlock"
@@ -195,13 +195,26 @@ r=$(gate_rc_at "$_red" "")
 [ "$r" = 1 ] && ok "with no candidate timestamp the decided failure still exits 1" \
              || bad "an empty CANDIDATE_CREATED_AT changed the verdict to $r; absence of a timestamp must not soften the gate"
 
-# A red run with no completed_at cannot be shown to predate anything. Refusing to call it stale
-# is the conservative reading: it keeps the deleting behaviour rather than inventing a reprieve
+# THE INCIDENT SHAPE, and the reason this keys on started_at rather than completed_at.
+#
+# Both of these ran against the same tagless checkout and failed for the same reason. verify
+# started 15:57:44 and finished at 16:00:02; install-macos started 15:57:45 and finished at
+# 16:02:31, because it is the slow lane. The tag appeared at 16:00:41, between them. Keyed on
+# completed_at, verify is stale by thirty-nine seconds and install-macos is a real verdict --
+# so the tag is deleted anyway and the rule saves nothing. Keyed on started_at, both are stale,
+# which is what they are: neither had the tag in its tree.
+_red_slow_lane='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"failure","id":1,"started_at":"2026-08-27T15:57:45Z","completed_at":"2026-08-27T16:02:31Z"}'
+r=$(gate_rc_at "$_red_slow_lane" "2026-08-27T16:00:41Z")
+[ "$r" = 2 ] && ok "a slow lane that STARTED before the tag and finished after it is stale (exits 2)" \
+             || bad "the slow lane exited $r, wanted 2 -- keyed on completed_at this is the case that deletes the tag regardless, which is how the first version of this fix failed to fix anything"
+
+# A red run with no started_at cannot be shown to predate anything. Refusing to call it stale is
+# the conservative reading: it keeps the deleting behaviour rather than inventing a reprieve
 # from a missing field.
-_red_no_end='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"failure","id":1,"started_at":"2026-08-26T10:00:00Z","completed_at":null}'
-r=$(gate_rc_at "$_red_no_end" "2026-08-26T11:00:00Z")
-[ "$r" = 1 ] && ok "a failure with no completed_at is not assumed stale (exits 1)" \
-             || bad "a failure with no completed_at exited $r, wanted 1 -- a missing timestamp must not be read as a reprieve"
+_red_no_start='{"name":"verify","head_sha":"abc123","status":"completed","conclusion":"failure","id":1,"started_at":null,"completed_at":"2026-08-26T10:05:00Z"}'
+r=$(gate_rc_at "$_red_no_start" "2026-08-26T11:00:00Z")
+[ "$r" = 1 ] && ok "a failure with no started_at is not assumed stale (exits 1)" \
+             || bad "a failure with no started_at exited $r, wanted 1 -- a missing timestamp must not be read as a reprieve"
 
 echo
 echo "require-checks-green selection: $pass passed, $fail failed"

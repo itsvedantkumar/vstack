@@ -204,7 +204,16 @@ in, rather than to the thing it names -- with the sign flipped. A check can inhe
 easily as a green, and a red that triggers a destructive remedy is the one that costs you something
 on the way past.
 
-The fix is `CANDIDATE_CREATED_AT`, and its narrowness is the load-bearing part. A stale red is
+The fix is `CANDIDATE_CREATED_AT`, keyed on when each run *started*. The first attempt keyed on
+when it finished, and replaying the incident's own timestamps killed that version: `verify` finished
+thirty-nine seconds before the tag appeared and read as stale, while `install-macos` -- same
+checkout, one second later start, same missing tag -- finished ninety seconds *after* the tag and
+read as a real verdict, so the tag died anyway. A rule that survives only on the fast lane's
+thirty-nine-second margin is not a rule. A job checks out as its first step, so what it started
+before is what it could not have seen. That the first fix was itself unfalsified against real data
+until it was replayed is the same lesson one level up.
+
+Its narrowness is the load-bearing part. A stale red is
 reported as undecided, not as success: publication is still withheld, and nothing red ships through
 that door. All that stops is the deletion. Check 54 exists because the fix has the standard
 two-halves problem -- `tests/require-checks-green.sh` proves the gate honours the variable by

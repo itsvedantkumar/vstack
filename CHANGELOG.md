@@ -22,8 +22,18 @@ three minutes later, calls them a decision against the candidate, and deletes th
 have turned them green. The retry starts from the same state and reproduces it exactly.
 
 `require-checks-green.sh` now takes `CANDIDATE_CREATED_AT` -- when origin first had the tag, which
-for a tag-push run is that workflow run's own `created_at`, the push's own receipt. A failing
-conclusion recorded before that moment is reported `STALE` and counted undecided.
+for a tag-push run is that workflow run's own `created_at`, the push's own receipt. A required
+check whose run *started* before that moment and failed is reported `STALE` and counted undecided.
+
+`started_at`, not `completed_at`, and that distinction is the fix rather than a detail of it. The
+first version keyed on `completed_at` and was then replayed against the incident's real
+timestamps: `verify` started 15:57:44 and finished 16:00:02, thirty-nine seconds before the tag
+appeared at 16:00:41, so it happened to read as stale. `install-macos` started one second later
+and finished at 16:02:31, because it is the slow lane -- same checkout, same missing tag, same
+reason for failing, and `completed_at` calls it a real verdict and deletes the tag anyway. The
+rule would not have saved the release it was written for, and the one lane it did save it saved
+by thirty-nine seconds of luck. A job checks out as its first step, so a run that started before
+the tag existed cannot have had the tag in its tree, whatever time it finished.
 
 The narrowness is the point. A stale red does not become green; it becomes exit 2, which still
 withholds publication, so nothing red ships through this door. The only behaviour that changes is

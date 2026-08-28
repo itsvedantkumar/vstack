@@ -29,8 +29,23 @@
 # destructive remedy either.
 #
 # CANDIDATE_CREATED_AT (default empty) is when the candidate tag came into existence, RFC3339.
-# When set, a required check whose FAILING conclusion was recorded before that moment is
-# reported STALE and counted as undecided rather than as a decision against the commit.
+# When set, a required check whose run STARTED before that moment and failed is reported STALE
+# and counted as undecided rather than as a decision against the commit.
+#
+# started_at, NOT completed_at, and the difference is the whole fix rather than a detail. The
+# first version of this keyed on completed_at and was measured against the real incident
+# afterwards: `verify` started 15:57:44 and finished 16:00:02, thirty-nine seconds before the
+# tag appeared at 16:00:41, so completed_at happened to call it stale. `install-macos` started
+# 15:57:45 -- one second later -- and finished at 16:02:31, because it is the slow lane. Same
+# checkout, same missing tag, same reason for failing, and completed_at calls it a real verdict
+# and deletes the tag. The rule would not have saved the release it was written for, and the
+# one lane it did save it saved by thirty-nine seconds of luck.
+#
+# A job checks out as its first step, so a run that STARTED before the tag existed cannot have
+# had the tag in its tree, whatever time it finished. That is the property being asserted. It
+# is also conservative in the safe direction: a run that started before the push and checked
+# out after it gets called stale when it was not, and the cost of that is a tag surviving a
+# release that does not publish.
 #
 # This is the other half of the exit-2 split above, and it cost two deleted tags on 2026-08-27
 # to find. bin/doctor's "declared release is fetchable" and verify.sh's check 24 both assert
@@ -73,10 +88,10 @@ CANDIDATE_CREATED_AT=${CANDIDATE_CREATED_AT:-}
 # Both timestamps come from the GitHub API in the same zero-padded RFC3339 UTC shape
 # (2026-08-27T15:59:16Z), which orders correctly as plain text. awk rather than bash's [[ < ]]
 # so this keeps working under sh and busybox, per the repo's portability rule.
-predates_candidate(){ # <completed_at> -> 0 if it is strictly earlier than the candidate
+predates_candidate(){ # <started_at> -> 0 if the run BEGAN before the candidate existed
   [ -n "$CANDIDATE_CREATED_AT" ] || return 1
-  # A run with no completed_at cannot be SHOWN to predate the tag. Refuse to assume it does:
-  # the conservative direction here is the one that keeps deleting, not the one that grants a
+  # A run with no started_at cannot be SHOWN to predate the tag. Refuse to assume it does: the
+  # conservative direction here is the one that keeps deleting, not the one that grants a
   # reprieve on a missing field.
   [ -n "$1" ] && [ "$1" != "null" ] || return 1
   awk -v a="$1" -v b="$CANDIDATE_CREATED_AT" 'BEGIN{exit !(a < b)}'
@@ -118,7 +133,7 @@ if [ "$WAIT_SECONDS" -gt 0 ]; then
         # 5400s budget irrelevant on 2026-08-27: the checks were decided, just decided about a
         # world without the tag, so the gate broke out of the wait in under a second and went
         # straight to the deletion.
-        if predates_candidate "$(printf '%s' "$m" | jq -r '.completed_at // ""')"; then
+        if predates_candidate "$(printf '%s' "$m" | jq -r '.started_at // ""')"; then
           _undecided=$((_undecided+1))
         else _decided_bad=1; fi
       fi
@@ -170,9 +185,9 @@ for name in "$@"; do
     echo "PENDING  $name: status=$status on ${sha}${_deadline_note} -- not safe to publish while a required check is still running"
     undecided=1
   elif [ "$conclusion" != "success" ]; then
-    completed=$(printf '%s' "$match" | jq -r '.completed_at // ""')
-    if predates_candidate "$completed"; then
-      echo "STALE    $name: conclusion=$conclusion decided at ${completed}, before the candidate existed at ${CANDIDATE_CREATED_AT} -- counted as undecided, because a check that ran without the tag was not judging this release. Re-run it against ${sha} to get a verdict that means something."
+    began=$(printf '%s' "$match" | jq -r '.started_at // ""')
+    if predates_candidate "$began"; then
+      echo "STALE    $name: conclusion=$conclusion from a run that STARTED at ${began}, before the candidate existed at ${CANDIDATE_CREATED_AT} -- it checked out a tree without this tag, so it was not judging this release. Counted as undecided. Re-run it against ${sha} to get a verdict that means something."
       undecided=1
     else
       echo "FAILED   $name: conclusion=$conclusion on ${sha}"
