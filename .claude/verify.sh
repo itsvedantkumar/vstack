@@ -3868,8 +3868,27 @@ if command -v jq >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>
     c56_err=$(printf '%s' "$c56_in" \
       | env -u HOME -u TMPDIR -u USER -u LANG CLAUDE_PROJECT_DIR="$c56_pd" \
             bash "$c56_h" 2>&1 >/dev/null)
-    case "$c56_err" in
-      *"unbound variable"*|*"bad substitution"*|*"parameter null or not set"*|*"No such file or directory"*)
+    # The FIRST rule is derived, and it is the one that matters. A list of bash phrasings is a
+    # list, and the tenth spelling beats it: this check shipped matching "parameter null or not
+    # set", which is what bash 3.2 says, while bash 5 says "parameter not set". The hook died on
+    # every Linux runner and this check called it healthy -- row 56b green against a file that
+    # aborts on line 36, caught by CI on 292571e and by nothing here.
+    #
+    # What is stable across every bash is the DIAGNOSTIC PREFIX. A runtime error from the shell
+    # is reported as "<the script as invoked>: line N: ...", and nothing a hook chooses to print
+    # carries that prefix, because it names the path this check invoked it by. Matching on the
+    # prefix asks "did the shell stop this script" instead of "do I recognise the complaint".
+    #
+    # A newline is prepended so the first line matches the same pattern as any later one, rather
+    # than needing a second alternative that someone later forgets to keep in step.
+    #
+    # The old substrings stay as a union, not as the criterion. They cover the one case the
+    # prefix rule cannot see: a message a CHILD process wrote to the same stderr, such as
+    # "cat: /nope: No such file or directory", which carries the child's prefix and not the
+    # hook's, and still means the hook could not do its work.
+    c56_nl=$(printf '\nx'); c56_nl=${c56_nl%x}
+    case "$c56_nl$c56_err" in
+      *"$c56_nl$c56_h: line "*|*"unbound variable"*|*"bad substitution"*|*"parameter null or not set"*|*"parameter not set"*|*"No such file or directory"*)
         c56_bad="$c56_bad\n  $c56_base on its $c56_ev event: $(printf '%s' "$c56_err" | head -1)" ;;
     esac
   done
