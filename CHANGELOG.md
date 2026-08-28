@@ -4,6 +4,49 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.49.0 — 2026-08-28
+
+### `stat -f %m` measures the filesystem on Linux, and exits 0 doing it
+
+`stat -f` means "file status" on BSD and macOS. On GNU coreutils and BusyBox it means *filesystem*
+status: it ignores `%m`, prints five lines about the mount the path sits on, and exits 0. So the
+familiar
+
+    m=$(stat -f %m "$p" 2>/dev/null || stat -c %Y "$p" 2>/dev/null || echo 0)
+
+never reaches its second branch on Linux. The `||` was written for a `stat` that fails. This one
+succeeds, with the wrong answer, in the wrong units, across five lines.
+
+Measured on 2026-08-28 in `alpine:latest` and `postgres:16`. Both printed `File: "/tmp"` first;
+the BusyBox shell then died on the comparison with `1781368758: out of range`, and bash's `[`
+called it too many arguments and returned false.
+
+Four files shipped that ordering. One picks the newest nvm install for `bin/claude-task.sh`, where
+the cost is a `PATH` missing its node bin under cron. The other three are the stale-lock reclaims
+in `claude/hooks/verify-gate.sh`, `claude/hooks/skill-mandate.sh` and
+`claude/hooks/dispatch-counter.sh`, and there the cost is worse than a wrong number: their
+`while ! mkdir "$lock_dir"` loop has no other exit. On Linux an abandoned lock directory was never
+reclaimed, so every later invocation of that hook spun forever. macOS self-healed after 30
+seconds and never showed it.
+
+All four now call `mtime_of()`, which asks GNU first -- `stat -c` on macOS is a usage error with an
+empty stdout, which is the honest failure the `||` was written for -- and then rejects anything
+that is not a bare integer, whatever exited 0. Four copies is deliberate: hooks are installed
+standalone and source nothing.
+
+### Check 55, the mtime probe returns an integer on every documented platform
+
+Checked by execution, not by grep. Three stubs reproduce the measured behaviour of BSD, GNU and a
+`stat` that cannot answer at all, and every copy of `mtime_of()` in the tree is run against all
+three. A stat mtime call outside `mtime_of()` fails the census, so a fifth hand-written copy
+cannot be added quietly, and a census of length zero fails rather than passing on nothing.
+
+Same class as check 53, one step harder: 53 asks whether both spellings are named, 55 asks what
+the code actually returns.
+
+Rows 55, 55b and 55c: restore the shipped ordering inside the function, add an inline copy outside
+it, and rename the tool everywhere to empty the census.
+
 ## 1.48.0 — 2026-08-27
 
 ### A verdict decided before the tag existed no longer deletes the tag

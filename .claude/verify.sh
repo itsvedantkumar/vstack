@@ -3688,6 +3688,107 @@ else
 fi
 
 echo
+# --- 55. the mtime probe returns an integer on every documented platform ----------------------
+# `stat -f` means "file status" on BSD/macOS and "FILESYSTEM status" on GNU coreutils and
+# BusyBox. On Linux it ignores %m entirely, prints a five-line block about the mount, and
+# EXITS 0 -- so the familiar `stat -f %m "$p" 2>/dev/null || stat -c %Y "$p"` never reaches its
+# second branch there. The caller gets a paragraph where it asked for an integer. Measured
+# 2026-08-28 in alpine and postgres:16 containers: both printed `File: "/tmp"` as the first of
+# five lines and exited 0, and the BusyBox shell then died on the comparison with
+# `1781368758: out of range`.
+#
+# That ordering shipped in four files. Three are lock-staleness reclaims inside hooks whose
+# `while ! mkdir` loop is otherwise unbounded, so on Linux an abandoned lock directory is never
+# reclaimed and every later invocation of that hook spins forever. A hang, not a wrong number.
+#
+# Same class as check 53 and checked the harder way: by execution, not by grep. Three stubs
+# stand in for the three documented platforms, each reproducing the measured behaviour --
+# including the macOS one where `stat -c` is a usage error, which is the honest failure the
+# `||` was written for. Four copies of mtime_of() is a deliberate trade: hooks are installed
+# standalone and source nothing, so they cannot share a library. Executing every copy against
+# every stub is what stops the four drifting apart quietly, and a stat mtime call OUTSIDE
+# mtime_of() fails the census, so a fifth copy cannot be added by hand without noticing.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  bad "the mtime probe returns an integer on every platform" "not inside a git work tree, so the file census could not run -- an empty census would pass this check while measuring nothing"
+else
+  c55_d=$(mktemp -d 2>/dev/null || echo "/tmp/c55.$$")
+  c55_ep=1756339200
+  mkdir -p "$c55_d/gnu" "$c55_d/bsd" "$c55_d/none"
+  # GNU coreutils and BusyBox behaved identically when measured, so one stub covers both.
+  cat > "$c55_d/gnu/stat" <<'C55GNU'
+#!/bin/sh
+if [ "$1" = "-c" ] && [ "$2" = "%Y" ]; then printf '%s\n' "$C55_EPOCH"; exit 0; fi
+if [ "$1" = "-f" ]; then
+  printf '  File: "%s"\n    ID: eab9943b4efd9b1d Namelen: 255     Type: overlayfs\n' "$3"
+  printf 'Block size: 4096       Fundamental block size: 4096\n'
+  printf 'Blocks: Total: 118511122  Free: 117936091  Available: 111897679\n'
+  printf 'Inodes: Total: 30179328   Free: 30146270\n'
+  exit 0
+fi
+exit 1
+C55GNU
+  cat > "$c55_d/bsd/stat" <<'C55BSD'
+#!/bin/sh
+if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then printf '%s\n' "$C55_EPOCH"; exit 0; fi
+echo "stat: illegal option -- c" >&2
+exit 1
+C55BSD
+  # Neither spelling works: the path is gone, or stat is not installed at all. The probe must
+  # answer 0 -- an integer the caller can compare -- rather than the empty string, which is
+  # what turns `[ "$m" -gt 0 ]` into a shell error instead of a false.
+  printf '#!/bin/sh\nexit 1\n' > "$c55_d/none/stat"
+  chmod +x "$c55_d/gnu/stat" "$c55_d/bsd/stat" "$c55_d/none/stat"
+
+  c55_n=0; c55_bad=""
+  for c55_f in $(git ls-files); do
+    case "$c55_f" in
+      *.sh|bin/*|claude/hooks/*|*.bash) ;;
+      *) continue ;;
+    esac
+    [ -f "$c55_f" ] || continue
+    # Two tracked files name both spellings while probing nothing: this one, in check 55's own
+    # platform stubs a few lines below, and the falsifiability suite, in the mutations that put
+    # the defect back. Exempted by exact path rather than by a pattern that would also cover a
+    # real probe added to either later: an exemption you can argue with beats a regex that
+    # quietly grows.
+    case "$c55_f" in (.claude/verify.sh|tests/gate-falsifiability.sh) continue ;; esac
+    grep -q 'stat -f %m\|stat -c %Y' "$c55_f" 2>/dev/null || continue
+    c55_n=$((c55_n + 1))
+    c55_fn="$c55_d/fn.sh"
+    sed -n '/^mtime_of() {/,/^}/p' "$c55_f" > "$c55_fn"
+    if [ ! -s "$c55_fn" ]; then
+      c55_bad="$c55_bad\n  $c55_f calls stat for an mtime but defines no mtime_of() -- an inline copy is a copy nothing here executes"
+      continue
+    fi
+    # Every stat mtime call in the file must be inside that function. Count them both ways.
+    # Comment lines are excluded: mtime_of's own header quotes both spellings while explaining
+    # why the order matters, and prose about a call is not a call.
+    c55_all=$(grep -v '^[[:space:]]*#' "$c55_f" | grep -c 'stat -f %m\|stat -c %Y') || c55_all=0
+    c55_in=$(grep -v '^[[:space:]]*#' "$c55_fn" | grep -c 'stat -f %m\|stat -c %Y') || c55_in=0
+    if [ "$c55_all" -ne "$c55_in" ]; then
+      c55_bad="$c55_bad\n  $c55_f has $((c55_all - c55_in)) stat mtime call(s) outside mtime_of() -- outside the function is outside this check"
+      continue
+    fi
+    for c55_p in gnu bsd none; do
+      c55_want=$c55_ep
+      [ "$c55_p" = none ] && c55_want=0
+      c55_got=$(PATH="$c55_d/$c55_p:$PATH" C55_EPOCH="$c55_ep" \
+        sh -c ". \"$c55_fn\"; mtime_of \"$c55_d\"" 2>/dev/null)
+      if [ "$c55_got" != "$c55_want" ]; then
+        c55_bad="$c55_bad\n  $c55_f mtime_of on the $c55_p stub answered [$(printf '%s' "$c55_got" | tr '\n' '|')] and not $c55_want"
+      fi
+    done
+  done
+  rm -rf "$c55_d"
+  if [ "$c55_n" -eq 0 ]; then
+    bad "the mtime probe returns an integer on every platform" "no tracked shell file calls stat for an mtime -- the census is empty, so every assertion above ran zero times"
+  elif [ -n "$c55_bad" ]; then
+    bad "the mtime probe returns an integer on every platform" "$(printf 'stat -f is filesystem status on Linux and exits 0, so the wrong order never falls through:%b' "$c55_bad")"
+  else
+    ok "the mtime probe returns an integer on every platform ($c55_n file(s) x 3 platform stubs)"
+  fi
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

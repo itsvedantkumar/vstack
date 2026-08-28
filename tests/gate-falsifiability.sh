@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -280,6 +280,9 @@ files_for(){ case "$1" in
   53)  printf 'tests/inventory-contract.sh' ;;
   54)  printf '.github/workflows/release.yml' ;;
   54b) printf '.github/scripts/require-checks-green.sh' ;;
+  55)  printf 'bin/claude-task.sh' ;;
+  55b) printf 'bin/claude-task.sh' ;;
+  55c) printf 'bin/claude-task.sh claude/hooks/dispatch-counter.sh claude/hooks/skill-mandate.sh claude/hooks/verify-gate.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -360,6 +363,9 @@ label_for(){ case "$1" in
   53)  printf 'hashers work on every documented platform' ;;
   54)  printf "the release gate's inputs are supplied by the workflow" ;;
   54b) printf "the release gate's inputs are supplied by the workflow" ;;
+  55)  printf 'the mtime probe returns an integer on every platform' ;;
+  55b) printf 'the mtime probe returns an integer on every platform' ;;
+  55c) printf 'the mtime probe returns an integer on every platform' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -530,6 +536,29 @@ exit 7
       # of printing ok on a list of length zero.
       sed -i.t 's/=\${\([A-Z][A-Z0-9_]*\):-/="${\1-/; s/:-0}$/-0}"/' .github/scripts/require-checks-green.sh \
         && rm -f .github/scripts/require-checks-green.sh.t ;;
+
+  55) # The shipped defect itself, put back INSIDE mtime_of() so the census still finds the file
+      # and only the execution lane can notice. This is the line that ran in four files until
+      # 1.49.0: it exits 0 on GNU and BusyBox with a five-line paragraph about the mount, so the
+      # `||` never falls through and the caller compares a paragraph against an integer.
+      perl -0pi -e 's/mtime_of\(\) \{.*?\n\}/mtime_of() {\n  stat -f %m "\$1" 2>\/dev\/null || stat -c %Y "\$1" 2>\/dev\/null || echo 0\n}/s' \
+        bin/claude-task.sh ;;
+
+  55b) # The other way this rots: a fifth copy typed inline instead of calling the function. The
+      # function stays correct and keeps passing all three stubs, so only the count of stat calls
+      # inside versus outside it can tell. Adding a probe by hand is exactly how the first four
+      # got there.
+      printf '%s\n' 'stale=$(stat -f %m "$0" 2>/dev/null || stat -c %Y "$0" 2>/dev/null || echo 0)' \
+        >> bin/claude-task.sh ;;
+
+  55c) # Empty the census. Rename the tool in every file that calls it and the loop above has
+      # nothing left to execute -- three platform stubs applied zero times, which is a green
+      # about nothing unless the check refuses on a census of length zero.
+      for _c55f in bin/claude-task.sh claude/hooks/dispatch-counter.sh \
+                   claude/hooks/skill-mandate.sh claude/hooks/verify-gate.sh; do
+        sed -i.t -e 's/stat -c %Y/stat -Q %Z/g' -e 's/stat -f %m/stat -Q %Z/g' "$_c55f"
+        rm -f "$_c55f.t"
+      done ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;

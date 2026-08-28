@@ -68,14 +68,27 @@ elif [ -f "$HOME/.nvm/alias/default" ]; then
     nvm_bin="$HOME/.nvm/versions/node/$default_ver/bin"
   fi
 fi
+# `stat -f` is "file status" on BSD/macOS and "FILESYSTEM status" on GNU coreutils and BusyBox,
+# where it ignores %m, prints five lines about the mount, and exits 0 -- so the familiar
+# `stat -f %m || stat -c %Y` never falls through on Linux and hands the caller a paragraph where
+# it asked for an integer. Measured 2026-08-28 in alpine and postgres:16 containers. GNU first,
+# because `stat -c` on macOS is a usage error (rc=1, empty output), which is the honest failure
+# the `||` was written for. The digit guard is the part that matters: it rejects anything that is
+# not a bare integer, whatever exited 0. verify.sh check 55 executes this function against a stub
+# of each documented platform, and finds it by name -- keep the name.
+mtime_of() { # <path> -> epoch seconds, or 0 when it cannot be read
+  _m=$(stat -c %Y "$1" 2>/dev/null) || _m=""
+  case "$_m" in ""|*[!0-9]*) _m=$(stat -f %m "$1" 2>/dev/null) ;; esac
+  case "$_m" in ""|*[!0-9]*) _m=0 ;; esac
+  printf '%s\n' "$_m"
+}
 if [ -z "$nvm_bin" ]; then
   # Newest installed nvm version dir by mtime. Avoids SC2012 (parsing `ls` output): glob the
   # candidate dirs directly and rank them by mtime instead of piping `ls -dt` into `head`.
   newest=""; newest_mtime=0
   for d in "$HOME"/.nvm/versions/node/*/bin; do
     [ -d "$d" ] || continue
-    # stat -f (BSD/macOS) vs -c (GNU/Linux)
-    mtime=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo 0)
+    mtime=$(mtime_of "$d")
     if [ "$mtime" -gt "$newest_mtime" ]; then newest_mtime=$mtime; newest="$d"; fi
   done
   nvm_bin="$newest"

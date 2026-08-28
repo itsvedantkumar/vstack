@@ -49,14 +49,28 @@ lock_dir="$cnt_file.lock"
 # on every POSIX filesystem (exactly one caller sees it succeed), which needs no GNU flock and no
 # coreutils on stock macOS. A lock older than 30s is assumed abandoned by a killed sibling rather
 # than honored forever, so a crash can't wedge the gate shut.
+# `stat -f` is "file status" on BSD/macOS and "FILESYSTEM status" on GNU coreutils and BusyBox,
+# where it ignores %m, prints five lines about the mount, and exits 0 -- so the familiar
+# `stat -f %m || stat -c %Y` never falls through on Linux and hands the caller a paragraph where
+# it asked for an integer. Measured 2026-08-28 in alpine and postgres:16 containers. GNU first,
+# because `stat -c` on macOS is a usage error (rc=1, empty output), which is the honest failure
+# the `||` was written for. The digit guard is the part that matters: it rejects anything that is
+# not a bare integer, whatever exited 0. verify.sh check 55 executes this function against a stub
+# of each documented platform, and finds it by name -- keep the name.
+mtime_of() { # <path> -> epoch seconds, or 0 when it cannot be read
+  _m=$(stat -c %Y "$1" 2>/dev/null) || _m=""
+  case "$_m" in ""|*[!0-9]*) _m=$(stat -f %m "$1" 2>/dev/null) ;; esac
+  case "$_m" in ""|*[!0-9]*) _m=0 ;; esac
+  printf '%s\n' "$_m"
+}
 lock_acquired=0
 i=0
 while ! mkdir "$lock_dir" 2>/dev/null; do
   i=$((i + 1))
   if [ "$i" -ge 300 ]; then
-    # stat -f (BSD/macOS) vs -c (GNU/Linux); `find -mmin` was tried first and dropped because
-    # some `find` implementations (e.g. bfs) reject fractional minute arguments outright.
-    lm=$(stat -f %m "$lock_dir" 2>/dev/null || stat -c %Y "$lock_dir" 2>/dev/null || echo 0)
+    # `find -mmin` was tried first and dropped because some `find` implementations (e.g. bfs)
+    # reject fractional minute arguments outright.
+    lm=$(mtime_of "$lock_dir")
     now=$(date +%s)
     if [ "$lm" -gt 0 ] && [ $((now - lm)) -ge 30 ]; then
       rm -rf "$lock_dir" 2>/dev/null
