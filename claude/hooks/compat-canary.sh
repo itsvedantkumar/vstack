@@ -30,7 +30,11 @@ elif command -v jq >/dev/null 2>&1; then JQ=$(command -v jq); fi
 KNOWN_EVENTS="SessionStart UserPromptSubmit Stop SubagentStop PreToolUse PostToolUse PostToolUseFailure Notification PreCompact"
 KNOWN_FAMILIES="2.1"
 
-STATE_FILE="${VSTACK_COMPAT_CANARY_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-compat-canary.json}"
+# ${HOME:-} rather than $HOME: under `set -u` a bare expansion aborts this hook on its own
+# assignment line when HOME is absent, which is every launchd agent and every `env -i`. The
+# canary's job is to report what it observed, so failing to find somewhere to write it must
+# degrade to writing nowhere, not to killing the tool call that triggered it.
+STATE_FILE="${VSTACK_COMPAT_CANARY_LOG:-${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/vstack-compat-canary.json}"
 
 reasons=""
 add_reason(){ reasons="${reasons:+$reasons; }$1"; }
@@ -105,7 +109,23 @@ fi
 log_dir_="${STATE_FILE%/*}"
 [ "$log_dir_" = "$STATE_FILE" ] && log_dir_="."
 mkdir -p "$log_dir_" 2>/dev/null
-printf '%s\n' "$rec" > "$STATE_FILE" 2>/dev/null
+# `> "$STATE_FILE" 2>/dev/null` does not silence a failed redirection. The shell opens the target
+# and reports the failure itself, before printf exists to have its stderr redirected -- which is
+# why an unwritable path printed `No such file or directory` on every tool call rather than
+# degrading quietly. The subshell puts the shell's own message somewhere we can redirect.
+#
+# Temp file then rename, rather than truncate in place: this is a PreToolUse hook, it fires on
+# every tool call, and nothing serialises two of them. A truncating write that loses its race
+# leaves a half-written record for the next run to parse.
+(
+  if _cc_tmp=$(mktemp "$log_dir_/.canary.XXXXXX" 2>/dev/null); then
+    if printf '%s\n' "$rec" > "$_cc_tmp" 2>/dev/null; then
+      mv -f "$_cc_tmp" "$STATE_FILE" 2>/dev/null || rm -f "$_cc_tmp" 2>/dev/null
+    else
+      rm -f "$_cc_tmp" 2>/dev/null
+    fi
+  fi
+) 2>/dev/null
 
 if [ "$status" = UNKNOWN ]; then
   printf 'COMPAT: UNKNOWN -- %s\n' "$reasons"

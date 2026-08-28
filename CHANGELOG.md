@@ -45,6 +45,38 @@ direction to the measurement. Its two heredoc claims predicted a bypass -- a del
 or a dot, extra spaces, `<<-` with a tab -- and all four still deny a trailing `rm -rf /`, as does
 `bash <<EOF` with the delete inside the body.
 
+### Two hooks aborted instead of deciding when HOME was absent
+
+Check 23 runs one hook under `env -u TMPDIR -u HOME -u USER -u LANG`, because
+`guard-destructive.sh` once read `$TMPDIR` with no default. Seven other hooks ship beside it and
+none had ever been run that way. Two died: `compat-canary.sh` and `verify-gate.sh` both expand a
+bare `$HOME` under `set -u`.
+
+`verify-gate.sh` is the Stop hook, and the line that died is the trust-store lookup deciding
+whether this repo's `verify.sh` may run unattended. Aborting there is not a wrong answer, it is no
+answer: the runtime gets a shell error where a decision belongs. Both now read `${HOME:-}`, so with
+no HOME the lookup resolves to a path that does not exist and nothing is trusted, which is the
+direction that gate has to fail in.
+
+`compat-canary.sh` also wrote its state file with `> "$STATE_FILE" 2>/dev/null`, which does not
+silence a failed redirection: the shell opens the target and reports the failure itself, before
+`printf` exists to have its stderr redirected. It now writes through a temp file and renames, so a
+PreToolUse hook firing twice at once cannot leave a half-written record either.
+
+### Check 56, every shipped hook decides with a stripped environment
+
+Census derived from the tree, and the EVENT derived from `claude/settings.json`. The first draft
+sent every hook the same `PreToolUse` payload; `format.sh` returns immediately on an event it is
+not registered for, so its body never ran and its row stayed green under a mutation that broke it
+outright. The second draft gave each hook its real event but an empty project directory, and both
+`verify-gate.sh` and `format.sh` return early on that too, so both rows went quiet again. The
+fixture now plants a `.claude/verify.sh` and a source file, and the rows bite.
+
+The check also reports that `compat-canary.sh` appears in no `settings.json` event at all.
+
+Rows 56 and 56b: restore the bare `$HOME` in the Stop hook, and break a hook that never had the
+problem, so a census that stops reaching every file cannot stay green.
+
 ### Asking for a ref that does not exist installed a different one and called it that
 
 `bootstrap.sh` had two lanes that disagreed about the same input. Without git, `VSTACK_REF=v9.9.9`

@@ -3804,6 +3804,87 @@ C55BSD
   fi
 fi
 
+# --- 56. every shipped hook decides with a stripped environment --------------------------------
+# Check 23 runs ONE hook under `env -u TMPDIR -u HOME -u USER -u LANG`, because guard-destructive.sh
+# once read $TMPDIR without a default. Seven other hooks ship alongside it and none of them were
+# ever run that way. Two died: compat-canary.sh and verify-gate.sh both expand a bare $HOME under
+# `set -u`, so with HOME absent they abort with `unbound variable` before reaching any decision.
+#
+# verify-gate.sh is the Stop hook. Aborting there is not a wrong answer, it is no answer: the line
+# that died is the trust-store lookup deciding whether this repo's verify.sh may run unattended. A
+# hook that stops on a shell error has not allowed or blocked anything; it has handed the runtime a
+# stack trace and left the outcome to whatever the runtime does with a non-zero exit.
+#
+# HOME is absent more often than it looks: launchd agents, `env -i`, a Docker `USER` with no passwd
+# entry, systemd units without PAMName. But the reason this check exists is not that HOME is likely
+# to be missing. It is that check 23 proved this property for one hook and nothing carried it to
+# the rest, which is check 54's shape one layer down.
+#
+# The EVENT IS DERIVED from claude/settings.json, not typed here. The first draft sent every hook
+# the same PreToolUse payload; format.sh returns immediately on an event it is not registered for,
+# so its body never ran and its row stayed green under a mutation that broke it outright. A hook
+# fed the wrong event is a hook this check does not reach.
+#
+# The assertion is on stderr, not the exit code: hooks legitimately exit 0, 1 and 2, and what none
+# of them may do is emit a shell-level error, because that means the script stopped before
+# deciding. Census derived from the tree, and empty is a failure.
+if command -v jq >/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  c56_n=0; c56_bad=""; c56_unwired=""
+  c56_pd=$(mktemp -d 2>/dev/null || echo /tmp/c56.$$)
+  # The fixture has to make each hook do its work, or this checks that they return early. Both of
+  # the hooks that were broken here return immediately on an empty project: verify-gate.sh is
+  # opt-in on $CLAUDE_PROJECT_DIR/.claude/verify.sh existing, and format.sh needs a real file to
+  # take the dirname of. Given an empty temp dir, both rows below went green against code that
+  # aborts on line one of its actual body.
+  #
+  # The planted verify.sh is `exit 0` because the Stop hook may decide to run it. It should not --
+  # with HOME stripped there is no trust store, so nothing is trusted, which is the decision under
+  # test -- and if that reasoning is ever wrong, what runs does nothing.
+  mkdir -p "$c56_pd/.claude" "$c56_pd/src" 2>/dev/null
+  printf '#!/bin/sh\nexit 0\n' > "$c56_pd/.claude/verify.sh" 2>/dev/null
+  chmod 755 "$c56_pd/.claude/verify.sh" 2>/dev/null
+  printf 'const x = 1\n' > "$c56_pd/src/fixture.ts" 2>/dev/null
+  : > "$c56_pd/t.jsonl" 2>/dev/null
+  for c56_h in $(git ls-files 'claude/hooks/*.sh'); do
+    [ -f "$c56_h" ] || continue
+    c56_n=$((c56_n + 1))
+    c56_base=${c56_h##*/}
+    # First event in settings.json whose command names this script. A hook nobody registered is
+    # still run, under PreToolUse, and named in the ok line so the gap is visible rather than
+    # silently untested.
+    c56_ev=$(jq -r --arg b "$c56_base" '
+        .hooks // {} | to_entries[]
+        | .key as $e | (.value[]?.hooks[]?.command // empty)
+        | select(test($b)) | $e' claude/settings.json 2>/dev/null | head -1)
+    if [ -z "$c56_ev" ]; then
+      c56_ev=PreToolUse
+      c56_unwired="$c56_unwired $c56_base"
+    fi
+    c56_in=$(jq -nc --arg e "$c56_ev" --arg d "$c56_pd" '{
+      hook_event_name:$e, session_id:"c56", transcript_path:($d+"/t.jsonl"),
+      cwd:$d, prompt:"hi", tool_name:"Bash",
+      tool_input:{command:"true", file_path:($d+"/src/fixture.ts")},
+      tool_response:{stdout:"",stderr:"",exit_code:0}}')
+    c56_err=$(printf '%s' "$c56_in" \
+      | env -u HOME -u TMPDIR -u USER -u LANG CLAUDE_PROJECT_DIR="$c56_pd" \
+            bash "$c56_h" 2>&1 >/dev/null)
+    case "$c56_err" in
+      *"unbound variable"*|*"bad substitution"*|*"parameter null or not set"*|*"No such file or directory"*)
+        c56_bad="$c56_bad\n  $c56_base on its $c56_ev event: $(printf '%s' "$c56_err" | head -1)" ;;
+    esac
+  done
+  rm -rf "$c56_pd"
+  if [ "$c56_n" -eq 0 ]; then
+    bad "every hook decides with a stripped environment" "no hook was found under claude/hooks/ -- the census is empty, so every assertion above ran zero times"
+  elif [ -n "$c56_bad" ]; then
+    bad "every hook decides with a stripped environment" "$(printf 'run with HOME, TMPDIR, USER and LANG absent, each on the event settings.json registers it for:%b' "$c56_bad")"
+  else
+    ok "every hook decides with a stripped environment ($c56_n hook(s) on their registered events${c56_unwired:+; not in settings.json, run as PreToolUse:$c56_unwired})"
+  fi
+else
+  skip "every hook decides with a stripped environment" "jq or a git work tree is unavailable, and the hook census needs both"
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

@@ -12,7 +12,7 @@
   },
   "derived_at": {
     "head": "224eef7ea22ca5b7c7c33a875fa013ff8e4176ad",
-    "payload_digest": "b91d23cf03c0432d1d524428525395a510bdddc470f7cc4f8b0b8d67410b74e9",
+    "payload_digest": "15300246a2b21bfbf680ff6e37bc5dfec12a950cb71d036b5ac25c08f1a3309b",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
@@ -553,7 +553,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 55,
+      "declared_checks": 56,
       "check_ids": [
         "0",
         "1",
@@ -609,7 +609,8 @@
         "52",
         "53",
         "54",
-        "55"
+        "55",
+        "56"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
@@ -630,7 +631,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 85,
+        "rows": 87,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way."
       },
       {

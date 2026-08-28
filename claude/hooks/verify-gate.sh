@@ -31,7 +31,12 @@ v=$(cd "$d/.claude" 2>/dev/null && pwd)/verify.sh
 [ -f "$v" ] || exit 0
 if command -v shasum >/dev/null 2>&1; then h=$(shasum -a 256 "$v" | cut -d' ' -f1)
 else h=$(sha256sum "$v" 2>/dev/null | cut -d' ' -f1); fi
-if ! grep -qxF "$h  $v" "$HOME/.config/agents/verify-trust" 2>/dev/null; then
+# ${HOME:-} rather than $HOME: this file runs under `set -u`, and with HOME absent a bare
+# expansion aborts the hook on line 34 -- before it has allowed or blocked anything. The runtime
+# gets a shell error and an exit code, not a decision. Defaulting to empty makes the lookup
+# resolve to /.config/agents/verify-trust, which does not exist, so the answer is "untrusted":
+# no trust store means nothing is trusted, which is the direction this gate must fail in.
+if ! grep -qxF "$h  $v" "${HOME:-}/.config/agents/verify-trust" 2>/dev/null; then
   m="verify gate: skipped untrusted .claude/verify.sh (new or changed). Run 'vstack trust' in this repo to arm the Stop-hook gate."
   if [ -n "$JQ" ]; then "$JQ" -cn --arg m "$m" '{systemMessage:$m}'
   else printf '{"systemMessage":"%s"}\n' "$(esc "$m")"; fi
@@ -42,7 +47,7 @@ fi
 # trusted one would sail through while the scripts it calls had changed underneath. Every
 # recorded file inside this repo has to still match, or nothing runs.
 root=$(dirname "$(dirname "$v")")
-tf="$HOME/.config/agents/verify-trust"
+tf="${HOME:-}/.config/agents/verify-trust"
 while IFS= read -r line; do
   rh=${line%% *}; rp=${line#*  }
   case "$rp" in "$root"/*) ;; *) continue ;; esac

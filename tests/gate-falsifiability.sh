@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c 56 56b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -283,6 +283,8 @@ files_for(){ case "$1" in
   55)  printf 'bin/claude-task.sh' ;;
   55b) printf 'bin/claude-task.sh' ;;
   55c) printf 'bin/claude-task.sh claude/hooks/dispatch-counter.sh claude/hooks/skill-mandate.sh claude/hooks/verify-gate.sh' ;;
+  56)  printf 'claude/hooks/verify-gate.sh' ;;
+  56b) printf 'claude/hooks/format.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -366,6 +368,8 @@ label_for(){ case "$1" in
   55)  printf 'the mtime probe returns an integer on every platform' ;;
   55b) printf 'the mtime probe returns an integer on every platform' ;;
   55c) printf 'the mtime probe returns an integer on every platform' ;;
+  56)  printf 'every hook decides with a stripped environment' ;;
+  56b) printf 'every hook decides with a stripped environment' ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -559,6 +563,22 @@ exit 7
         sed -i.t -e 's/stat -c %Y/stat -Q %Z/g' -e 's/stat -f %m/stat -Q %Z/g' "$_c55f"
         rm -f "$_c55f.t"
       done ;;
+
+  56) # Put the bare expansion back in the Stop hook's trust-store lookup. Under `set -u` with
+      # HOME absent this aborts on line 34, before the gate has allowed or blocked anything --
+      # the runtime gets a shell error where a decision belongs. Every other hook keeps working,
+      # and so does this one on any machine that has a HOME, which is why nothing noticed.
+      sed -i.t 's|"${HOME:-}/.config/agents/verify-trust"|"$HOME/.config/agents/verify-trust"|' \
+        claude/hooks/verify-gate.sh && rm -f claude/hooks/verify-gate.sh.t ;;
+
+  56b) # A hook that was never broken, broken. Proves the census actually runs every file rather
+      # than the two that happened to be wrong when the check was written: format.sh has no HOME
+      # problem at all, so if this row stays green the loop is not reaching it.
+      # Anchored on the exact line, not on `0,/^dir=/`: BSD sed rejects the 0 address, so that
+      # form matched nothing on macOS and the row reported "did not fail" against a mutation that
+      # had never landed. ${x?} rather than a bare $x because format.sh does not set -u.
+      sed -i.t 's|^dir=$(dirname "$f")$|dir=${UNSET_ON_PURPOSE?}|' \
+        claude/hooks/format.sh && rm -f claude/hooks/format.sh.t ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
