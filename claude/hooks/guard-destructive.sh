@@ -192,8 +192,25 @@ _check_deny_segment() {
       for tok in $seg; do
         # shellcheck disable=SC2088  # matching the literal ~ the user typed; expanding it here would
         # compare $HOME against $HOME and let `rm -rf ~` through.
-        case "$tok" in
-          /|/\*|'~'|'~/'|'~/*'|'$HOME'|'"$HOME"'|'$HOME/'|'${HOME}')
+        # Normalise, then compare. The list this replaced was nine literals -- `/`, `/*`, `~`,
+        # `~/`, `~/*`, `$HOME`, `"$HOME"`, `$HOME/`, `${HOME}` -- and it still let `$HOME/*`,
+        # `"$HOME"/*`, `"${HOME}"` and `${HOME}/*` through to the ask tier, while `~/*` two
+        # entries along was denied. Same directory, same outcome, opposite verdict, decided by
+        # which way the operator happened to type it. Enumerating spellings loses to whoever
+        # thinks of a tenth one, so this reduces the token instead: drop every quote wherever it
+        # sits, fold ${HOME} onto $HOME, then remove one trailing `/*` or `/`.
+        _t=$tok
+        while :; do
+          case "$_t" in
+            *[\"\']*) _t="${_t%%[\"\']*}${_t#*[\"\']}" ;;
+            *) break ;;
+          esac
+        done
+        case "$_t" in '${HOME}'*) _t="\$HOME${_t#'${HOME}'}" ;; esac
+        _t="${_t%/\*}"; _t="${_t%/}"
+        case "$_t" in
+          # `` is what `/` and `/*` reduce to once the trailing slash comes off.
+          ''|'~'|'$HOME')
             emit deny "[guard] recursive delete of / or your home directory. If you truly mean this, run it yourself outside the agent session." ;;
         esac
       done

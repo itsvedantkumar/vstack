@@ -1604,6 +1604,13 @@ if command -v jq >/dev/null; then
   g_want 'rm -rf $HOME'                  deny
   g_want 'rm -rf /*'                     deny
   g_want 'rm -rf ~/*'                    deny
+  # Same directory, four more spellings. The list this replaced was nine literals long and still
+  # let every one of these through to `ask`, while `~/*` two lines up was denied -- identical
+  # effect, opposite verdict, decided by which way the operator happened to type it.
+  g_want 'rm -rf $HOME/*'                deny
+  g_want 'rm -rf "$HOME"/*'              deny
+  g_want 'rm -rf "${HOME}"'              deny
+  g_want 'rm -rf ${HOME}/*'              deny
   g_want 'git push --force origin main'  deny
   g_want 'git push -f origin master'     deny
   g_want 'true && git push --force origin main' deny
