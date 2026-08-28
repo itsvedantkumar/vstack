@@ -104,14 +104,31 @@ _deadline_note=""
 # id, started_at and completed_at are in the projection because the selection below orders on
 # them. They were absent, and their absence was invisible: the selection sorted on .name, which
 # is constant across the set it sorts, so nothing ever noticed the ordering keys were not there.
+#
+# stderr goes to its own file, NOT into runs_json. It used to be 2>&1, which is right for the
+# failure path -- you want the message -- and silently wrong for the success path: gh writes
+# deprecation and rate-limit notices to stderr on calls that succeed, and spliced into the stream
+# they make every jq read return nothing. A fully green commit would then report every required
+# check MISSING and the release would stall on a phantom.
+#
+# And failing to ASK is not an answer. This exited 1 when gh failed, release.yml maps exit 1 to
+# verdict=failed, and cleanup-on-failed-gate deletes the candidate tag on that -- so a transient
+# `error connecting to api.github.com` destroyed the release. That error was observed by hand
+# while polling during the 2026-08-27 session. Nothing about the commit was learned; the gate
+# could not even place the question, which is the definition of undecided. Same defect as reading
+# a pre-tag conclusion as a verdict, one doorway over: a non-answer wired to a destructive remedy.
 fetch_runs(){
+  _errf=$(mktemp 2>/dev/null || echo "/tmp/rcg-err.$$")
   runs_json=$(gh api "repos/${repo}/commits/${sha}/check-runs" --paginate \
-    --jq '.check_runs[] | {name, head_sha, status, conclusion, id, started_at, completed_at}' 2>&1)
+    --jq '.check_runs[] | {name, head_sha, status, conclusion, id, started_at, completed_at}' 2>"$_errf")
   rc=$?
+  _err=$(cat "$_errf" 2>/dev/null)
+  rm -f "$_errf"
   if [ "$rc" -ne 0 ]; then
-    echo "require-checks-green: gh api check-runs failed for ${sha}:"
-    echo "$runs_json"
-    exit 1
+    echo "UNKNOWN  could not read check-runs for ${sha}: gh api exited ${rc}"
+    [ -n "$_err" ] && echo "$_err"
+    echo "UNDECIDED  the gate could not ask the question, so nothing has been decided about ${sha}; exiting 2 so the caller withholds publication WITHOUT deleting anything"
+    exit 2
   fi
 }
 fetch_runs

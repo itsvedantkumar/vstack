@@ -216,6 +216,43 @@ r=$(gate_rc_at "$_red_no_start" "2026-08-26T11:00:00Z")
 [ "$r" = 1 ] && ok "a failure with no started_at is not assumed stale (exits 1)" \
              || bad "a failure with no started_at exited $r, wanted 1 -- a missing timestamp must not be read as a reprieve"
 
+# =================================================================================================
+# 11. Failing to ASK is not an answer.
+#
+# fetch_runs captured stderr into the JSON with 2>&1 and exited 1 when gh failed. release.yml maps
+# exit 1 to verdict=failed, and cleanup-on-failed-gate deletes the candidate tag on that. So a
+# transient `error connecting to api.github.com` -- observed by hand during this session's polling
+# -- destroyed the release. Nothing was learned about the commit; the gate could not even place
+# the question. That is the definition of undecided, and it is the same defect as the pre-tag
+# verdict: a non-answer wired to a destructive remedy.
+gate_rc_gh(){ # <stdout> <stderr> <exit-code> -> exit code of the real wrapper
+  cat > "$STUBDIR/gh" <<STUB
+#!/bin/sh
+cat >&2 <<'ERRP'
+$2
+ERRP
+cat <<'OUTP'
+$1
+OUTP
+exit $3
+STUB
+  chmod +x "$STUBDIR/gh"
+  PATH="$STUBDIR:$PATH" REQUIRE_CHECKS_WAIT_SECONDS=0 \
+    bash "$GATE" owner/repo abc123 verify >/dev/null 2>&1
+  echo $?
+}
+
+r=$(gate_rc_gh "" "error connecting to api.github.com" 1)
+[ "$r" = 2 ] && ok "a gh api failure exits 2, so a network blip does not delete the tag" \
+             || bad "a gh api failure exited $r, wanted 2 -- exit 1 is 'a required check decided against this commit', and the caller DELETES the candidate tag on it; a transient api.github.com error is not a verdict"
+
+# The success path must not be corrupted by anything gh writes to stderr. gh emits deprecation and
+# rate-limit notices there on perfectly good calls; spliced into the JSON they make every check
+# unparseable, so a green commit reads as MISSING and the release stalls on a phantom.
+r=$(gate_rc_gh "$_green" "gh: warning: this API is deprecated" 0)
+[ "$r" = 0 ] && ok "a stderr warning on a successful gh call does not corrupt the check-run JSON" \
+             || bad "a green check with a gh stderr warning exited $r, wanted 0 -- stderr is being spliced into the JSON, so every check reads MISSING"
+
 echo
 echo "require-checks-green selection: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
