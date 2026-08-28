@@ -1643,6 +1643,14 @@ if command -v jq >/dev/null; then
   g_want 'rm -rf node_modules /etc'      ask
   g_want 'rm -rf node_modules'           allow
   g_want 'rm -rf dist'                   allow
+  # Quoted spellings of the same safe paths. This is the tier the comment above calls the one
+  # that keeps the guard installed, and every quoted form of it used to prompt: the whitelist
+  # compared against the token as typed, so the literal quote characters never matched
+  # `node_modules` or `/tmp/*`. An agent that quotes its paths got a confirmation dialog on
+  # every build-artifact delete, which is how a guard gets turned off.
+  g_want 'rm -rf "node_modules"'         allow
+  g_want 'rm -rf "./dist"'               allow
+  g_want 'rm -rf "/tmp/x"'               allow
   g_want 'npm test'                      allow
   g_want 'git push origin feature-x'     allow
   g_want 'git commit -m "wip"'           allow

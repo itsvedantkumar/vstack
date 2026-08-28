@@ -26,6 +26,25 @@ Found by `opencode/muse-spark-1.2-contributor-free`. Its four BusyBox portabilit
 with no coreutils, grep or sed installed: every check but the two that legitimately skip ran,
 credential redaction green, and a payload digest byte-identical to the macOS one.
 
+Quoting the path used to change the verdict in the other direction too, and that direction is
+the corrosive one. The whitelist compared the token as typed, so `node_modules` matched and
+`"node_modules"` did not: every quoted build-artifact delete drew a confirmation prompt.
+
+    rm -rf node_modules      allow          rm -rf "node_modules"    ask
+    rm -rf ./dist            allow          rm -rf "./dist"          ask
+    rm -rf /tmp/x            allow          rm -rf "/tmp/x"          ask
+
+That is the tier this file's own comment calls the one that keeps the guard installed, and an
+agent that quotes its paths met a dialog on every artifact delete. Both tiers now compare through
+one `_gd_unquote()` helper that removes quote characters wherever they sit, which is what handles
+a quote in the middle of a token. Pure parameter expansion, no subshell: this runs ahead of every
+Bash command. Check 23 is 44 rows across 3 tiers.
+
+Reported as a `TMPDIR` quoting bug by `opencode/muse-spark-1.2-contributor-free`, in the opposite
+direction to the measurement. Its two heredoc claims predicted a bypass -- a delimiter with a dash
+or a dot, extra spaces, `<<-` with a tab -- and all four still deny a trailing `rm -rf /`, as does
+`bash <<EOF` with the delete inside the body.
+
 ### Asking for a ref that does not exist installed a different one and called it that
 
 `bootstrap.sh` had two lanes that disagreed about the same input. Without git, `VSTACK_REF=v9.9.9`

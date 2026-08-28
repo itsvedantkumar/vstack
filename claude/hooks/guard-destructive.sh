@@ -48,6 +48,25 @@ _guard_trap() {
 }
 trap _guard_trap EXIT
 
+# Quoting must not change a verdict. This hook compares the token the operator typed against
+# literal patterns, so `node_modules` matched the allowlist and `"node_modules"` did not -- the
+# quote characters are part of the token here, not shell syntax we ever consumed. That cut both
+# ways: every quoted build-artifact delete prompted, which is how a guard gets turned off, and
+# four quoted spellings of the home directory reached `ask` while the bare ones were denied.
+#
+# Stripping quotes wherever they sit, rather than only at the ends, is what handles `"$HOME"/*`
+# and `"/tmp"/x`. Pure parameter expansion, no subshell: this runs before every Bash command.
+_gd_unquote() { # <token> -> the token with every ' and " removed
+  _u=$1
+  while :; do
+    case "$_u" in
+      *[\"\']*) _u="${_u%%[\"\']*}${_u#*[\"\']}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$_u"
+}
+
 emit() { # <allow|ask|deny> <reason>
   _guard_emitted=1
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
@@ -199,13 +218,7 @@ _check_deny_segment() {
         # which way the operator happened to type it. Enumerating spellings loses to whoever
         # thinks of a tenth one, so this reduces the token instead: drop every quote wherever it
         # sits, fold ${HOME} onto $HOME, then remove one trailing `/*` or `/`.
-        _t=$tok
-        while :; do
-          case "$_t" in
-            *[\"\']*) _t="${_t%%[\"\']*}${_t#*[\"\']}" ;;
-            *) break ;;
-          esac
-        done
+        _t=$(_gd_unquote "$tok")
         case "$_t" in '${HOME}'*) _t="\$HOME${_t#'${HOME}'}" ;; esac
         _t="${_t%/\*}"; _t="${_t%/}"
         case "$_t" in
@@ -331,6 +344,7 @@ _check_ask_segment() {
         case "$tok" in
           rm|-*) continue ;;
         esac
+        tok=$(_gd_unquote "$tok")
         case "$tok" in
           node_modules|dist|build|target|coverage|.next|.turbo|.cache|.venv|__pycache__|.pytest_cache) continue ;;
           */node_modules|*/node_modules/*|*/dist|*/dist/*|*/build|*/build/*|*/target|*/target/*) continue ;;
