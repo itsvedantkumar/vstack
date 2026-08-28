@@ -267,3 +267,40 @@ committed behavior — not reverted after the proof, and not something a test ha
 own. If a decision is being tracked as "the operator chose to run the fixed guard live," it was
 made by leaving it there after the fact, not before.
 
+## Follow-up: the guard reads heredoc bodies, and that is deliberate (RICK, 2026-08-28)
+
+Measured while writing the commit message for the quote-normalisation fix. `git commit -F -` with a
+heredoc whose body quoted `rm -rf $HOME/*` was denied by the guard. Not a regression from that
+change: `rm -rf ~/*` inside a heredoc body behaved the same way before it.
+
+The obvious reading is a false positive. A heredoc body is data, not a command, so scanning it
+prompts on text that deletes nothing. The reason it stays is what happens if you exempt bodies:
+
+    bash <<EOF        sh <<EOF        python - <<EOF        ssh host <<EOF
+    rm -rf /
+    EOF
+
+Every one of those is a heredoc body that IS executed. Exempting bodies wholesale turns the guard
+off for anyone who types four extra characters. Exempting them only when the receiving command is
+not an interpreter means maintaining a list of interpreters, which is the same enumerate-the-
+spellings trap the `${HOME}` fix above removed: the list is wrong the moment someone reaches for
+`env`, `xargs`, `docker exec`, `nohup`, or a shell this list has not heard of.
+
+Measured, so the choice is made against evidence rather than caution. All of these still deny the
+trailing delete, which is what the exemption would have had to preserve:
+
+    cat <<'MY-DELIM' ... MY-DELIM ; rm -rf /      deny
+    cat <<FOO.BAR    ... FOO.BAR  ; rm -rf /      deny
+    cat <<   EOF     ... EOF      ; rm -rf /      deny
+    cat <<-	EOF     ... EOF      ; rm -rf /      deny
+    bash <<EOF       rm -rf /     EOF             deny
+
+`opencode/muse-spark-1.2-contributor-free` predicted the first four would let the trailing command
+through, on the grounds that the delimiter regex rejects `-` and `.` and that only one leading
+space is stripped. The parse does desync on those inputs. It cannot produce a bypass, because a
+desync leaves the remainder in the segment being scanned rather than removing it: the failure mode
+of this splitter is over-denial in every direction anyone has found.
+
+So the cost is real and narrow: writing *about* these commands needs `git commit -F <file>` rather
+than a heredoc. That is the price of the guard not having an interpreter allowlist, and it is
+cheaper than the guard having one.
