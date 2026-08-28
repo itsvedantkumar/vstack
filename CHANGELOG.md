@@ -17,14 +17,14 @@ exactly the same tree reached only the ask tier:
 
 Enumerating spellings loses to whoever thinks of a tenth one, so the guard now reduces the token
 before comparing: drop every quote wherever it sits, fold `${HOME}` onto `$HOME`, then remove one
-trailing `/*` or `/`. Check 23 gains those four as deny rows, watched red first, and is now 41
-commands across 3 tiers. `$HOME/Downloads` still asks, and `node_modules`, `./dist` and `/tmp/x`
+trailing `/*` or `/`. Check 23 gains those four as deny rows, watched red first, and its decision table
+is now 41 rows across 3 tiers. `$HOME/Downloads` still asks, and `node_modules`, `./dist` and `/tmp/x`
 still pass without a prompt: the tier that keeps the guard installed is unmoved.
 
 Found by `opencode/muse-spark-1.2-contributor-free`. Its four BusyBox portability claims against
 `failure-diagnose.sh` and `compat-canary.sh` were falsified by running the gate on a real Alpine
-with no coreutils, grep or sed installed: 53 checks ran, 2 legitimate skips, credential redaction
-green, and a payload digest byte-identical to the macOS one.
+with no coreutils, grep or sed installed: every check but the two that legitimately skip ran,
+credential redaction green, and a payload digest byte-identical to the macOS one.
 
 ### Asking for a ref that does not exist installed a different one and called it that
 
