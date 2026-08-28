@@ -6,6 +6,37 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.50.0 — 2026-08-28
 
+### One failed fetch retired `vstack update` on a pinned install
+
+`update` repairs the shape `VSTACK_REF=vX.Y.Z bash bootstrap.sh` leaves behind: a shallow clone
+whose only fetch refspec is the pinned tag, with no `refs/remotes/origin/main` to compare against.
+It widened the refspec, unshallowed, and if that one fetch did not work, gave up.
+
+It does not reliably work on git 2.54. With two shallow roots grafted, the pinned tag plus main's
+tip from a later shallow fetch, `--unshallow` rewrites `.git/shallow` and then fails re-reading
+it: `fatal: shallow file has changed since we read it`. The identical next fetch succeeds, because
+the second read sees the file the first pass wrote. Debian stable-slim and Ubuntu latest ship older
+git and never hit it, which is why container lane 26 failed on exactly one image of three, and why
+the 1.49.0 tag was withdrawn.
+
+Worse than the single attempt was what gated it. The fetch ran only `if [ -z "$repair_err" ]`,
+where `repair_err` held the *output* of `git config remote.origin.fetch`. One warning on that
+call and the repair was skipped in full, then the error below reported that origin/main could not
+be resolved after a repair that had never been attempted.
+
+Success is now origin/main resolving, not any one git command exiting 0. Four attempts in order,
+stopping at the first that resolves it: unshallow, unshallow again, plain fetch, then an explicit
+`+refs/heads/main:refs/remotes/origin/main` which does not need the shallow boundary dropped at
+all. The last one leaves the repo shallow, so `git merge --ff-only` further down may refuse for
+want of ancestry, and that refusal is a message the operator reads rather than a guess this code
+makes on their behalf.
+
+The regression test does not depend on having git 2.54. A shim ahead of git on PATH fails the
+first `--unshallow` and passes everything else through, so `install-matrix.sh update-shallow` runs
+offline on any git and tests the retry rather than the bug. Measured against the real repo in
+alpine:latest afterwards: `rc=1`, three `full diff,` headers, the non-gate filename present, and
+the checkout fully unshallowed.
+
 ### `rm -rf $HOME/*` was an ask, and `rm -rf ~/*` was a deny
 
 Same directory, same outcome, opposite verdict, decided by which way the operator happened to
@@ -103,6 +134,10 @@ comment states the word-splitting is required, and three called it a defect that
 `$SRC/claude/hooks/` aborts the overlay, which is the correct answer to a broken source tree.
 
 ## 1.49.0 — 2026-08-28
+
+Tagged and withdrawn. `container-matrix` failed lane 26 on alpine:latest and the release
+workflow deleted the tag, correctly: the gate rendered a real verdict against the commit.
+The commits below are on main and ship in 1.50.0, which carries the fix for that lane.
 
 ### `stat -f %m` measures the filesystem on Linux, and exits 0 doing it
 

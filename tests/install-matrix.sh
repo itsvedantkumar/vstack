@@ -785,6 +785,77 @@ if want update; then
   fi
 fi
 
+# --- vstack update recovers when the first unshallow fetch fails ---------------------------------
+# The pinned-install shape: `VSTACK_REF=vX.Y.Z bash bootstrap.sh` clones --depth 1 --branch <tag>,
+# which leaves a shallow repo whose only fetch refspec is that one tag. `update` repairs that by
+# widening the refspec and unshallowing. The repair was written as a single attempt whose failure
+# was terminal, and on git 2.54 the attempt is not reliably single: with two shallow roots grafted
+# (the pinned tag, plus main's tip from any later shallow fetch) the unshallow rewrites .git/shallow
+# and then fails its own re-read of it -- `fatal: shallow file has changed since we read it`. The
+# very next identical fetch succeeds. Measured 2026-08-28 in alpine:latest, git 2.54.0, against the
+# real repo; debian stable-slim and ubuntu latest ship older git and never hit it, which is why
+# container lane 26 failed on exactly one of three images.
+#
+# The failure is transient by construction, so this lane forces it rather than depending on a git
+# version: a shim ahead of git on PATH fails the FIRST `fetch --unshallow` and passes everything
+# else through. That makes the case reproducible on any git, and it tests the retry, not the bug.
+#
+# The assertion is that origin/main resolves and the command goes on to show what it would install.
+# Asserting "did not print the error" alone would pass on a command that died earlier for some
+# other reason -- the same shape as a non-zero exit standing in for a real check.
+if want update-shallow; then
+  if ! command -v git >/dev/null 2>&1; then
+    skip "vstack update recovers from a failed unshallow" "git not installed"
+  else
+    S="$ROOT/shal"; mkdir -p "$S/origin/claude"
+    git -C "$S/origin" init -q -b main
+    git -C "$S/origin" config user.email t@example.com; git -C "$S/origin" config user.name t
+    printf '{}\n' > "$S/origin/claude/settings.json"
+    printf 'one\n' > "$S/origin/f"; git -C "$S/origin" add -A; git -C "$S/origin" commit -qm one
+    git -C "$S/origin" tag -a v0 -m v0
+    printf 'two\n' > "$S/origin/f"; git -C "$S/origin" add -A; git -C "$S/origin" commit -qm two
+    # --branch <tag> --depth 1: shallow, and remote.origin.fetch names only the tag, so there is
+    # no refs/remotes/origin/main for `update` to compare against until it repairs one.
+    git clone -q --depth 1 --branch v0 "file://$S/origin" "$S/repo" 2>/dev/null
+    e=""
+    [ "$(git -C "$S/repo" rev-parse --is-shallow-repository)" = true ] \
+      || e="$e; fixture is not shallow, so the unshallow path is never reached"
+    git -C "$S/repo" rev-parse --verify -q origin/main >/dev/null 2>&1 \
+      && e="$e; fixture already has origin/main, so the repair path is never reached"
+
+    mkdir -p "$S/bin"
+    REALGIT=$(command -v git)
+    cat > "$S/bin/git" <<SHIM
+#!/usr/bin/env bash
+# Fail the first --unshallow fetch exactly the way git 2.54 does, then get out of the way.
+for a in "\$@"; do
+  if [ "\$a" = --unshallow ] && [ ! -e "$S/tripped" ]; then
+    : > "$S/tripped"
+    echo 'fatal: shallow file has changed since we read it' >&2
+    exit 128
+  fi
+done
+exec "$REALGIT" "\$@"
+SHIM
+    chmod +x "$S/bin/git"
+
+    out=$(PATH="$S/bin:$PATH" HOME="$S" VSTACK_DIR="$S/repo" "$SRC/bin/vstack" update < /dev/null 2>&1)
+    [ -e "$S/tripped" ] || e="$e; the shim never saw an --unshallow, so nothing was under test"
+    case "$out" in
+      *"could not resolve origin/main"*)
+        e="$e; gave up on the first failed unshallow instead of retrying" ;;
+    esac
+    git -C "$S/repo" rev-parse --verify -q origin/main >/dev/null 2>&1 \
+      || e="$e; origin/main still does not resolve after update ran"
+    printf '%s' "$out" | grep -qi 'incoming' \
+      || e="$e; never reached the review step that shows what it would install"
+    printf '%s' "$out" | grep -qiE 'terminal|--yes|aborted' \
+      || e="$e; recovered but did not then refuse unattended"
+    [ -z "$e" ] && ok "vstack update recovers from a failed unshallow" \
+      || bad "vstack update recovers from a failed unshallow" "${e#; }"
+  fi
+fi
+
 # --- recovering from a half-finished or damaged install ------------------------------------------
 # install.sh is not transactional: a crash, a full disk, or a kill mid-run leaves a partial tree.
 # The claim that re-running is safe has to hold from a damaged state, not only a clean one.

@@ -554,14 +554,45 @@ case "$CMD" in
       # further down needs real ancestry to prove main is a fast-forward of HEAD, which two
       # disconnected shallow histories cannot supply.
       upstream=origin/main
-      repair_err=$(git -C "$REPO" config remote.origin.fetch "+refs/heads/main:refs/remotes/origin/main" 2>&1)
-      if [ -z "$repair_err" ]; then
-        if [ "$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
-          repair_err=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head --unshallow origin 2>&1)
-        else
-          repair_err=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin 2>&1)
-        fi
-      fi
+      # What counts as success here is origin/main resolving, not any one git command exiting 0.
+      # Two things were wrong with reading it the other way round. The repair was gated on the
+      # config call producing NO OUTPUT AT ALL, so a single warning on its stderr skipped every
+      # fetch and the error below fired without an attempt ever having been made. And the one
+      # fetch that did run was treated as decisive.
+      #
+      # It is not decisive on git 2.54. With two shallow roots grafted -- a pinned tag from
+      # `--depth 1 --branch vX.Y.Z`, plus main's tip from any later shallow fetch -- `--unshallow`
+      # rewrites .git/shallow and then fails re-reading it: `fatal: shallow file has changed since
+      # we read it`. The identical next fetch succeeds, because the second read sees the file the
+      # first pass wrote. Measured 2026-08-28 in alpine:latest (git 2.54.0) against this repo;
+      # debian stable-slim and ubuntu latest ship older git and never hit it, which is why the
+      # container matrix failed on exactly one image of three and withdrew a release for it.
+      #
+      # So try in order and stop at the first attempt that leaves origin/main resolvable. The last
+      # attempt names the refspec explicitly and does not need the shallow boundary dropped, so it
+      # can resolve origin/main in a repo that stays shallow. That is worse than full history --
+      # `git merge --ff-only` below needs real ancestry and will say so -- but a diff the user can
+      # read and refuse beats an abort here, and the ancestry failure is reported rather than
+      # guessed at.
+      repair_err=$(git -C "$REPO" config remote.origin.fetch "+refs/heads/main:refs/remotes/origin/main" 2>&1) \
+        || repair_err="${repair_err:-could not widen remote.origin.fetch to track main}"
+      for attempt_ in unshallow unshallow plain refspec; do
+        git -C "$REPO" rev-parse --verify -q "$upstream" >/dev/null 2>&1 && break
+        err_=""
+        case "$attempt_" in
+          unshallow)
+            # Skipped on a complete repo: --unshallow there is a hard error, not a no-op.
+            if [ "$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+              err_=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head --unshallow origin 2>&1)
+            fi ;;
+          plain)
+            err_=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin 2>&1) ;;
+          refspec)
+            err_=$(git -C "$REPO" fetch -q --no-tags --no-prune --no-write-fetch-head origin \
+                     "+refs/heads/main:refs/remotes/origin/main" 2>&1) ;;
+        esac
+        if [ -n "$err_" ]; then repair_err="${repair_err:+$repair_err; }$err_"; fi
+      done
       if ! git -C "$REPO" rev-parse --verify -q "$upstream" >/dev/null 2>&1; then
         echo "vstack update: could not resolve $upstream even after repairing the fetch refspec" >&2
         [ -n "$repair_err" ] && echo "               git said: $repair_err" >&2
