@@ -361,8 +361,27 @@ jobs:
     runs-on: ubuntu-latest
     container: alpine:latest
     steps:
-      - name: Tools a slim image does not ship
-        run: apk add --no-cache bash git jq curl findutils coreutils grep sed nodejs npm
+      # BusyBox on purpose. This lane's whole reason to exist is that Alpine ships BusyBox
+      # applets rather than GNU coreutils, and `apk add coreutils grep sed findutils` -- which
+      # this step used to do -- replaces every one of them with the GNU version before the gate
+      # runs. That made the lane a second Linux/GNU run wearing an Alpine label: it could not
+      # have caught the v1.49.0 defect (`stat -f` means FILESYSTEM status on GNU and BusyBox,
+      # ignores %m, and exits 0 doing it), which is the exact class the comment claimed it was
+      # here for.
+      #
+      # Removing the net needs evidence that the net was not load-bearing, so both suites were
+      # run against a real clone inside alpine:latest with only these packages, then again in
+      # the same container with the GNU userland added:
+      #
+      #   install-matrix.sh   26 passed, 0 failed, 1 skipped   identical both ways
+      #   .claude/verify.sh   56 declared, 55 ran, 1 skipped   VERIFIED (skip: claude CLI)
+      #
+      # Measured 2026-08-28 at 292571e. shasum is genuinely absent here; every script that needs
+      # a digest already falls back to sha256sum, and that fallback is now exercised rather than
+      # assumed. If a future change really does need a GNU tool, install that ONE package and
+      # say which behaviour required it -- do not restore the blanket userland swap.
+      - name: Tools a slim image does not ship (BusyBox kept, deliberately)
+        run: apk add --no-cache bash git jq curl nodejs npm
 
       # check 29 ("shellcheck clean") skips without a validator on PATH, and a check that skips
       # on a lane specifically kept around to catch BusyBox-vs-GNU differences is a green
