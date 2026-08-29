@@ -3904,6 +3904,104 @@ else
   skip "every hook decides with a stripped environment" "jq or a git work tree is unavailable, and the hook census needs both"
 fi
 
+# --- 57. every reader of the trust store answers the gate's question ---------------------------
+# `vstack trust` writes one record and four things read it. Only one of them decides anything:
+# claude/hooks/verify-gate.sh, which runs a repo's own script unattended on Stop. The other three
+# report on that decision to a human -- and a report that disagrees with the decision it claims to
+# describe is worse than no report, because the operator acts on the report.
+#
+# They disagreed. Measured against the real programs, on the same sandbox, three ways:
+#
+#   scenario                          gate         doctor       statusline
+#   armed, hash current               trusted      trusted      trusted
+#   verify.sh edited since trusting   untrusted    untrusted    trusted
+#   record names a different file     untrusted    trusted      trusted
+#
+# statusline.sh looked only for the path and never hashed anything, so it rendered its green
+# "shield" on a checkout whose gate refuses to run -- on every turn, which makes it the most-read
+# of the three. Its own comment above the block says shield means "it is trusted, so Stop actually
+# blocks", and its perf note gave the reason: no subprocess. Measured here, shasum -a 256 over
+# this repository's verify.sh costs 9 ms against the 12 ms git call the same script already pays
+# every turn, so the saving bought a wrong answer for under one spawn.
+#
+# bin/doctor matched as a substring rather than as a whole line, so a record for
+# <path>/verify.sh.orig satisfied a query for <path>/verify.sh.
+#
+# claude/hooks/format.sh reads the same store to decide whether prettier may load a config-declared
+# plugin. It is excluded here on purpose: it displays no verdict, so there is no report to
+# disagree with, and reaching its lookup needs a plugin-declaring prettier config -- machinery
+# that would test prettier discovery, not trust agreement.
+#
+# The probe runs the three programs for real and compares their answers to the gate's. It asserts
+# agreement, not spelling: any of them may be rewritten however its author likes, and this check
+# only cares that it still lands where the gate lands. The armed row is the positive control --
+# without it, three readers hardwired to "untrusted" would agree perfectly and pass.
+if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1; }; then
+  c57_d=$(mktemp -d)
+  mkdir -p "$c57_d/repo/.claude" "$c57_d/repo/claude" "$c57_d/home/.config/agents"
+  printf '{}\n' > "$c57_d/repo/claude/settings.json"
+  printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
+  chmod 755 "$c57_d/repo/.claude/verify.sh"
+  c57_v="$(cd "$c57_d/repo/.claude" && pwd)/verify.sh"
+  c57_ts="$c57_d/home/.config/agents/verify-trust"
+  c57_hash(){
+    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else sha256sum "$1" | cut -d' ' -f1; fi
+  }
+  # Each reader reduced to the verdict it shows. The gate shows its verdict by refusing.
+  c57_gate(){
+    c57_o=$(printf '{"session_id":"c57"}' \
+      | env HOME="$c57_d/home" CLAUDE_PROJECT_DIR="$c57_d/repo" bash claude/hooks/verify-gate.sh 2>&1)
+    case "$c57_o" in *"skipped untrusted"*) echo untrusted ;; *) echo trusted ;; esac
+  }
+  c57_doctor(){
+    env HOME="$c57_d/home" VSTACK_DIR="$c57_d/repo" bash bin/doctor --json 2>/dev/null \
+      | jq -r '.trust.state // "NO-VERDICT"'
+  }
+  c57_statusline(){
+    c57_o=$(printf '{"workspace":{"current_dir":"%s"}}' "$c57_d/repo" \
+      | env HOME="$c57_d/home" bash claude/statusline.sh 2>&1)
+    case "$c57_o" in
+      *shield*)      echo trusted ;;
+      *"gate open"*) echo untrusted ;;
+      *)             echo NO-VERDICT ;;
+    esac
+  }
+  c57_errs=""
+  c57_probe(){ # $1 scenario name, $2 what the gate must say for this scenario to be meaningful
+    c57_g=$(c57_gate)
+    if [ "$c57_g" != "$2" ]; then
+      c57_errs="$c57_errs\n  $1: the gate itself answered '$c57_g' where this scenario needs '$2' -- the fixture no longer sets up what it claims to"
+      return
+    fi
+    for c57_r in doctor statusline; do
+      c57_a=$("c57_$c57_r")
+      [ "$c57_a" = "$c57_g" ] \
+        || c57_errs="$c57_errs\n  $1: $c57_r reports '$c57_a' where the gate decides '$c57_g'"
+    done
+  }
+  # armed: the positive control. Readers stuck on one answer pass every negative row.
+  printf '%s  %s\n' "$(c57_hash "$c57_v")" "$c57_v" > "$c57_ts"
+  c57_probe "armed" trusted
+  # the script changed after it was trusted -- the case the trust store exists to catch
+  printf 'x\n' >> "$c57_d/repo/.claude/verify.sh"
+  c57_probe "edited since trusting" untrusted
+  # a record for a neighbouring path, which a substring match accepts and a line match does not
+  printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
+  printf '%s  %s.orig\n' "$(c57_hash "$c57_v")" "$c57_v" > "$c57_ts"
+  c57_probe "record names another file" untrusted
+  rm -rf "$c57_d"
+  if [ -n "$c57_errs" ]; then
+    bad "every reader of the trust store answers the gate's question" \
+      "$(printf 'bin/doctor and claude/statusline.sh report on a decision claude/hooks/verify-gate.sh makes:%b' "$c57_errs")"
+  else
+    ok "every reader of the trust store answers the gate's question (2 reader(s) x 3 scenario(s); format.sh excluded, it shows no verdict)"
+  fi
+else
+  skip "every reader of the trust store answers the gate's question" \
+    "jq, or both shasum and sha256sum, are unavailable -- the probe needs jq to read doctor's verdict and a hasher to arm the store"
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

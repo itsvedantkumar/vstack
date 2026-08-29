@@ -4,6 +4,51 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.51.0 — 2026-08-29
+
+### Two of the three things that report on the trust store disagreed with it
+
+`vstack trust` writes one record and four things read it. Only one of them decides anything:
+`claude/hooks/verify-gate.sh`, which runs a repository's own script unattended on Stop. The other
+three report on that decision to a human, and two of them reported something else.
+
+Measured against the real programs on one sandbox store:
+
+| store | verify-gate.sh | bin/doctor | claude/statusline.sh |
+|---|---|---|---|
+| armed, hash current | trusted | trusted | trusted |
+| verify.sh edited since trusting | untrusted | untrusted | **trusted** |
+| record names a neighbouring file | untrusted | **trusted** | **trusted** |
+
+`statusline.sh` looked for the path and never hashed anything, so a `verify.sh` edited after
+`vstack trust` ran still rendered its green `shield` while the gate skipped that repository. It
+renders on every turn, which makes it the most-read of the three, and its own comment said shield
+means "it is trusted, so Stop actually blocks". The reason it did not hash was cost: no subprocess
+on a per-turn render. Measured here, `shasum -a 256` over this repository's `verify.sh` takes 9 ms
+against the 12 ms `git` call the same script already makes, so the saving bought a wrong answer
+for less than one spawn.
+
+`bin/doctor` matched with `grep -qF` where the gate uses `-qxF`, so a record for
+`<path>/verify.sh.orig` contains the query for `<path>/verify.sh` and satisfied it.
+
+Both now make the gate's query. `claude/hooks/format.sh` already did.
+
+### Check 57, every reader of the trust store answers the gate's question
+
+Runs the three programs for real against one store, three ways, and fails when any of them lands
+somewhere the gate does not. It asserts agreement rather than spelling, so any of them may be
+rewritten freely. The armed row is the positive control: without it, readers hardwired to
+`untrusted` would agree on both negative rows and pass. `format.sh` is excluded and the check says
+why — it shows no verdict, so there is no report to disagree with.
+
+### An older install's credential export was removed by code nothing tested
+
+`install.sh` states that it also takes out the `set -a`/`secrets.env` line earlier versions wrote,
+so the fix reaches machines that already have it. Only the half that proves the installer does not
+*add* the line had a test. The new `secrets-removal` lane in `tests/install-matrix.sh` seeds the
+line into two rc files of a real installed home and requires both halves: `doctor` classifies it
+as vstack's own regression, and a re-run deletes it. Falsified in both directions before landing.
+
 ## 1.50.0 — 2026-08-28
 
 ### Check 56 recognised bash 3.2's wording for an aborted script, and no other

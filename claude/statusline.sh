@@ -90,10 +90,22 @@ fi
 #   open    the repo has a gate but it is not armed -- a gate nobody trusts does not run
 #   (none)  no gate here at all, and the statusline says nothing rather than implying safety
 #
-# Cheap on purpose: two stat calls, no subprocess, because this renders on every turn.
+# This asked for the path and nothing else. The gate keys on the hash as well, so a verify.sh
+# edited after `vstack trust` ran still rendered shield while the gate skipped it -- the exact
+# "only ever says protected" shape the paragraph above rejects, on the indicator a reader sees
+# most often. The reason given was cost: no subprocess, because this renders on every turn.
+# Measured on this repository's own verify.sh, shasum -a 256 costs 9 ms against the 12 ms git
+# call three lines up, so the saving bought a wrong answer for less than one spawn. Same query
+# as claude/hooks/verify-gate.sh and claude/hooks/format.sh make, and .claude/verify.sh check 57
+# runs all three against one store and fails if any of them lands somewhere else.
 if [ -f "$cdir/.claude/verify.sh" ]; then
   _tr="$HOME/.config/agents/verify-trust"
-  if [ -f "$_tr" ] && grep -qF "$cdir/.claude/verify.sh" "$_tr" 2>/dev/null; then
+  _tv="$(cd "$cdir/.claude" 2>/dev/null && pwd)/verify.sh"
+  if command -v shasum >/dev/null 2>&1; then _th=$(shasum -a 256 "$_tv" 2>/dev/null | cut -d' ' -f1)
+  else _th=$(sha256sum "$_tv" 2>/dev/null | cut -d' ' -f1); fi
+  # No hasher means nothing on this machine can tell trusted from stale, and the honest render
+  # is the one that claims less.
+  if [ -n "$_th" ] && grep -qxF "$_th  $_tv" "$_tr" 2>/dev/null; then
     out="${out} ${D}·${R} ${G}shield${R}"
   else
     out="${out} ${D}·${R} ${Y}gate open${R}"

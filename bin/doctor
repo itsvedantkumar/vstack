@@ -578,7 +578,11 @@ if [ -n "$R" ]; then
       TRUST_DETAIL="no shasum/sha256sum on PATH -- could not hash $_tvp"
     elif [ ! -f "$_tf" ]; then
       TRUST_STATE="untrusted"; TRUST_DETAIL="$_tf does not exist -- the verify-gate has never been armed for this checkout"
-    elif grep -qF "$_th  $_tvp" "$_tf" 2>/dev/null; then
+    # -qxF, not -qF: the gate matches the whole line, so a substring query answers a looser
+    # question than the one being reported on. A record for <path>/verify.sh.orig contains
+    # "<hash>  <path>/verify.sh" and satisfied the substring, so doctor read "trusted" off a
+    # store the gate refuses to run against.
+    elif grep -qxF "$_th  $_tvp" "$_tf" 2>/dev/null; then
       TRUST_STATE="trusted"; TRUST_DETAIL="$_tvp hash matches $_tf (recorded by install.sh)"
     else
       TRUST_STATE="untrusted"; TRUST_DETAIL="$_tvp not recorded in $_tf at its current hash -- stale trust, or install.sh has not run from here"
