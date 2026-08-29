@@ -335,6 +335,7 @@ true.
 
 - [How skills fire](docs/how-skills-fire.md) — the routing mechanism and what was measured
 - [Checks that inherit their answer](docs/checks-that-inherit-their-answer.md) — the failure shape behind every fake green found here
+- [Releasing this repository](docs/releasing-this-repo.md) — why three harnesses disagree between a version bump and its tag, and the order that satisfies all of them
 - [What this actually does](docs/what-this-actually-does.md) — every claim sorted into measured, mechanism-only, and unproven, each dated and sourced
 - [Checks that measure nothing](docs/research/fake-greens-2026-08.md) — the whole evidence base in one paper
 - [Do harnesses help?](docs/research/do-harnesses-help.md) — the null result, in full
