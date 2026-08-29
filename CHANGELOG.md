@@ -4,6 +4,42 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.52.0 — 2026-08-29
+
+### `vstack explain` printed a by-family breakdown with no families in it, on macOS only
+
+The ownership-receipt section reports how many paths vstack claims and breaks them down by
+family. The breakdown came from a `sed` using BRE alternation:
+
+```
+sed -n 's#.*/\(hooks\|agents\|commands\|skills\)/.*#\1#p' "$EX_REC"
+```
+
+`\|` is a GNU extension. BSD sed matches nothing at all with it, so on macOS the command printed
+
+```
+3 path(s) recorded as installed by vstack. by family:
+  1 other (CLAUDE.md, statusline.sh, bin/*, conductor settings, ...)
+```
+
+A header promising a breakdown, an empty breakdown, and directly below it an "other" count that
+was right — because the very next line uses `grep -vE`. Two adjacent lines written in two dialects
+and disagreeing on one platform. Measured on `/usr/bin/sed` against a three-line fixture receipt: the BRE form
+returns nothing at all, the `-nE` form returns a counted line for each family present in it.
+
+The existing test asserted the total and the "other" count, both produced by grep, and never the
+lines the sed produced. It passed on macOS against a breakdown that was never printed. It now
+requires every family it plants to come back named. A repo-wide sweep of every tracked file found
+no other sed relying on BRE alternation.
+
+### An unreadable run log rendered as no run log
+
+`vstack explain`'s run-log section piped `tail` into `jq` with `2>/dev/null` and never read the
+exit code, so a log truncated by a killed process printed the section header with nothing under
+it — visually identical to "no runs yet", one line below a header promising recent entries. The
+section already knew how to say UNKNOWN when the file is absent; it now says UNREADABLE when the
+file is present and will not parse, and still prints whichever lines did parse.
+
 ## 1.51.0 — 2026-08-29
 
 ### Two of the three things that report on the trust store disagreed with it

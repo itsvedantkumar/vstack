@@ -304,13 +304,21 @@ $h/.claude/agents/code-reviewer.md
 $h/.claude/CLAUDE.md
 REC
   out=$(env -i HOME="$h" PATH="$MINPATH" "$v" explain 2>&1)
-  if printf '%s\n' "$out" | grep -q '^3 path(s) recorded' \
-     && printf '%s\n' "$out" | grep -q '1 other'; then
-    ok "explain reads the ownership receipt verbatim (3 paths, 1 uncategorised)"
-  else
-    bad "explain reads the ownership receipt verbatim" "output:
+  # The total and the uncategorised count are produced by grep; the per-family breakdown
+  # between them is produced by a sed. Asserting only the two grep-made lines leaves the sed
+  # unmeasured, and the sed is the half that reads a receipt path as a pattern. Every family
+  # planted above has to come back named, or the header is counting paths the body cannot show.
+  e=""
+  printf '%s\n' "$out" | grep -q '^3 path(s) recorded' || e="$e; the receipt total was not reported"
+  printf '%s\n' "$out" | grep -q '1 other'             || e="$e; the uncategorised path was not counted"
+  for fam in hooks agents; do
+    printf '%s\n' "$out" | grep -qE "^ +1 $fam\$" \
+      || e="$e; the $fam path was recorded but never appeared in the by-family breakdown"
+  done
+  [ -z "$e" ] && ok "explain reads the ownership receipt verbatim (3 paths, 2 families, 1 uncategorised)" \
+    || bad "explain reads the ownership receipt verbatim" "${e#; }
+output:
 $out"
-  fi
 }
 
 # Trusted-scripts section: exact opposite states, both read from the same file this script also
@@ -349,6 +357,33 @@ case_explain_surfaces_recent_runlog() {
     bad "explain surfaces a run-log entry self-test just wrote" "output:
 $out"
   fi
+}
+
+# A run log that exists but cannot be parsed is a third state, and it used to render as the
+# second. `tail | jq ... 2>/dev/null` discards jq's stderr and never reads its exit code, so a
+# truncated or hand-edited log printed the section header with nothing under it -- visually
+# identical to "no entries yet" and one line below a header promising recent entries. The
+# section already knows how to say UNKNOWN when there is no log; it has to say something when
+# there is one it cannot read.
+case_explain_runlog_unreadable_is_not_empty() {
+  if ! command -v jq >/dev/null 2>&1; then skip "explain reports an unreadable run log" "jq not installed"; return; fi
+  v=$(standalone_vstack explain-runlog-bad)
+  h="$ROOT/home-explain-runlog-bad"
+  mkdir -p "$h/.config/agents"
+  # A log that was being appended to when the process died: last line truncated mid-object.
+  printf '%s\n' '{"command":"self-test","outcome":"pass","timestamp":"2026-08-29T00:00:00Z","sha":"deadbeefcafe","declared":5,"ran":5,"skipped":0}' \
+                 '{"command":"verify","outcome":"pass","timest' > "$h/.config/agents/vstack-runlog.jsonl"
+  out=$(env -i HOME="$h" PATH="$MINPATH" "$v" explain 2>&1)
+  body=$(printf '%s\n' "$out" | sed -n '/^== recent local run-log entries/,$p' | tail -n +2)
+  e=""
+  printf '%s\n' "$body" | grep -q 'UNREADABLE' \
+    || e="$e; the section did not say the log could not be read"
+  printf '%s\n' "$body" | grep -q '"command":"self-test"' \
+    || e="$e; the line that does parse was dropped along with the one that does not"
+  [ -z "$e" ] && ok "explain reports an unreadable run log instead of an empty section" \
+    || bad "explain reports an unreadable run log" "${e#; }
+section body:
+$body"
 }
 
 # --- recover: install.sh's transactional-recovery story --------------------------------------
@@ -490,7 +525,7 @@ $out3"
   fi
 }
 
-cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog recover_no_marker_is_clean recover_dry_run_touches_nothing recover_yes_restores_and_is_idempotent recover_refuses_on_backup_mismatch recover_refuses_malformed_or_missing_marker"
+cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog explain_runlog_unreadable_is_not_empty recover_no_marker_is_clean recover_dry_run_touches_nothing recover_yes_restores_and_is_idempotent recover_refuses_on_backup_mismatch recover_refuses_malformed_or_missing_marker"
 if [ $# -gt 0 ]; then cases="$*"; fi
 for c in $cases; do
   "case_$c"

@@ -287,7 +287,11 @@ cmd_explain() {
   if [ -f "$EX_REC" ]; then
     EX_N=$(grep -c . "$EX_REC" 2>/dev/null || echo 0)
     echo "$EX_N path(s) recorded as installed by vstack. by family:"
-    sed -n 's#.*/\(hooks\|agents\|commands\|skills\)/.*#\1#p' "$EX_REC" | sort | uniq -c | sed 's/^/  /'
+    # sed -nE, not BRE: \| alternation is a GNU extension. BSD sed matches nothing at all with
+    # it, so on macOS this printed "N path(s) recorded ... by family:" and then an empty
+    # breakdown, directly above an "N other" line the grep -E below got right. Two adjacent
+    # lines disagreeing, on one platform, because they were written in two dialects.
+    sed -nE 's#.*/(hooks|agents|commands|skills)/.*#\1#p' "$EX_REC" | sort | uniq -c | sed 's/^/  /'
     EX_OTHER=$(grep -vE '/(hooks|agents|commands|skills)/' "$EX_REC" | grep -c .)
     [ "$EX_OTHER" -gt 0 ] && echo "  $EX_OTHER other (CLAUDE.md, statusline.sh, bin/*, conductor settings, ...)"
   else
@@ -366,7 +370,19 @@ cmd_explain() {
 
   echo "== recent local run-log entries (not attestations -- unsigned, editable, local only) =="
   if [ -f "$RUNLOG" ] && command -v jq >/dev/null 2>&1; then
-    tail -n 5 "$RUNLOG" | jq -c '{command,outcome,timestamp,sha:(if .sha=="UNKNOWN" then .sha else .sha[0:10] end),declared,ran,skipped}' 2>/dev/null
+    # jq's exit code, not just its stdout. `2>/dev/null` with the status unread turned a log
+    # this could not parse -- truncated by a killed process, or hand-edited -- into an empty
+    # body under a header promising recent entries, which reads as "no runs yet". A file that
+    # exists and cannot be read is a third state and has to say so. Whatever did parse is still
+    # printed: a partial answer is worth more than none, as long as it is not passed off as all.
+    _rl_err=$(mktemp)
+    tail -n 5 "$RUNLOG" | jq -c '{command,outcome,timestamp,sha:(if .sha=="UNKNOWN" then .sha else .sha[0:10] end),declared,ran,skipped}' 2>"$_rl_err"
+    _rl_rc=$?
+    if [ "$_rl_rc" -ne 0 ]; then
+      echo "UNREADABLE -- jq exited $_rl_rc reading $RUNLOG; any lines above are the ones that parsed."
+      [ -s "$_rl_err" ] && sed 's/^/  /' "$_rl_err" | head -3
+    fi
+    rm -f "$_rl_err"
   else
     echo "UNKNOWN -- no run log yet at $RUNLOG (run 'vstack self-test' or 'vstack verify' to create one), or jq not installed"
   fi
