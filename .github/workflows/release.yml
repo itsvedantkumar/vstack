@@ -95,20 +95,37 @@ jobs:
           # when this runs. Wait for them rather than refusing, because the refusal is not free:
           # it used to delete the tag, and even now it costs a manual re-dispatch. 25 minutes
           # covers this repo's slowest lane (verify's falsifiability sweep) with margin.
-          # Derived from the workflow it waits for, not chosen. The last eight completed
-          # `verify` runs took 27, 27, 28, 36, 52, 52, 59 and 70 minutes -- the falsifiability
-          # suite dominates and grows with every check added. 1500s is 25 minutes, which is
-          # BELOW ALL EIGHT: this budget had never once been long enough, so every release
-          # timed out undecided and needed a manual re-dispatch. Measured on v1.47.0, which
-          # sat at "1 required check still undecided" for the entire 1500s and then gave up
-          # while the run it was waiting for was 20 minutes from finishing.
+          # Derived from the workflow it waits for, not chosen. The falsifiability suite
+          # dominates `verify` and grows with every row added: each row breaks the tree, runs
+          # the WHOLE gate, requires it to name the check, and restores. One gate run is 84s
+          # measured locally and about 60s on a runner, so the suite costs a runner minute per
+          # row and the job's duration is roughly the row count in minutes.
           #
-          # 5400s is 90 minutes, comfortably above the 70-minute worst case, and well inside
+          # 1500s was 25 minutes against runs of 27, 27, 28, 36, 52, 52, 59 and 70 -- below all
+          # eight, so every release timed out undecided and needed a manual re-dispatch.
+          #
+          # 5400s replaced it and was correct for one release. The last seven successful
+          # `verify` runs took 63, 81, 82, 85, 89, 85 and 93 minutes: 5400s is 90 minutes, which
+          # is BELOW TWO OF THE LAST THREE. v1.51.0 hit it exactly -- resolve gave up at
+          # "PENDING verify: status=in_progress (after waiting 5400s)" eight seconds before the
+          # run it was waiting for went green, and the tag sat unpublished until a manual
+          # re-dispatch. Nothing was deleted, because an undecided verdict withholds rather
+          # than cleans up, but the release still did not happen on its own.
+          #
+          # 7200s is 120 minutes: 27 minutes over the measured 93-minute worst case, which at a
+          # minute per row is about 27 more falsifiability rows of headroom, and well inside
           # GitHub's 360-minute job ceiling. The cost is a runner minute per minute spent
-          # waiting; that is the price of not publishing over an unread verdict, and it is
-          # only paid when a release is actually in flight. Re-derive this from the numbers
-          # above if the suite grows again rather than nudging it.
-          REQUIRE_CHECKS_WAIT_SECONDS: "5400"
+          # waiting, paid only while a release is in flight; that is the price of not publishing
+          # over an unread verdict.
+          #
+          # This number goes stale silently. Nothing compares it to how long `verify` actually
+          # takes -- both times it has been wrong, it was wrong because the suite grew and the
+          # comment did not. Re-derive it from the real durations, not from this comment:
+          #   gh run list --workflow verify.yml --limit 14 --json databaseId,conclusion \
+          #     --jq '.[]|select(.conclusion=="success")|.databaseId' \
+          #   | while read r; do gh run view "$r" --json jobs \
+          #       --jq '.jobs[]|select(.name=="verify")|"\(.startedAt) \(.completedAt)"'; done
+          REQUIRE_CHECKS_WAIT_SECONDS: "7200"
         run: |
           # When origin first had this tag, as closely as this workflow can observe it. On the
           # ordinary path -- a tag push -- this run was CREATED BY that push, so its created_at
