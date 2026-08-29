@@ -32,6 +32,16 @@ lines the sed produced. It passed on macOS against a breakdown that was never pr
 requires every family it plants to come back named. A repo-wide sweep of every tracked file found
 no other sed relying on BRE alternation.
 
+### A failure message named the README without reading it
+
+`bin/doctor`'s release-reachability check reads the declared version from
+`claude/.claude-plugin/plugin.json` and asks origin whether that tag exists. Its failure message
+said the version was "declared and pinned in the README" -- borrowing check 24's conclusion
+without running check 24. In the window between a version bump and its tag, which is exactly when
+this check fires, the two disagree: the manifests said v1.52.0 while the README still pinned
+v1.51.0, and the message named a version the README did not contain. It now reports what it
+measured.
+
 ### An unreadable run log rendered as no run log
 
 `vstack explain`'s run-log section piped `tail` into `jq` with `2>/dev/null` and never read the

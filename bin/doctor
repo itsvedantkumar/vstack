@@ -1007,7 +1007,12 @@ else
     elif [ -n "$_out" ]; then
       ok "declared release is fetchable (v$_rv on origin)"
     else
-      bad "declared release is fetchable" "v$_rv is declared and pinned in the README but is not on origin — the documented install URL 404s (git -C $_rr push --follow-tags)"
+      # "declared" is claude/.claude-plugin/plugin.json, read four lines up. The README's pin is
+      # NOT read here, and this message used to assert it was pinned there too -- borrowing check
+      # 24's conclusion without running check 24. When the two actually disagree, as they do in
+      # the window between a bump and its tag, the message named a version the README did not
+      # contain. Say what was measured: a declared version with no tag on origin.
+      bad "declared release is fetchable" "v$_rv is declared by claude/.claude-plugin/plugin.json but has no tag on origin, so any install URL built from it 404s (git -C $_rr push --follow-tags)"
     fi
   fi
 fi

@@ -12,7 +12,7 @@
   },
   "derived_at": {
     "head": "55f5be1f4dadedb9373cc3a53d1d86a92bb35ae7",
-    "payload_digest": "eacae3acaf49a8d9ebcfa6d493775e1dba83073af3ba06c1911b461b899b19c1",
+    "payload_digest": "b7c44fcf29091836aa8f4be0768535f29b0ce5170e03cdf32ae010f8dad3f821",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
