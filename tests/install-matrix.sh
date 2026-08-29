@@ -958,6 +958,42 @@ if want no-ambient-secrets; then
     || bad "credentials are not exported into shells" "${e#; }"
 fi
 
+# --- the export line vstack used to write is removed, not just no longer added ----------------
+# The lane above proves install.sh does not ADD the line. It cannot see the other half: the
+# comment in install.sh promises it also takes OUT the line earlier versions wrote, so that the
+# fix reaches machines that already have it and not only new ones. That promise is gated on a
+# grep whose pattern was written for one regex dialect, and a pattern that never matches turns
+# the whole removal into a no-op that reports success. Seed the exact line an older install
+# wrote, then require both halves: doctor calls it vstack's own regression, and a re-run of the
+# installer deletes it.
+if want secrets-removal; then
+  H="$ROOT/ambrm"; mkdir -p "$H"
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  e=""
+  LEGACY='[ -f "$HOME/.config/agents/secrets.env" ] && set -a && . "$HOME/.config/agents/secrets.env" && set +a'
+  for rc in .zshenv .bashrc; do
+    printf '%s\n' "$LEGACY" >> "$H/$rc"
+  done
+  # doctor must read it as vstack's own line -- a regression it fails on -- not as something the
+  # operator wrote, which only earns a note saying it is probably not needed.
+  dout=$(HOME="$H" VSTACK_DIR="$SRC" "$SRC/bin/doctor" 2>&1)
+  grep -q 'credentials exported to shells' <<<"$dout" \
+    || e="$e; doctor did not recognise its own export line as a regression"
+  grep -q 'vstack exports no credentials to shells' <<<"$dout" \
+    && e="$e; doctor reported the shells clean while the line was sitting in two rc files"
+  # and the installer must take it back out
+  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  for rc in .zshenv .bashrc; do
+    grep -qF "$LEGACY" "$H/$rc" 2>/dev/null \
+      && e="$e; re-running the installer left the export line in $rc"
+  done
+  # removing it must not cost the rc file anything else it was carrying
+  grep -q 'ENABLE_PROMPT_CACHING_1H' "$H/.zshenv" 2>/dev/null \
+    || e="$e; the parity env block went missing with the export line"
+  [ -z "$e" ] && ok "an older install's export line is removed on re-run" \
+    || bad "an older install's export line is removed on re-run" "${e#; }"
+fi
+
 # --- uninstall leaves nothing of vstack behind -------------------------------------------------
 # An external audit found that a fresh install followed by a fresh uninstall left six hook
 # commands pointing at scripts that had just been deleted, plus vstack's model policy and all
