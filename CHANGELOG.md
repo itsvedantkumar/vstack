@@ -4,6 +4,75 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.53.0 — 2026-08-29
+
+### Two readers of the trust store reported "trusted" on a checkout the gate refuses to run
+
+`vstack trust` records more than `.claude/verify.sh`. It records every `install.sh`, `overlay.sh`,
+`uninstall.sh` and `bootstrap.sh` at the repo root, plus every path verify.sh sources, because
+verify.sh is the entry point and not the blast radius. `claude/hooks/verify-gate.sh` re-hashes all
+of them before it lets anything run.
+
+`bin/doctor` and `claude/statusline.sh` hashed the entry point alone. Append one line to
+`install.sh` and the gate refused with `install.sh changed since it was trusted`, while doctor
+printed `trusted` and the statusline rendered its green `shield` on every turn. The report and the
+decision it claims to describe disagreed, and the operator reads the report.
+
+Check 57 could not see it: its fixture only ever wrote `.claude/verify.sh`, so all three programs
+were being asked about the one file they agreed on. It now also plants a recorded companion, in
+both directions (recorded and unchanged must still read trusted). Its gate classifier matched only
+the `skipped untrusted` refusal and read the `refused to run` refusal as trusted, which is how a
+disagreement got reported as a broken fixture.
+
+Both readers now re-check the gate's whole recorded set, skipping absent files exactly as the gate
+does. One extra spawn regardless of file count: `shasum` takes many operands and emits the store's
+own format, so one `grep -vxF` against the store lists precisely the drifted files.
+
+### A failed timestamp lookup could delete the release tag
+
+`.github/workflows/release.yml` read the candidate run's `created_at` with
+`$(gh api ... 2>/dev/null || true)`. That timestamp is what tells a pre-tag conclusion apart from a
+live verdict. A transient failure of that one unretried call emptied it, and the 2026-08-27
+incident shape then resolved `FAILED` instead of `STALE`, which returns `DELETE` and force-pushes
+`git push origin :refs/tags/$TAG`. The fix for that incident had a path straight back into it.
+The lookup now follows the convention `require-checks-green.sh` already used two files over: a
+failed read is `UNDECIDED`, exit 2, tag kept, and the log names the call that failed.
+
+`should-delete-candidate-tag.sh` also modelled only `container-matrix = failure`. A job hitting its
+own `timeout-minutes: 45` reports `cancelled` and fell through to a `no required job failed` line
+that was not true. The verdict stays KEEP, deliberately: a timeout is an ambiguous non-answer, not
+evidence the images are broken. Only the log was lying.
+
+### The replay log recorded dispatch descriptions verbatim
+
+`claude/hooks/dispatch-counter.sh` byte-counts prompt and result because a replay log full of
+verbatim text is a place secrets land. `description` was carved out on the reasoning that it is a
+label, not content. Nothing enforced that: it is unconstrained free text on the Task schema, and a
+dispatch described as `rotate credential sk-ant-...` put the credential in the log. It is now
+`description_bytes`, like its two neighbours. Redaction was rejected: any pattern list is
+incomplete, and an incomplete filter ships false confidence where a byte count cannot leak at all.
+
+### `uninstall.sh` silently removed no MCP servers when `$HOME` contained `&` or `|`
+
+Third instance of one defect. `$HOME` was interpolated into a `sed` *replacement*, where `&`
+expands to the match and `|` was the delimiter. A `|` made sed exit 1, the downstream
+`jq -s ... 2>/dev/null` parsed nothing, and vstack's MCP entries stayed registered while uninstall
+reported success. Fixed the way `install.sh:841` and `bin/doctor` already were.
+
+The first version of that test passed with the bug still in place: this machine has the real
+`claude` binary on PATH, so `install.sh`'s plugin probe pre-creates `~/.claude.json`, and
+uninstall's unrelated whole-file restore wiped the MCP servers no matter what the sed did. The
+lane now strips `claude` from PATH so the incremental removal path is the only one running.
+
+### A component family with no derivation was checked by nothing
+
+`tests/inventory-contract.sh` dropped any `components` family lacking a
+`regeneration.derivations` entry with a bare `continue`, and drove its member checks from twelve
+hardcoded names. A planted family with `floor: 999` and a bogus member list still produced
+every check clean and exit 0. The floor loop now fails and names the family, and the member
+checks are driven from `.components | keys[]`, so a new family is covered by construction rather
+than by remembering two separate registrations.
+
 ## 1.52.0 — 2026-08-29
 
 ### `vstack explain` printed a by-family breakdown with no families in it, on macOS only

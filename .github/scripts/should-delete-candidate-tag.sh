@@ -39,11 +39,31 @@ resolve="$1"
 gate="$2"
 matrix="$3"
 
-# The container matrix has no undecided state to carve out: it either ran the images or it did
-# not, and a failure there is a decision. Checked first because it is unconditional.
+# container-matrix's `result` is one of success | failure | cancelled | skipped (GitHub Actions'
+# fixed set for a `needs.<job>.result`). Only `failure` is treated as a decision against the
+# tag -- checked first because it is unconditional. The other three are enumerated below rather
+# than left to fall through unnamed:
+#
+#   cancelled  the job hit its own `timeout-minutes: 45`, or someone cancelled the run, or a
+#              sibling required job failing triggered GitHub's default cancel-in-progress. None
+#              of those are the matrix ANSWERING that the images are broken -- a timeout is the
+#              same kind of non-answer require-checks-green.sh's own gh api failure already
+#              refuses to treat as a decision (see that script's fetch_runs). KEEP is correct,
+#              same as any other undecided gate; the defect worth fixing is that the generic
+#              "no required job failed" message on the fallback path was untrue for this case --
+#              a required job plainly did not succeed. Named explicitly below so the run's log
+#              says why publish did not happen instead of implying every required job was green.
+#   skipped    container-matrix `needs: resolve`, so it is only skipped when resolve itself did
+#              not succeed -- already covered by the `resolve = failure` branch below, since
+#              resolve and matrix skip/fail together in that case.
 if [ "$matrix" = failure ]; then
   echo "DELETE  container-matrix failed -- the images this tag claims to support did not build"
   exit 0
+fi
+
+if [ "$matrix" != success ] && [ "$resolve" != failure ]; then
+  echo "KEEP    container-matrix=${matrix} (not success, not failure) -- no decision against this tag, but nothing published either; publish requires container-matrix to succeed and it did not, so investigate why (timeout? cancelled run?) and re-dispatch if the images are fine"
+  exit 10
 fi
 
 if [ "$resolve" = failure ]; then

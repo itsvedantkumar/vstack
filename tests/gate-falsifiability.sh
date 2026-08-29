@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -287,6 +287,8 @@ files_for(){ case "$1" in
   56b) printf 'claude/hooks/format.sh' ;;
   57)  printf 'bin/doctor' ;;
   57b) printf 'claude/statusline.sh' ;;
+  57c) printf 'bin/doctor' ;;
+  57d) printf 'claude/statusline.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -374,6 +376,8 @@ label_for(){ case "$1" in
   56b) printf 'every hook decides with a stripped environment' ;;
   57)  printf "every reader of the trust store answers the gate's question" ;;
   57b) printf "every reader of the trust store answers the gate's question" ;;
+  57c) printf "every reader of the trust store answers the gate's question" ;;
+  57d) printf "every reader of the trust store answers the gate's question" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -596,6 +600,17 @@ exit 7
       # exists to catch. This row is here because that green was on screen every turn for
       # months and no check looked at it.
       sed -i.t 's|grep -qxF "$_th  $_tv" "$_tr"|grep -qF "$_tv" "$_tr"|' \
+        claude/statusline.sh && rm -f claude/statusline.sh.t ;;
+
+  57c) # Doctor hashing the entry point and stopping there. verify.sh still matches, so it
+      # reports trusted, while the gate re-hashes the companion scripts `vstack trust` recorded
+      # and refuses. Rows 57 and 57b both leave this green: they mutate how the verify.sh line is
+      # matched, and this defect is about the lines below it never being read at all.
+      sed -i.t 's|if \[ -n "$_tmm" \]; then|if false; then|' \
+        bin/doctor && rm -f bin/doctor.t ;;
+
+  57d) # The same omission in the statusline, where it renders every turn.
+      sed -i.t 's|\[ -z "$_tm" \] && _tok=1|_tok=1|' \
         claude/statusline.sh && rm -f claude/statusline.sh.t ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;

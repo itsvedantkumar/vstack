@@ -197,13 +197,24 @@ check_list(){ # label, jq path to the declared array, regeneration.derivations k
   fail "$label" "$msg"
 }
 
-check_list "components.skills.members"           ".components.skills.members"           "skills"
-check_list "components.agents.members"           ".components.agents.members"           "agents"
-check_list "components.agent_references.members" ".components.agent_references.members" "agent_references"
-check_list "components.commands.members"         ".components.commands.members"         "commands"
-check_list "components.hooks.members"            ".components.hooks.members"            "hooks"
-check_list "components.wrappers.members"         ".components.wrappers.members"         "wrappers"
-check_list "components.mcp_servers.members"      ".components.mcp_servers.members"      "mcp_servers"
+# Driven from `.components | keys[]`, not a hand-maintained list of family names: a family added
+# to .components with no matching call here was the defect (see
+# docs/checks-that-inherit-their-answer.md) -- a new key in .components must be checked BY
+# CONSTRUCTION, not by remembering to also register it in a second, parallel list. check_list
+# itself already fails loudly when regeneration.derivations has no entry for the key; looping
+# keys[] is what makes it get called at all.
+#
+# The exclusion is derived, not hand-listed: a component family with no `.members` array (were
+# one ever added) is skipped with a named, counted skip -- never a silent `continue` -- because a
+# hand-list of "families with no members" is the same defect one layer up.
+for _c in $(jq -r '.components | keys[]' "$INV"); do
+  if jq -e --arg c "$_c" '.components[$c] | has("members")' "$INV" >/dev/null 2>&1; then
+    check_list "components.$_c.members" ".components.$_c.members" "$_c"
+  else
+    skipc "components.$_c.members" "components.$_c has no .members array to diff against the tree"
+  fi
+done
+
 check_list "ownership.settings.shipped_keys"     ".ownership.settings.shipped_keys"     "settings_keys"
 check_list "ownership.settings.project_scope_keys" ".ownership.settings.project_scope_keys" "project_keys"
 check_list "ownership.skill_overrides.keys"      ".ownership.skill_overrides.keys"      "skill_overrides"
@@ -241,7 +252,13 @@ fi
 for comp in $(jq -r '.components | keys[]' "$INV"); do
   floor=$(jq -r --arg c "$comp" '.components[$c].floor' "$INV")
   cmd=$(jq -r --arg c "$comp" '.regeneration.derivations[$c] // empty' "$INV")
-  [ -n "$cmd" ] || continue
+  # A floor that cannot be checked is not a floor: a components.* family with no matching
+  # regeneration.derivations entry used to fall through this `continue` with no fail, no skip,
+  # and no printed line at all -- the family's stated floor was never compared against the tree.
+  if [ -z "$cmd" ]; then
+    fail "floor: components.$comp" "claude/inventory.json's regeneration.derivations has no entry named '$comp' -- the stated floor of $floor cannot be checked against the tree"
+    continue
+  fi
   cnt=$(eval "$cmd" 2>/dev/null | grep -c .)
   if [ "$cnt" -ge "$floor" ] 2>/dev/null; then
     pass "floor: components.$comp ($cnt >= floor $floor)"

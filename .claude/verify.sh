@@ -3040,9 +3040,10 @@ if command -v jq >/dev/null; then
 
     c44_row1=$(sed -n '1p' "$c44_replay")
     c44_promptlen=$(printf '%s' "$c44_prompt" | wc -c | tr -d ' ')
-    jq -e --arg sid "$c44_sid" --arg desc "$c44_desc" --argjson plen "$c44_promptlen" \
+    c44_desclen=$(printf '%s' "$c44_desc" | wc -m | tr -d ' ')
+    jq -e --arg sid "$c44_sid" --argjson dlen "$c44_desclen" --argjson plen "$c44_promptlen" \
       '.session_id==$sid and .dispatch_index==1 and .tool_name=="Task"
-       and .description==$desc and .prompt_bytes==$plen and (.result_bytes|type)=="number"
+       and .description_bytes==$dlen and .prompt_bytes==$plen and (.result_bytes|type)=="number"
        and (.duration_ms|type)=="number" and (.tool_use_id|type)=="string"' \
       <<<"$c44_row1" >/dev/null 2>&1 \
       || c44_errs="$c44_errs\nreplay row 1 is not a well-formed row for the sentinel dispatch: $c44_row1"
@@ -3055,12 +3056,15 @@ if command -v jq >/dev/null; then
     [ "$c44_cnt_val" = "$c44_n" ] \
       || c44_errs="$c44_errs\nthe counter file the statusline reads ($c44_cnt) holds '$c44_cnt_val', not $c44_n -- replay dispatch_index and the statusline counter have drifted apart"
 
-    # Direction 3b: the secrecy boundary. description is recorded verbatim by design; prompt and
-    # result are sizes only. Asserted by grepping the WHOLE replay file for each sentinel string
-    # rather than trusting the schema -- a byte-count field can be quietly swapped for the text
-    # it was meant to summarize without ever changing its name.
+    # Direction 3b: the secrecy boundary. All three free-text fields are sizes only. description
+    # used to be recorded verbatim on the reasoning that it is a label rather than content, but
+    # nothing enforced that: it is unconstrained free text on the Task tool schema, and a
+    # dispatch described as "rotate credential sk-ant-... before merge" put the credential in the
+    # log. A carve-out defended by convention is not a boundary. Asserted by grepping the WHOLE
+    # replay file for each sentinel string rather than trusting the schema -- a byte-count field
+    # can be quietly swapped for the text it was meant to summarize without changing its name.
     grep -qF "$c44_desc" "$c44_replay" \
-      || c44_errs="$c44_errs\ndescription sentinel never appears in the replay log -- description is not being recorded verbatim"
+      && c44_errs="$c44_errs\ndescription sentinel text appears in the replay log -- description contents are leaking, not just description_bytes"
     grep -qF "$c44_prompt" "$c44_replay" \
       && c44_errs="$c44_errs\nprompt sentinel text appears in the replay log -- prompt contents are leaking, not just prompt_bytes"
     grep -qF "$c44_result" "$c44_replay" \
@@ -3916,6 +3920,7 @@ fi
 #   armed, hash current               trusted      trusted      trusted
 #   verify.sh edited since trusting   untrusted    untrusted    trusted
 #   record names a different file     untrusted    trusted      trusted
+#   a recorded companion changed      untrusted    trusted      trusted
 #
 # statusline.sh looked only for the path and never hashed anything, so it rendered its green
 # "shield" on a checkout whose gate refuses to run -- on every turn, which makes it the most-read
@@ -3952,7 +3957,14 @@ if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || comma
   c57_gate(){
     c57_o=$(printf '{"session_id":"c57"}' \
       | env HOME="$c57_d/home" CLAUDE_PROJECT_DIR="$c57_d/repo" bash claude/hooks/verify-gate.sh 2>&1)
-    case "$c57_o" in *"skipped untrusted"*) echo untrusted ;; *) echo trusted ;; esac
+    # Two refusals, not one. An unrecognised verify.sh says "skipped untrusted"; a recorded
+    # companion that changed says "refused to run". Matching only the first read the second as
+    # trusted, so the fixture blamed itself ("the gate no longer sets up what it claims to")
+    # for a disagreement the gate was reporting correctly.
+    case "$c57_o" in
+      *"skipped untrusted"*|*"refused to run"*) echo untrusted ;;
+      *) echo trusted ;;
+    esac
   }
   c57_doctor(){
     env HOME="$c57_d/home" VSTACK_DIR="$c57_d/repo" bash bin/doctor --json 2>/dev/null \
@@ -3990,12 +4002,29 @@ if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || comma
   printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
   printf '%s  %s.orig\n' "$(c57_hash "$c57_v")" "$c57_v" > "$c57_ts"
   c57_probe "record names another file" untrusted
+  # A companion script. `vstack trust` (bin/vstack) records every install.sh/overlay.sh/
+  # uninstall.sh/bootstrap.sh at the repo root and every path verify.sh sources, and
+  # claude/hooks/verify-gate.sh:44-63 re-hashes all of them before running anything. The three
+  # scenarios above only ever write .claude/verify.sh, so they exercised the one file all three
+  # programs agreed about and were blind to the rest of the recorded set: with install.sh changed,
+  # the gate refused while doctor said "trusted" and statusline rendered "shield". A fixture that
+  # writes one file cannot see a disagreement about a second one.
+  printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
+  printf '#!/bin/sh\necho install\n' > "$c57_d/repo/install.sh"
+  c57_i="$(cd "$c57_d/repo" && pwd)/install.sh"
+  { printf '%s  %s\n' "$(c57_hash "$c57_v")" "$c57_v"
+    printf '%s  %s\n' "$(c57_hash "$c57_i")" "$c57_i"; } > "$c57_ts"
+  # positive control for this pair: a recorded, unmodified companion must not read as untrusted,
+  # or a reader that simply distrusts anything with two records would pass the row below.
+  c57_probe "companion recorded and unchanged" trusted
+  printf '# changed\n' >> "$c57_d/repo/install.sh"
+  c57_probe "companion changed since trusting" untrusted
   rm -rf "$c57_d"
   if [ -n "$c57_errs" ]; then
     bad "every reader of the trust store answers the gate's question" \
       "$(printf 'bin/doctor and claude/statusline.sh report on a decision claude/hooks/verify-gate.sh makes:%b' "$c57_errs")"
   else
-    ok "every reader of the trust store answers the gate's question (2 reader(s) x 3 scenario(s); format.sh excluded, it shows no verdict)"
+    ok "every reader of the trust store answers the gate's question (2 reader(s) x 5 scenario(s); format.sh excluded, it shows no verdict)"
   fi
 else
   skip "every reader of the trust store answers the gate's question" \

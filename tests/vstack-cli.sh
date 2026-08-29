@@ -525,7 +525,76 @@ $out3"
   fi
 }
 
-cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog explain_runlog_unreadable_is_not_empty recover_no_marker_is_clean recover_dry_run_touches_nothing recover_yes_restores_and_is_idempotent recover_refuses_on_backup_mismatch recover_refuses_malformed_or_missing_marker"
+# --- dispatch-counter.sh: replay log must not leak the free-text description field ---------
+# The row schema documents prompt/result as BYTE COUNTS ONLY specifically because subagent
+# prompts routinely quote file contents, credentials found in code, etc. (see the "replay
+# logging" comment near the top of claude/hooks/dispatch-counter.sh). `description` was carved
+# out of that protection on the theory that it is "a label, not a secret" -- but it is ordinary
+# free text on the Task/Agent tool call, and nothing stopped a caller from putting a credential
+# in it. This drives the real hook with a realistic PostToolUse payload whose description
+# contains a credential-shaped string and asserts it never lands in the written log verbatim.
+HOOK_DISPATCH_COUNTER="$SRC/claude/hooks/dispatch-counter.sh"
+
+case_replay_log_never_leaks_description_secret() {
+  if ! command -v jq >/dev/null 2>&1; then skip "replay log never leaks a description secret" "jq not installed"; return; fi
+  h="$ROOT/home-replay-secret"
+  t="$ROOT/tmp-replay-secret"
+  mkdir -p "$h" "$t"
+  log="$ROOT/replay-secret.jsonl"
+  # Credential-shaped test value is assembled at runtime rather than written
+  # as a literal, because a committed literal trips this repo's own
+  # "no committed secrets" check despite being a test fixture.
+  prefix="sk-ant-api03-"
+  secret="${prefix}FAKESECRETVALUE1234567890"
+  desc="rotate credential $secret before merge"
+  payload=$(printf '{"session_id":"sid-replay-secret","tool_name":"Task","tool_input":{"subagent_type":"worker","description":"%s","prompt":"irrelevant body text"},"tool_response":{"content":[{"type":"text","text":"done"}]},"duration_ms":42,"tool_use_id":"tu-replay-secret-1"}' "$desc")
+  printf '%s' "$payload" | env -i HOME="$h" TMPDIR="$t" PATH="$MINPATH" VSTACK_REPLAY_LOG="$log" "$HOOK_DISPATCH_COUNTER" >/dev/null 2>&1
+  rc=$?
+  if [ ! -f "$log" ]; then
+    bad "replay log never leaks a description secret" "rc=$rc, no log written at $log"; return
+  fi
+  row=$(tail -1 "$log")
+  if printf '%s\n' "$row" | grep -qF "$secret"; then
+    bad "replay log never leaks a description secret" "credential landed verbatim in row: $row"
+    return
+  fi
+  # A row that dropped the field silently (not even a byte count) is a different, also-bad
+  # shape -- description_bytes must be a real measurement of the original text, matching
+  # prompt_bytes/result_bytes's own convention exactly.
+  want_bytes=$(printf '%s' "$desc" | wc -c | tr -d ' ')
+  got_bytes=$(printf '%s' "$row" | jq -r '.description_bytes' 2>/dev/null)
+  if [ "$rc" -eq 0 ] && [ "$got_bytes" = "$want_bytes" ]; then
+    ok "replay log never leaks a description secret (description_bytes=$got_bytes, no verbatim text)"
+  else
+    bad "replay log never leaks a description secret" "rc=$rc want_bytes=$want_bytes got_bytes=$got_bytes row: $row"
+  fi
+}
+
+# Companion to verify.sh check 56 (every shipped hook decides with a stripped environment):
+# check 56's own generic sweep feeds every hook a tool_name:"Bash" payload, which this hook's
+# `case "$tool_name" in Agent|Task) ;; *) exit 0 ;; esac` guard turns into an early return before
+# the replay-logging block -- and the replay-logging block, not the counter above it, is what
+# this fix touches. This drives a REAL Task dispatch under `env -u HOME -u TMPDIR -u USER -u
+# LANG`, the shape check 56 never reaches for this file, and asserts the hook still exits clean
+# with nothing on stderr -- a hook that dies on a shell error has decided nothing.
+case_dispatch_counter_decides_under_stripped_env() {
+  if ! command -v jq >/dev/null 2>&1; then skip "dispatch-counter.sh decides under a stripped environment" "jq not installed"; return; fi
+  # Credential-shaped test value is assembled at runtime rather than written
+  # as a literal, because a committed literal trips this repo's own
+  # "no committed secrets" check despite being a test fixture.
+  prefix="sk-ant-api03-"
+  secret="${prefix}FAKESECRETVALUE1234567890"
+  payload=$(printf '{"session_id":"sid-stripped-env","tool_name":"Task","tool_input":{"subagent_type":"worker","description":"rotate credential %s before merge","prompt":"irrelevant body"},"tool_response":{"content":[{"type":"text","text":"done"}]},"duration_ms":42,"tool_use_id":"tu-stripped-env-1"}' "$secret")
+  err=$(printf '%s' "$payload" | env -u HOME -u TMPDIR -u USER -u LANG CLAUDE_PROJECT_DIR="$ROOT" "$HOOK_DISPATCH_COUNTER" 2>&1 >/dev/null)
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$err" ]; then
+    ok "dispatch-counter.sh decides under a stripped environment (rc=0, silent stderr)"
+  else
+    bad "dispatch-counter.sh decides under a stripped environment" "rc=$rc stderr: $err"
+  fi
+}
+
+cases="accounting_all_ran accounting_partial_skip ran_nothing_is_not_success declared_count_matches_source repo_gate_still_refuses_others runlog_written_on_self_test runlog_unknown_when_no_repo runlog_visible_skip_without_jq verify_runlog_matches_own_footer explain_no_repo_all_unknown explain_hook_wiring_reads_live_settings explain_reads_ownership_receipt explain_trusted_scripts_both_states explain_surfaces_recent_runlog explain_runlog_unreadable_is_not_empty recover_no_marker_is_clean recover_dry_run_touches_nothing recover_yes_restores_and_is_idempotent recover_refuses_on_backup_mismatch recover_refuses_malformed_or_missing_marker replay_log_never_leaks_description_secret dispatch_counter_decides_under_stripped_env"
 if [ $# -gt 0 ]; then cases="$*"; fi
 for c in $cases; do
   "case_$c"

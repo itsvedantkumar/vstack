@@ -58,16 +58,25 @@
 #    delegation-drift log's own layout exactly (one file, session_id is a field, not a filename).
 #
 # 2. WHAT EACH ROW CARRIES. ts, session_id, dispatch_index (the $cnt this hook already computed
-#    above -- free, no second counter), tool_name (Agent vs Task), subagent_type, description --
-#    plus prompt_bytes and result_bytes instead of the prompt/result text themselves. description
-#    earns keeping verbatim: it is a short, human-authored 3-6 word imperative the CALLER wrote
-#    for exactly this purpose (Task/Agent's own tool schema: {description, prompt, subagent_type}
-#    -- description is not secret, it is a label), and it is what answers "which agent ran and to
-#    do what" without the prompt's bulk or its exposure risk. prompt/result get sizes only, same
-#    instinct oh-my-claudecode's own friction report uses to analyse context bloat without
-#    exposing prompts: a replay log full of verbatim prompts is a secret-leak surface (subagent
-#    prompts routinely quote file contents, credentials found in code, etc.) and a disk problem
-#    the delegation log's own 2MB-cap comment already argues against elsewhere in this repo.
+#    above -- free, no second counter), tool_name (Agent vs Task), subagent_type -- plus
+#    prompt_bytes, result_bytes, and description_bytes instead of the prompt/result/description
+#    text themselves. description was carried verbatim in an earlier version of this file on the
+#    theory that it is a short, human-authored 3-6 word imperative label (Task/Agent's own tool
+#    schema: {description, prompt, subagent_type}) and therefore not the same exposure risk as
+#    prompt/result. That theory does not hold: description is ordinary free text on the tool
+#    call, not a constrained enum, and nothing on the schema or the runtime stops a caller from
+#    writing a credential, a file path with a token in it, or any other secret-shaped string into
+#    it -- reproduced directly (a dispatch whose description quoted an API-key-shaped string
+#    landed that string verbatim in this log). A byte count cannot leak; a redaction pass over an
+#    open-ended set of credential shapes (cloud provider keys, PATs, JWTs, private key headers,
+#    ad hoc passwords) can only ever be a filter with known gaps, and it is not worth the false
+#    confidence of shipping a partial one over description's few label-sized bytes when this
+#    field's entire job -- "which agent ran and to do what" -- survives a byte count only
+#    partially anyway. Sizing it exactly like prompt/result removes the class of bug instead of
+#    chasing its instances: a replay log full of verbatim prompts (or descriptions) is a
+#    secret-leak surface (subagent prompts routinely quote file contents, credentials found in
+#    code, etc.) and a disk problem the delegation log's own 2MB-cap comment already argues
+#    against elsewhere in this repo.
 #
 #    One field beyond the brief's minimum earns its bytes for free: duration_ms. Confirmed by
 #    reading this CLI build's own hook-input constructor (`strings` on the installed 2.1.241
@@ -169,7 +178,7 @@ jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' '
              dispatch_index: $ph,
              tool_name: $tn,
              subagent_type: ($ti.subagent_type // null),
-             description: ($ti.description // null),
+             description_bytes: (if ($ti | has("description")) then ($ti.description // "" | length) else null end),
              prompt_bytes: (if ($ti | has("prompt")) then ($ti.prompt // "" | length) else null end),
              result_bytes: (if has("tool_response") then (.tool_response | tostring | length) else null end),
              duration_ms: (.duration_ms // null),

@@ -145,9 +145,29 @@ jobs:
           # undecided means publication is withheld and the tag is left alone. A re-dispatch
           # declining to delete a tag is a nuisance; deleting the right tag over the wrong
           # verdict is what this is here to stop.
-          CANDIDATE_CREATED_AT=$(gh api "repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at' 2>/dev/null || true)
+          # A failed READ here used to be indistinguishable from a legitimate empty value, and
+          # an empty CANDIDATE_CREATED_AT disables the staleness carve-out below -- every
+          # pre-tag conclusion then reads as a live verdict, which is the failure mode
+          # require-checks-green.sh's own gh api call already refuses to allow itself (see its
+          # fetch_runs: an UNKNOWN read there is UNDECIDED, never a silent "nothing is stale").
+          # A transient rate-limit or network blip on THIS call must follow the same rule: not
+          # learning when the tag appeared is not the same fact as the tag having always been
+          # there, and the second reading is what deleted a tag on 2026-08-27.
+          _ccat_errf=$(mktemp 2>/dev/null || echo "/tmp/release-ccat-err.$$")
+          set +e
+          CANDIDATE_CREATED_AT=$(gh api "repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at' 2>"$_ccat_errf")
+          _ccat_rc=$?
+          set -e
+          _ccat_err=$(cat "$_ccat_errf" 2>/dev/null)
+          rm -f "$_ccat_errf"
+          if [ "$_ccat_rc" -ne 0 ] || [ -z "$CANDIDATE_CREATED_AT" ] || [ "$CANDIDATE_CREATED_AT" = "null" ]; then
+            echo "UNKNOWN  could not read this run's created_at from gh api (repos/${{ github.repository }}/actions/runs/${GITHUB_RUN_ID}, exit ${_ccat_rc}): ${_ccat_err:-<empty response>}"
+            echo "UNDECIDED  without knowing when this candidate tag appeared, a pre-tag conclusion cannot be told apart from a real one, so nothing has been decided for ${{ steps.pin.outputs.sha }}; exiting 2 so the caller withholds publication WITHOUT deleting anything"
+            echo "verdict=undecided" >> "$GITHUB_OUTPUT"
+            exit 2
+          fi
           export CANDIDATE_CREATED_AT
-          echo "candidate tag observed on origin at ${CANDIDATE_CREATED_AT:-<unknown -- staleness disabled, every conclusion counts>}"
+          echo "candidate tag observed on origin at ${CANDIDATE_CREATED_AT}"
           set +e
           bash .github/scripts/require-checks-green.sh \
             "${{ github.repository }}" "${{ steps.pin.outputs.sha }}" ${{ env.REQUIRED_CHECKS }}

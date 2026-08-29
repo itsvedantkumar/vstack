@@ -1056,6 +1056,57 @@ if want uninstall-clean; then
     || bad "uninstall removes vstack and keeps your own settings" "${e#; }"
 fi
 
+# --- uninstall unpicks MCP servers even when HOME contains sed-special characters --------------
+# uninstall.sh built its own `sed "s|__HOME__|$HOME|g"` (around line 314) straight from raw
+# $HOME, the third instance of the same defect install.sh:841-847 and bin/doctor already carry
+# the fix for: sed gives & and \ special meaning in the REPLACEMENT text and | is the delimiter
+# here, so an unescaped $HOME corrupts the shipped-servers snapshot the classification jq
+# compares against, and vstack's own mcpServers entries are silently left behind in
+# ~/.claude.json -- uninstall still reports success. Plants a real & in $HOME the same way the
+# doctor-names lane above does, rather than asserting on the sed invocation directly.
+#
+# Run with `claude` hidden from PATH. install.sh's own MCP-merge comment (see install.sh
+# ~834-838) says the machine running this installer for the first time has never run Claude
+# Code, so ~/.claude.json does not exist yet and install.sh creates it fresh. On a workstation
+# that already has the real `claude` binary on PATH -- this one included -- install.sh's
+# TypeScript-LSP detection (`claude plugin list`) launches it first, which auto-creates
+# ~/.claude.json before the MCP merge ever runs; that pre-existing file then makes uninstall's
+# unrelated whole-file restore (map_target "claude.json" above) replace .claude.json wholesale
+# and every server vanishes regardless of whether the classification below got it right,
+# masking exactly the defect this case exists to catch. Stripping `claude` from PATH reproduces
+# the fresh-machine case the comment describes instead of this machine's own installed state.
+if want uninstall-ampersand-home; then
+  if ! command -v jq >/dev/null 2>&1; then
+    skip "uninstall removes MCP servers when HOME contains &" "jq not installed"
+  else
+    noclaude_path=""; _oldifs="$IFS"; IFS=':'
+    for _pdir in $PATH; do
+      IFS="$_oldifs"
+      [ -x "$_pdir/claude" ] && continue
+      noclaude_path="$noclaude_path:$_pdir"
+    done
+    IFS="$_oldifs"
+    noclaude_path="${noclaude_path#:}"
+    H="$ROOT/home&amp"; mkdir -p "$H"
+    HOME="$H" PATH="$noclaude_path" "$SRC/install.sh" >/dev/null 2>&1
+    # Positive control, taken between install and uninstall (same shape as uninstall-clean
+    # above): asserting only that vstack's servers are gone afterwards passes for free if
+    # install never registered them here in the first place.
+    want_srv=$(jq -r 'keys | length' "$SRC/mcp/servers.json" 2>/dev/null || echo 0)
+    installed_srv=$(jq -r '[(.mcpServers // {}) | keys[]] | length' "$H/.claude.json" 2>/dev/null || echo 0)
+    HOME="$H" PATH="$noclaude_path" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
+    e=""
+    [ "${installed_srv:-0}" -ge "$want_srv" ] && [ "$want_srv" -gt 0 ] \
+      || e="$e; install registered ${installed_srv:-0} MCP server(s) into a HOME containing & where $want_srv were expected, so removal proves nothing"
+    for srv in $(jq -r 'keys[]' "$SRC/mcp/servers.json" 2>/dev/null); do
+      [ "$(jq -r --arg s "$srv" 'if (.mcpServers // {}) | has($s) then "left" else "gone" end' "$H/.claude.json" 2>/dev/null)" = gone ] \
+        || e="$e; vstack's $srv MCP server was left registered when HOME contains &"
+    done
+    [ -z "$e" ] && ok "uninstall removes MCP servers when HOME contains &" \
+      || bad "uninstall removes MCP servers when HOME contains &" "${e#; }"
+  fi
+fi
+
 # --- doctor --drift does not mutate the repo it inspects ---------------------------------------
 # A bare `git fetch` is not read-only: it does whatever ~/.gitconfig says. With fetch.prune and
 # fetch.pruneTags true -- a common pairing -- it deletes every local tag and remote-tracking

@@ -570,6 +570,7 @@ TRUST_STATE="unknown"; TRUST_DETAIL="no vstack repo found"
 if [ -n "$R" ]; then
   if [ -f "$R/.claude/verify.sh" ]; then
     _tvp="$(cd "$R/.claude" 2>/dev/null && pwd)/verify.sh"
+    _troot="$(cd "$R" 2>/dev/null && pwd)"
     if command -v shasum >/dev/null 2>&1; then _th=$(shasum -a 256 "$_tvp" 2>/dev/null | cut -d' ' -f1)
     elif command -v sha256sum >/dev/null 2>&1; then _th=$(sha256sum "$_tvp" 2>/dev/null | cut -d' ' -f1)
     else _th=""; fi
@@ -584,6 +585,33 @@ if [ -n "$R" ]; then
     # store the gate refuses to run against.
     elif grep -qxF "$_th  $_tvp" "$_tf" 2>/dev/null; then
       TRUST_STATE="trusted"; TRUST_DETAIL="$_tvp hash matches $_tf (recorded by install.sh)"
+      # verify.sh's own hash is not the gate's question. `vstack trust` records the scripts at the
+      # repo root too, and claude/hooks/verify-gate.sh:44-63 re-hashes every recorded file under
+      # the repo before it runs anything -- so appending one line to install.sh makes the gate
+      # refuse while this reader, hashing the entry point alone, kept reporting "trusted".
+      # Re-check the same set the gate does, and match its rules exactly: a recorded file that no
+      # longer exists is skipped there, so it is skipped here, or the two would disagree the
+      # other way.
+      #
+      # One spawn, not one per file: shasum takes many operands and emits the store's own
+      # "<hash>  <path>" format, so `grep -vxF -f <store>` prints exactly the lines whose current
+      # bytes are not recorded. Empty output means every companion still matches.
+      _tpaths=$(grep -F "  $_troot/" "$_tf" 2>/dev/null | cut -d' ' -f3-)
+      _tlist=""; _toifs=$IFS; IFS='
+'
+      set -f
+      for _tp in $_tpaths; do [ -f "$_tp" ] && _tlist="$_tlist$_tp
+"; done
+      if [ -n "$_tlist" ]; then
+        if command -v shasum >/dev/null 2>&1; then _tmm=$(shasum -a 256 -- $_tlist 2>/dev/null | grep -vxF -f "$_tf" -)
+        else _tmm=$(sha256sum -- $_tlist 2>/dev/null | grep -vxF -f "$_tf" -); fi
+      else _tmm=""; fi
+      set +f; IFS=$_toifs
+      if [ -n "$_tmm" ]; then
+        _tn=$(printf '%s\n' "$_tmm" | sed 's#.*  ##; s#.*/##' | tr '\n' ' ')
+        TRUST_STATE="untrusted"
+        TRUST_DETAIL="$_tvp matches, but ${_tn% } changed since it was trusted and .claude/verify.sh executes it -- the gate refuses to run. Re-run 'vstack trust'."
+      fi
     else
       TRUST_STATE="untrusted"; TRUST_DETAIL="$_tvp not recorded in $_tf at its current hash -- stale trust, or install.sh has not run from here"
     fi

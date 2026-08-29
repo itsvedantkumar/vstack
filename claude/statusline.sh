@@ -105,7 +105,30 @@ if [ -f "$cdir/.claude/verify.sh" ]; then
   else _th=$(sha256sum "$_tv" 2>/dev/null | cut -d' ' -f1); fi
   # No hasher means nothing on this machine can tell trusted from stale, and the honest render
   # is the one that claims less.
+  # verify.sh's hash alone is not what the gate keys on. `vstack trust` records the repo-root
+  # scripts too and claude/hooks/verify-gate.sh:44-63 re-hashes all of them, so a changed
+  # install.sh makes the gate refuse while this rendered shield -- the same "only ever says
+  # protected" failure the paragraph above rejects, one layer in. Re-check the gate's whole set,
+  # skipping recorded files that no longer exist exactly as the gate does. Still one extra spawn
+  # regardless of how many companions there are: shasum takes many operands and prints the
+  # store's own format, so grep -vxF against the store lists precisely the drifted ones.
+  _tok=""
   if [ -n "$_th" ] && grep -qxF "$_th  $_tv" "$_tr" 2>/dev/null; then
+    _tk="$(cd "$cdir" 2>/dev/null && pwd)"
+    _tp=$(grep -F "  $_tk/" "$_tr" 2>/dev/null | cut -d' ' -f3-)
+    _tl=""; _ti=$IFS; IFS='
+'
+    set -f
+    for _tf in $_tp; do [ -f "$_tf" ] && _tl="$_tl$_tf
+"; done
+    if [ -n "$_tl" ]; then
+      if command -v shasum >/dev/null 2>&1; then _tm=$(shasum -a 256 -- $_tl 2>/dev/null | grep -vxF -f "$_tr" -)
+      else _tm=$(sha256sum -- $_tl 2>/dev/null | grep -vxF -f "$_tr" -); fi
+    else _tm=""; fi
+    set +f; IFS=$_ti
+    [ -z "$_tm" ] && _tok=1
+  fi
+  if [ -n "$_tok" ]; then
     out="${out} ${D}·${R} ${G}shield${R}"
   else
     out="${out} ${D}·${R} ${Y}gate open${R}"

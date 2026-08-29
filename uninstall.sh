@@ -311,7 +311,17 @@ fi
 MCP_REMOVE=""
 if command -v jq >/dev/null 2>&1 && [ -f "$CJSON" ] && [ -f "$SRC/mcp/servers.json" ]; then
   mship=$(mktemp); morig=$(mktemp)
-  sed "s|__HOME__|$HOME|g" "$SRC/mcp/servers.json" > "$mship"
+  # Third instance of the same defect: sed gives & and \ special meaning in the REPLACEMENT
+  # text and | is the delimiter here, so an unescaped $HOME corrupts this snapshot -- an & in
+  # $HOME re-inserts the whole match (__HOME__ itself) at that position, and a | makes sed exit
+  # 1 outright, either of which desyncs $mship from the live file and leaves the classification
+  # below unable to recognise vstack's own entries as removable. install.sh:841-847 and
+  # bin/doctor carry the fix already; the escape set is exactly the three characters sed treats
+  # specially in a replacement joined by this delimiter: & (whole match), \ (escape), | (the
+  # delimiter itself, chosen here instead of the more common / because paths already contain
+  # slashes).
+  home_esc=$(printf '%s' "$HOME" | sed 's/[&|\\]/\\&/g')
+  sed "s|__HOME__|$home_esc|g" "$SRC/mcp/servers.json" > "$mship"
   if [ -f "$BK/claude.json" ]; then cat "$BK/claude.json" > "$morig"; else printf '{}\n' > "$morig"; fi
   while IFS=$'\t' read -r mstatus mkey; do
     [ -n "$mkey" ] || continue
