@@ -4,6 +4,58 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.54.0 — 2026-08-31
+
+### The falsifiability sweep took 63-93 minutes because every row re-ran the whole gate
+
+`tests/gate-falsifiability.sh` mutates one file per row and then runs all 57 checks to see which
+one goes red. At 92 rows that is O(rows x checks) wall clock for O(rows) of information, and it
+was the whole reason the `verify` job took over an hour. `REQUIRE_CHECKS_WAIT_SECONDS` has been
+set below that job twice, and one of those came eight seconds from failing a release.
+
+The scoping mechanism already existed (`VSTACK_FALSIFY_ROWS`, documented in the script since it
+was written) and CI called the script bare. `verify` is now a join over `verify-core` and a
+7-way `falsify` matrix, which should put the workflow around 18-20 minutes.
+
+Sharding a gate whose entire purpose is complete coverage invites the failure this repository
+exists to catch: N shards each reporting green while some row ran in no shard at all. The shard
+assignment is derived from the one `CHECKS=` line check 16 already polices, round-robin so every
+index lands in exactly one shard with no remainder bucket, and `falsify-reconcile` re-derives
+that list independently and diffs it against the union of ids the shards' own output says they
+ran. Not the ids the matrix intended to send: the ids the tool reported.
+
+### A job could be fanned into a required check without being gated by it
+
+`verify` cannot require the shards by name. `falsify` is a matrix job, so its check-runs are
+named `falsify (0, ...)` and a required context spelled `falsify` matches nothing, which
+`require-checks-green.sh` reports as MISSING forever. That is the deadlock check 50's second
+direction already exists to prevent, so the join has to be admitted to the model.
+
+It is not admitted on the strength of a `needs:` edge. A job can sit in `needs:` and have its
+result ignored: with `if: always()` the dependent runs regardless, and echoing a result reads it
+without acting on it. Check 50 now proves each one by execution. It extracts the required job's
+own `run:` script, fills the `${{ needs.X.result }}` templates with success everywhere except
+the job under test, and requires a non-zero exit. The all-success run is the positive control,
+without which a join hardwired to `exit 1` would "prove" every job gated.
+
+Falsified both ways: deleting one job's assertion from the join reports exactly that job, and
+changing the join's final `exit "$rc"` to `exit 0` reports all four.
+
+### install-matrix counted doctor's failures off the rendered display
+
+Three predicates, three wrong answers. `grep -c '✖'` counted the trailing `DRIFT ✖` verdict
+alongside the findings it summarises, reporting one real failure as two. `grep -c '✖.'` skipped
+the verdict only because its glyph happens to land at end-of-line, and dropped a real failure
+besides: drift has no finding line at all, its only appearance in the display *is* the verdict.
+Measured on one checkout, `failCount` 1 and `drift.status` "drift" -- two failures, counted as
+one.
+
+`bin/doctor --json` already published `checks[]`, `failCount`, `drift`, `healthy` and `exitCode`,
+so the display is not parsed any more. The count is `failCount` plus drift deliberately:
+`bin/doctor` sets `EXIT_CODE=1` on `$FAIL -ne 0 OR DRIFT_STATUS = drift`, but `failCount` carries
+only `$FAIL`, so a drift-only failure is a real red that `failCount` alone reports as zero. An
+absent or unparseable `--json` is reported as unknown, never as green.
+
 ## 1.53.0 — 2026-08-29
 
 ### Two readers of the trust store reported "trusted" on a checkout the gate refuses to run

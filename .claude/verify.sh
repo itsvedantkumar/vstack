@@ -3521,17 +3521,78 @@ if [ -f "$_c50_wf" ] && [ -f "$_c50_rl" ]; then
   if [ -z "$_c50_req" ]; then
     c50_errs="$c50_errs\nno names parsed out of $_c50_rl's REQUIRED_CHECKS -- the release gate would be comparing against an empty list"
   fi
+  # A job can also be read INDIRECTLY: verify.yml's `verify` is a join that fans in verify-core
+  # and the falsify shards and fails unless each one succeeded. Requiring those four by name
+  # instead would deadlock the release -- `falsify` is a matrix job, so its check-runs are named
+  # `falsify (0, ...)` and a required context spelled `falsify` never matches anything, which
+  # require-checks-green.sh reports as MISSING forever. That is the same deadlock this check's
+  # own second direction exists to prevent, so the model has to admit the join.
+  #
+  # It is not admitted on the strength of a `needs:` edge. A job can appear in `needs:` and have
+  # its result ignored -- with `if: always()` the dependent runs anyway, and `echo` of a result
+  # reads it without acting on it. So each candidate is proved by EXECUTION: the required job's
+  # own run: script is extracted, its `${{ needs.X.result }}` templates are filled in with
+  # success everywhere except the one job under test, and the script must exit non-zero. The
+  # all-success run is the positive control; without it a join hardwired to exit 1 would "prove"
+  # every job gated.
+  _c50_runof(){ # <job> -> that job's run: script, dedented, from $_c50_wf
+    awk -v j="$1" '
+      $0 ~ "^  " j ":[[:space:]]*$" {inj=1; next}
+      inj && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {inj=0}
+      inj && /^[[:space:]]*run:[[:space:]]*\|[[:space:]]*$/ {
+        match($0, /[^ ]/); ind=RSTART; inr=1; next
+      }
+      inr {
+        if ($0 ~ /^[[:space:]]*$/) { print ""; next }
+        match($0, /[^ ]/)
+        if (RSTART <= ind) { inr=0; next }
+        print substr($0, ind+2)
+      }
+    ' "$_c50_wf"
+  }
+  _c50_gates(){ # <required-job> <job-under-test> -> 0 if that job failing makes the script fail
+    _g_script=$(_c50_runof "$1")
+    [ -n "$_g_script" ] || return 1
+    # every needs.X.result -> success, then the one under test -> failure
+    _g_ok=$(printf '%s' "$_g_script" | sed -E 's/\$\{\{[[:space:]]*needs\.[A-Za-z0-9_-]+\.result[[:space:]]*\}\}/success/g')
+    _g_bad=$(printf '%s' "$_g_script" \
+      | sed -E "s/\\\$\\{\\{[[:space:]]*needs\\.$2\\.result[[:space:]]*\\}\\}/failure/g" \
+      | sed -E 's/\$\{\{[[:space:]]*needs\.[A-Za-z0-9_-]+\.result[[:space:]]*\}\}/success/g')
+    # any surviving ${{ ... }} would make bash choke on its own syntax rather than decide
+    case "$_g_bad" in *'${{'*) return 1 ;; esac
+    printf '%s\n' "$_g_ok"  | bash >/dev/null 2>&1 || return 1   # positive control
+    printf '%s\n' "$_g_bad" | bash >/dev/null 2>&1 && return 1   # must fail on this job's red
+    return 0
+  }
+
   if [ -n "$_c50_jobs" ] && [ -n "$_c50_req" ]; then
-    _c50_unread=$(comm -23 <(printf '%s\n' "$_c50_jobs") <(printf '%s\n' "$_c50_req"))
+    # Fold in every job a required job provably gates on, then compare what is left.
+    _c50_covered="$_c50_req"
+    for _c50_j in $_c50_jobs; do
+      case "
+$_c50_req
+" in *"
+$_c50_j
+"*) continue ;; esac
+      for _c50_r in $_c50_req; do
+        if _c50_gates "$_c50_r" "$_c50_j"; then
+          _c50_covered="$_c50_covered
+$_c50_j"
+          break
+        fi
+      done
+    done
+    _c50_covered=$(printf '%s\n' "$_c50_covered" | sed '/^$/d' | sort -u)
+    _c50_unread=$(comm -23 <(printf '%s\n' "$_c50_jobs") <(printf '%s\n' "$_c50_covered"))
     _c50_phantom=$(comm -13 <(printf '%s\n' "$_c50_jobs") <(printf '%s\n' "$_c50_req"))
     [ -z "$_c50_unread" ] \
-      || c50_errs="$c50_errs\nCI job(s) no gate reads: $(printf '%s' "$_c50_unread" | tr '\n' ' ') -- add them to REQUIRED_CHECKS in $_c50_rl or the release publishes over their red"
+      || c50_errs="$c50_errs\nCI job(s) no gate reads: $(printf '%s' "$_c50_unread" | tr '\n' ' ') -- add them to REQUIRED_CHECKS in $_c50_rl, or fan them into a required job that asserts needs.<job>.result and exits non-zero on it"
     [ -z "$_c50_phantom" ] \
       || c50_errs="$c50_errs\nREQUIRED_CHECKS name(s) with no job behind them: $(printf '%s' "$_c50_phantom" | tr '\n' ' ') -- nothing will ever report for these, so the gate stays UNDECIDED forever"
   fi
   _c50_njobs=$(printf '%s' "$_c50_jobs" | grep -c . )
   [ -z "$c50_errs" ] \
-    && ok "every CI job is a required check ($_c50_njobs jobs, both directions)" \
+    && ok "every CI job is a required check ($_c50_njobs jobs, both directions; $(printf '%s\n' "$_c50_covered" | grep -c .) covered directly or by a proved join)" \
     || bad "every CI job is a required check" "$(printf '%b' "$c50_errs")"
 else
   bad "every CI job is a required check" "$_c50_wf or $_c50_rl is missing -- CI itself is gone, which is a failure and not an environment fact"

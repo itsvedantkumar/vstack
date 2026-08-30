@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -274,6 +274,7 @@ files_for(){ case "$1" in
   49)  printf 'bin/doctor' ;;
   50)  printf '.github/workflows/verify.yml' ;;
   50b) printf '.github/workflows/release.yml' ;;
+  50c) printf '.github/workflows/verify.yml' ;;
   51)  printf '.github/scripts/should-delete-candidate-tag.sh' ;;
   51b) printf '.github/workflows/release.yml' ;;
   52)  printf 'bin/claude-bg.sh' ;;
@@ -363,6 +364,7 @@ label_for(){ case "$1" in
   49)  printf "doctor's CI lane answers for HEAD" ;;
   50)  printf 'every CI job is a required check' ;;
   50b) printf 'every CI job is a required check' ;;
+  50c) printf 'every CI job is a required check' ;;
   51)  printf 'release cleanup decides correctly' ;;
   51b) printf 'release cleanup decides correctly' ;;
   52)  printf 'the bin-scripts suite can actually fail' ;;
@@ -502,6 +504,16 @@ exit 7
       # added to verify.yml, went red on its first run, and nothing in the release path asked it
       # anything, because REQUIRED_CHECKS is a hand-maintained list beside the workflow.
       printf '\n  install-freebsd:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' >> .github/workflows/verify.yml ;;
+
+  50c) # The join stops acting on a shard's verdict while still listing it in needs:. The
+      # falsify matrix cannot be a required check by name -- its check-runs are `falsify (0,
+      # ...)`, so a required context spelled `falsify` never matches and the release deadlocks --
+      # so `verify` fans it in instead. That is only worth anything if the join actually exits
+      # non-zero on it, which check 50 proves by running the join's own script with this job's
+      # result set to failure. Deleting the assertion leaves needs: intact and the reference
+      # gone, which is what a careless edit to that loop looks like.
+      perl -0pi -e 's/^\s*"falsify:\$\{\{ needs\.falsify\.result \}\}" \\\n//m' \
+        .github/workflows/verify.yml ;;
 
   50b) # The other direction: a required name with no job behind it. require-checks-green.sh
       # reports MISSING for it on every commit, so the release gate sits UNDECIDED forever --

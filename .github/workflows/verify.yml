@@ -13,8 +13,35 @@ on:
   # ask again is the whole operation.
   workflow_dispatch:
 
+env:
+  # Single source for the shard count so the plan step, this comment and anyone reading the run
+  # log agree on the same number. Picked from measured cost, not assumed: tests/gate-
+  # falsifiability.sh has 91 declared rows (see falsify-plan's own derivation of the same
+  # CHECKS= line), and release.yml records "~60s on a runner" per row (one full 57-check
+  # ./.claude/verify.sh invocation). 91 divides evenly by 7 (13 rows/shard, no remainder
+  # bucket), and 7 concurrent runners stays well inside every GitHub-hosted concurrency tier
+  # this repo could plausibly be on, unlike e.g. 13 shards (91/13 = 7 rows/shard) which pushes
+  # total concurrent jobs in this workflow to ~20 and risks queueing on the smallest tier for no
+  # latency gain that matters once shard time already dwarfs per-shard setup overhead. At 7
+  # shards: ~13 rows x ~60s = ~13 minutes of mutation loop, plus this job's own checkout +
+  # toolchain install (jq, shellcheck, tsc/csslint/xmllint/gofmt, the Claude Code CLI -- the
+  # same install steps verify-core runs, duplicated per shard so no row degrades to an
+  # unexpected skip) estimated at ~3-4 minutes, so roughly 16-18 minutes wall per shard. That
+  # runs concurrently with verify-core (~10-15 minutes) rather than after it, so the workflow's
+  # total wall clock is bounded by the falsify pipeline, not their sum: roughly 18-20 minutes
+  # against the 63-93 minutes measured for the unsharded job in release.yml's own comment beside
+  # REQUIRE_CHECKS_WAIT_SECONDS. Not verified by an actual CI run -- see this task's report.
+  FALSIFY_SHARDS: "7"
+
 jobs:
-  verify:
+  # --- verify-core: everything the old monolithic `verify` job did, MINUS the falsifiability
+  # sweep -- which is now sharded below (falsify-plan / falsify / falsify-reconcile) and joined
+  # back into the required check named `verify` at the bottom of this file. This job carries no
+  # branch-protection meaning of its own; `verify` (the join job) is what release.yml and
+  # .github/branch-protection-ruleset.json actually wait on, and it fans in this job's result
+  # alongside the falsify pipeline's. Splitting it out lets this ~10-15 minute lane run
+  # concurrently with the sharded sweep instead of serially behind it, which is the whole point.
+  verify-core:
     runs-on: ubuntu-latest
     steps:
       # fetch-depth 0 because check 24 compares the installable payload against the tag whose
@@ -127,12 +154,12 @@ jobs:
       - name: Run the verification gate
         run: ./.claude/verify.sh
 
-      # A gate that cannot fail proves nothing. This used to break one skill description and
-      # call it done, which left the other checks unproven — and two of them were not enforcing
-      # anything at the time. Every declared check now gets its own mutation, and check 16 of
-      # the gate fails if a check is added without one.
-      - name: Prove every check is falsifiable
-        run: ./tests/gate-falsifiability.sh
+      # "Prove every check is falsifiable" (tests/gate-falsifiability.sh) used to run here. It is
+      # O(rows x checks) -- 91 rows, each re-running the whole 57-check gate -- and dominated
+      # this job's wall clock (measured 63-93 minutes total). It now runs sharded, in parallel
+      # with the rest of this job, as falsify-plan / falsify / falsify-reconcile below, and its
+      # result is fanned back into the `verify` join job at the bottom of this file. See that
+      # job's header comment for the coverage-by-construction argument.
 
       # The comparison the README cites. It asserts the decision each mechanism produces, so a
       # regression turns it red rather than quietly changing a number in a table nobody re-runs.
@@ -172,6 +199,318 @@ jobs:
 
       - name: Confirm the tree is restored
         run: git diff --exit-code
+
+  # --- falsify-plan: derive the shard matrix from tests/gate-falsifiability.sh's own CHECKS=
+  # line -- the single declared list check 16 of the gate itself polices -- so a row added
+  # there lands in some shard's input on its very next run, and a hand-maintained shard list
+  # (the defect this whole pipeline exists to avoid re-introducing, one level up) never gets
+  # the chance to exist. Same derivation claude/inventory.json records at
+  # regeneration.derivations.falsifiability_rows:
+  #   sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh
+  #
+  # Round-robin (list index i -> shard i % FALSIFY_SHARDS), not contiguous chunks: it is a
+  # TOTAL function over the list -- every index lands in exactly one shard by construction, with
+  # no remainder bucket to forget -- and it spreads whichever rows turn out to be the slow ones
+  # across every shard rather than letting them cluster in one.
+  #
+  # This job does not trust its own arithmetic as the coverage proof; it only rules out a bug in
+  # the split loop below, not a bug in how the matrix expression later reaches each shard job's
+  # environment. It self-checks that the union of the shards it just built equals the
+  # authoritative list it split, and uploads that authoritative list as an artifact so
+  # falsify-reconcile can diff the shards' ACTUAL runtime input against it independently, after
+  # they run -- see that job for why both checks exist rather than just this one.
+  falsify-plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Derive shards from the CHECKS= line, and prove the split covers it
+        id: plan
+        run: |
+          set -eu
+          SHARDS="$FALSIFY_SHARDS"
+          IDS=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh)
+          [ -n "$IDS" ] || {
+            echo "::error::empty CHECKS derivation from tests/gate-falsifiability.sh -- refusing to plan zero shards"
+            exit 1
+          }
+
+          mkdir -p /tmp/falsify-plan
+          : > /tmp/falsify-plan/authoritative.txt
+          i=0
+          while [ "$i" -lt "$SHARDS" ]; do : > "/tmp/falsify-plan/shard-$i.txt"; i=$((i+1)); done
+          i=0
+          n=0
+          for _id in $IDS; do
+            printf '%s\n' "$_id" >> /tmp/falsify-plan/authoritative.txt
+            shard=$((i % SHARDS))
+            printf '%s\n' "$_id" >> "/tmp/falsify-plan/shard-$shard.txt"
+            i=$((i+1)); n=$((n+1))
+          done
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+
+          # Self-check #1 (this job's own arithmetic). Coverage is re-checked independently,
+          # against the shards' actual runtime input, in falsify-reconcile below.
+          sort -u /tmp/falsify-plan/authoritative.txt > /tmp/falsify-plan/authoritative-sorted.txt
+          cat /tmp/falsify-plan/shard-*.txt | sort -u > /tmp/falsify-plan/union.txt
+          if ! diff -u /tmp/falsify-plan/authoritative-sorted.txt /tmp/falsify-plan/union.txt; then
+            echo "::error::falsify-plan's own shard split does not cover the authoritative CHECKS list -- see diff above"
+            exit 1
+          fi
+
+          : > /tmp/falsify-plan/shards.tsv
+          i=0
+          while [ "$i" -lt "$SHARDS" ]; do
+            ids_=$(tr '\n' ' ' < "/tmp/falsify-plan/shard-$i.txt" | sed 's/ *$//')
+            [ -n "$ids_" ] || {
+              echo "::error::shard $i would be assigned zero ids ($SHARDS shards for $n rows) -- lower FALSIFY_SHARDS or investigate the split"
+              exit 1
+            }
+            printf '%s\t%s\n' "$i" "$ids_" >> /tmp/falsify-plan/shards.tsv
+            i=$((i+1))
+          done
+          MATRIX_JSON=$(jq -c -R -n '[inputs | split("\t") | {shard: (.[0]|tonumber), ids: .[1]}]' \
+            /tmp/falsify-plan/shards.tsv)
+          echo "matrix={\"include\":$MATRIX_JSON}" >> "$GITHUB_OUTPUT"
+          echo "planned $SHARDS shards for $n declared rows"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: falsify-authoritative-ids
+          path: /tmp/falsify-plan/authoritative-sorted.txt
+          retention-days: 1
+
+  # --- falsify: the sharded sweep itself, one matrix leg per shard falsify-plan built. Same
+  # toolchain as verify-core (jq, shellcheck, the fixture validators, the Claude Code CLI) so no
+  # row degrades to an unexpected skip just because it landed on a leaner runner -- in
+  # particular row 19, the one falsifiability row that needs the CLI to produce a real FAIL
+  # rather than a skip (see the "No unexpected skips" step below).
+  #
+  # Each shard gets its own checkout on its own runner: matrix legs run on separate GitHub-
+  # hosted VMs with separate filesystems, so there is no shared worktree for two shards to race
+  # on. gate-falsifiability.sh's own concurrency lock (keyed on `git rev-parse
+  # --git-common-dir`, see its header comment) exists to stop a concurrent SESSION on the SAME
+  # worktree from reading a tree mid-mutation as a real result; shards never share a worktree,
+  # so that lock is simply never contended between them -- confirmed by reading its key, not
+  # assumed, since a lock that turned out to be filesystem-scoped rather than worktree-scoped
+  # would need a different argument here.
+  falsify:
+    needs: falsify-plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.falsify-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install jq and shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq shellcheck
+          shellcheck --version
+
+      - name: Install fixture validators (tsc, csslint, xmllint, gofmt)
+        run: |
+          set -eu
+          sudo apt-get install -y -qq libxml2-utils
+          npm install -g typescript@5 csslint@1
+          tsc --version
+          csslint --version
+          xmllint --version
+          gofmt --help >/dev/null 2>&1 || { echo "gofmt not on PATH"; exit 1; }
+
+      - name: Install Claude Code CLI
+        run: |
+          set -u
+          npm install -g @anthropic-ai/claude-code@2.1.243 || true
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  PKG=linux-x64 ;;
+            Linux-aarch64) PKG=linux-arm64 ;;
+            Darwin-arm64)  PKG=darwin-arm64 ;;
+            Darwin-x86_64) PKG=darwin-x64 ;;
+            *)             PKG="" ;;
+          esac
+          if [ -n "$PKG" ]; then
+            PREFIX="$RUNNER_TEMP/ccbin"
+            npm install --prefix "$PREFIX" "@anthropic-ai/claude-code-$PKG@2.1.243" || true
+            BIN="$PREFIX/node_modules/@anthropic-ai/claude-code-$PKG/claude"
+            if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
+              sudo ln -sf "$BIN" /usr/local/bin/claude
+            fi
+          fi
+          claude --version || echo "::warning::claude CLI unusable on this runner; falsify row 19 will skip"
+
+      - name: Falsify this shard's rows (VSTACK_FALSIFY_ROWS scoped)
+        env:
+          VSTACK_FALSIFY_ROWS: ${{ matrix.ids }}
+        run: |
+          [ -n "${VSTACK_FALSIFY_ROWS:-}" ] || {
+            echo "::error::shard ${{ matrix.shard }} was assigned no ids -- refusing to run gate-falsifiability.sh unscoped"
+            exit 1
+          }
+          echo "shard ${{ matrix.shard }}: $VSTACK_FALSIFY_ROWS"
+          # Redirected, not piped into tee: this workflow's default shell is `bash -e` with no
+          # pipefail (see the "Run the verification gate" step on the macOS/Alpine jobs below
+          # for the measured proof), so a pipe here would let a red gate-falsifiability.sh exit
+          # as tee's 0. rc captured explicitly instead.
+          rc=0
+          ./tests/gate-falsifiability.sh > "$RUNNER_TEMP/falsify-shard.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/falsify-shard.txt"
+          exit "$rc"
+
+      - name: No unexpected skips in this shard (only row 24's no-tags skip is approved)
+        run: |
+          bad=$(/usr/bin/grep -E '^(ok|FAIL|skip)[[:space:]]+check ' "$RUNNER_TEMP/falsify-shard.txt" \
+                | /usr/bin/grep '^skip' | /usr/bin/grep -v '^skip[[:space:]]*check 24 ' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::unexpected skip(s) in shard ${{ matrix.shard }} (row 19 needs the CLI installed above; nothing else is expected to skip):"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Record + sanity-check the ids this shard actually ran
+        env:
+          VSTACK_FALSIFY_ROWS: ${{ matrix.ids }}
+        run: |
+          set -eu
+          /usr/bin/grep -E '^(ok|FAIL|skip)[[:space:]]+check ' "$RUNNER_TEMP/falsify-shard.txt" \
+            | awk '{for(i=1;i<=NF;i++) if($i=="check"){print $(i+1); break}}' \
+            | sort -u > "$RUNNER_TEMP/ran-ids.txt"
+          want=$(printf '%s\n' $VSTACK_FALSIFY_ROWS | sort -u | wc -l | tr -d ' ')
+          got=$(wc -l < "$RUNNER_TEMP/ran-ids.txt" | tr -d ' ')
+          if [ "$got" != "$want" ]; then
+            echo "::error::shard ${{ matrix.shard }} was assigned $want id(s) but the gate's own output names $got of them -- a row landed nowhere the accounting footer would catch, or landed twice"
+            exit 1
+          fi
+          echo "ok  shard ${{ matrix.shard }}: $got id(s) confirmed in the gate's own output"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: falsify-ran-ids-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ran-ids.txt
+          retention-days: 1
+
+  # --- falsify-reconcile: the check this whole sharding scheme exists to have. N shards each
+  # reporting green proves nothing about coverage on its own -- sharding a gate whose entire
+  # purpose is complete coverage introduces exactly the failure mode this repository exists to
+  # catch (check 16's "a check with no row" has a new sibling: "a row with no shard"). Runs even
+  # if a shard failed (`if: always()`), so a coverage gap is reported specifically rather than
+  # lost behind a job that simply skipped.
+  #
+  # Reconciles in two independent directions, neither of which is "trust the plan job's own
+  # arithmetic": (1) re-derives the authoritative CHECKS list fresh, from this same commit,
+  # rather than reusing falsify-plan's number, and diffs the two; (2) diffs the UNION of ids
+  # each shard's own gate-falsifiability.sh output actually reported against that authoritative
+  # list -- not the ids the matrix intended to send it, which falsify's own per-shard sanity
+  # step already checked, but the ids the tool itself said it ran.
+  falsify-reconcile:
+    needs: [falsify-plan, falsify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Every shard (and the plan that built them) succeeded
+        run: |
+          rc=0
+          [ "${{ needs.falsify-plan.result }}" = success ] \
+            || { echo "::error::falsify-plan did not succeed: ${{ needs.falsify-plan.result }}"; rc=1; }
+          [ "${{ needs.falsify.result }}" = success ] \
+            || { echo "::error::falsify (the shard matrix) did not all succeed: ${{ needs.falsify.result }}"; rc=1; }
+          exit "$rc"
+
+      - name: Re-derive the authoritative id list independently, at this same commit
+        run: |
+          set -eu
+          sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh | tr ' ' '\n' | sort -u \
+            > /tmp/authoritative-fresh.txt
+          [ -s /tmp/authoritative-fresh.txt ] || { echo "::error::empty CHECKS re-derivation"; exit 1; }
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: falsify-authoritative-ids
+          path: /tmp/artifacts/authoritative
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: falsify-ran-ids-shard-*
+          path: /tmp/artifacts/ran
+
+      - name: falsify-plan's uploaded list matches an independent re-derivation
+        run: |
+          set -eu
+          diff -u /tmp/authoritative-fresh.txt /tmp/artifacts/authoritative/authoritative-sorted.txt
+
+      - name: The union of ids every shard actually ran equals every declared row -- no more, no less
+        run: |
+          set -eu
+          find /tmp/artifacts/ran -name ran-ids.txt -exec cat {} + | sort -u > /tmp/union-ran.txt
+          missing=$(comm -23 /tmp/authoritative-fresh.txt /tmp/union-ran.txt)
+          extra=$(comm -13 /tmp/authoritative-fresh.txt /tmp/union-ran.txt)
+          rc=0
+          if [ -n "$missing" ]; then
+            echo "::error::declared row(s) that ran in NO shard: $missing"
+            rc=1
+          fi
+          if [ -n "$extra" ]; then
+            echo "::error::shard(s) reported id(s) not in the declared CHECKS list: $extra"
+            rc=1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "ok  $(wc -l < /tmp/authoritative-fresh.txt) declared rows, all ran in exactly one shard"
+          fi
+          exit "$rc"
+
+  # --- verify: the join. Its NAME is the required check, kept exactly as it was before this
+  # sharding change:
+  #   - .github/branch-protection-ruleset.json's required_status_checks lists context strings
+  #     "verify", "install-linux", "install-macos", "install-alpine" (exact match --
+  #     .github/scripts/latest-check-run.jq selects on `.name == $n`, not a prefix).
+  #   - release.yml's `REQUIRED_CHECKS: verify install-linux install-macos install-alpine`
+  #     (line ~34) passes the same four names to require-checks-green.sh, which reports a
+  #     required check MISSING if no check-run by that exact name exists for the candidate SHA.
+  # A rename here would not fail loudly -- it would leave the release gate either undecided
+  # forever (MISSING) or, if branch protection were edited to match, deciding on fewer signals
+  # than before. Neither is a change to make by editing a job id in this file alone, so `verify`
+  # stays the name; only what runs to earn it has changed.
+  #
+  # This job carries almost no work of its own on purpose. The work is verify-core (everything
+  # the old monolithic `verify` job did, except the falsifiability sweep) running concurrently
+  # with the falsify-plan / falsify / falsify-reconcile pipeline; this job's only content is
+  # requiring every one of those to have succeeded before it can. `if: always()` so it still
+  # runs -- and names which upstream lane failed -- rather than reading as a bare `skipped`
+  # conclusion when one of them goes red. require-checks-green.sh treats anything other than
+  # `success` as not green either way (skipped included), so this is for a readable log, not for
+  # correctness that would otherwise be missing.
+  verify:
+    needs: [verify-core, falsify-plan, falsify, falsify-reconcile]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every lane this check speaks for actually succeeded
+        run: |
+          rc=0
+          for pair in \
+            "verify-core:${{ needs.verify-core.result }}" \
+            "falsify-plan:${{ needs.falsify-plan.result }}" \
+            "falsify:${{ needs.falsify.result }}" \
+            "falsify-reconcile:${{ needs.falsify-reconcile.result }}"; do
+            job=${pair%%:*}; result=${pair#*:}
+            if [ "$result" != success ]; then
+              echo "::error::$job did not succeed (result=$result)"
+              rc=1
+            else
+              echo "ok  $job: success"
+            fi
+          done
+          exit "$rc"
 
   # Everything above runs the gate. This installs for real, on Linux, into a disposable HOME.
   # It exists because the worst bug this repo has shipped was Linux-only and invisible on the

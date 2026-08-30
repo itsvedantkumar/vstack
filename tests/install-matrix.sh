@@ -1238,6 +1238,75 @@ if want overlay-preserves; then
   fi
 fi
 
+# --- doctor's findings are read from its own JSON, never counted off the display ---------------
+# This lane needs two things from bin/doctor: a verdict, and an accurate list of what failed.
+# Both were being re-derived by grepping the rendered output for the ✖ glyph, and every variant
+# of that is wrong in a different direction:
+#
+#   grep -c '✖'   over-counts. doctor ends with a bare `echo "DRIFT ✖"` verdict summarising the
+#                 findings above it, so the summary is counted alongside the thing it summarises.
+#                 Measured: one real finding reported as "2 failure(s): ...;DRIFT ✖;".
+#   grep -c '✖.'  under-counts, and is fragile besides. It skips the verdict only because the
+#                 verdict's glyph happens to land at end-of-line; one trailing space restores the
+#                 double count, and under a C locale `.` matches a BYTE, so the 3-byte ✖ is one
+#                 reflow away from matching its own continuation bytes. Worse, it drops a real
+#                 failure: drift has NO bad() line, its only appearance in the display IS the
+#                 `DRIFT ✖` verdict. Measured on this checkout -- failCount 1 and
+#                 drift.status "drift", two real failures, and the predicate returned 1.
+#
+# The display cannot separate the drift finding from the drift verdict because they are the same
+# line. doctor's JSON can, and already does, so the display is not parsed at all any more.
+#
+# The count is deliberately failCount + drift, not failCount alone: bin/doctor:1244 sets
+# EXIT_CODE=1 on `$FAIL -ne 0 OR DRIFT_STATUS = drift`, but failCount carries only $FAIL. A
+# drift-only failure is a real red that failCount reports as zero.
+dr_json(){ # <home> <doctor-path>  -> doctor's JSON, or empty if it could not produce any
+  HOME="$1" "$2" --json 2>/dev/null
+}
+count_dr_findings(){ # <doctor --json output>
+  printf '%s' "$1" | jq -r '
+    ([.checks[]? | select(.status != "ok")] | length)
+    + (if (.drift.status? // "ok") != "ok" then 1 else 0 end)' 2>/dev/null
+}
+list_dr_findings(){ # <doctor --json output>
+  printf '%s' "$1" | jq -r '
+    ([.checks[]? | select(.status != "ok") | "\(.label) ✖ \(.detail)"]
+     + (if (.drift.status? // "ok") != "ok" then ["drift ✖ \(.drift.detail)"] else [] end))
+    | join("; ")' 2>/dev/null
+}
+
+# Proves the counter against fixed JSON fixtures rather than trusting a live install's word for
+# it: a live run's finding count depends on whatever is true of the machine that day, so it is
+# the one place that can never assert an exact number and mean it.
+if want doctor-verdict-count; then
+  # one check failure, no drift
+  FIX1='{"checks":[{"label":"declared release is fetchable","status":"bad","detail":"no tag on origin"},{"label":"skills (26)","status":"ok","detail":""}],"drift":{"status":"ok","detail":""},"failCount":1}'
+  n1=$(count_dr_findings "$FIX1")
+  [ "${n1:-0}" -eq 1 ] || e="${e:-}; one check failure counted as $n1, want 1"
+  case "$(list_dr_findings "$FIX1")" in
+    *"declared release is fetchable"*) ;;
+    *) e="${e:-}; the finding list did not name the failing check" ;;
+  esac
+
+  # drift only. failCount is 0 here and the run is still red -- the case the display could not
+  # express and failCount alone gets wrong.
+  FIX_D='{"checks":[{"label":"skills (26)","status":"ok","detail":""}],"drift":{"status":"drift","itemsCompared":78,"detail":"drift found across 78 item(s) compared"},"failCount":0}'
+  nd=$(count_dr_findings "$FIX_D")
+  [ "${nd:-0}" -eq 1 ] || e="${e:-}; a drift-only failure counted as $nd, want 1 (failCount alone reports 0)"
+  case "$(list_dr_findings "$FIX_D")" in
+    *drift*) ;;
+    *) e="${e:-}; the finding list did not name the drift failure" ;;
+  esac
+
+  # fully clean: no check failures, no drift
+  FIX0='{"checks":[{"label":"skills (26)","status":"ok","detail":""}],"drift":{"status":"ok","detail":""},"failCount":0}'
+  n0=$(count_dr_findings "$FIX0")
+  [ "${n0:-1}" -eq 0 ] || e="${e:-}; a clean fixture counted $n0"
+
+  [ -z "${e:-}" ] && ok "doctor's findings are read from its JSON (3 fixtures: check-fail, drift-only, clean)" \
+    || { bad "doctor's findings are read from its JSON" "${e#; }"; unset e; }
+fi
+
 # --- a stranger's clean install reports healthy, not broken -------------------------------------
 # doctor mixed what vstack installs with what the operator happens to have: the author's Claude
 # plan, their ~/Projects layout, their optional plugins. On a fresh machine eight of those went
@@ -1250,13 +1319,19 @@ if want doctor-stranger; then
   if [ ! -x "$H/.config/agents/bin/doctor" ]; then
     bad "doctor is green on a clean install" "install did not place bin/doctor"
   else
-    out=$(HOME="$H" "$H/.config/agents/bin/doctor" 2>&1); rc=$?
-    reds=$(printf '%s' "$out" | grep -c '✖' || true)
-    if [ "$rc" -eq 0 ] && [ "${reds:-0}" -eq 0 ]; then
-      ok "doctor is green on a clean install ($(printf '%s' "$out" | grep -c '·') note(s), 0 failures)"
+    HOME="$H" "$H/.config/agents/bin/doctor" >/dev/null 2>&1; rc=$?
+    js=$(dr_json "$H" "$H/.config/agents/bin/doctor")
+    reds=$(count_dr_findings "$js")
+    # An absent or unparseable --json is not a pass. It means this lane cannot answer its own
+    # question, and the honest report says so rather than falling back to a looser one.
+    if [ -z "$js" ] || [ -z "$reds" ]; then
+      bad "doctor is green on a clean install" \
+          "doctor exited $rc but produced no parseable --json, so the finding count is unknown (jq present? $(command -v jq >/dev/null 2>&1 && echo yes || echo NO))"
+    elif [ "$rc" -eq 0 ] && [ "$reds" -eq 0 ]; then
+      ok "doctor is green on a clean install ($(printf '%s' "$js" | jq -r '[.checks[]?|select(.status=="note")]|length' 2>/dev/null) note(s), 0 failures)"
     else
       bad "doctor is green on a clean install" \
-          "exit $rc with $reds failure(s): $(printf '%s' "$out" | grep '✖' | sed 's/  */ /g' | tr '\n' ';')"
+          "exit $rc with $reds failure(s): $(list_dr_findings "$js")"
     fi
   fi
 fi
