@@ -3553,6 +3553,19 @@ if [ -f "$_c50_wf" ] && [ -f "$_c50_rl" ]; then
   _c50_gates(){ # <required-job> <job-under-test> -> 0 if that job failing makes the script fail
     _g_script=$(_c50_runof "$1")
     [ -n "$_g_script" ] || return 1
+    # ONLY a join's script is ever executed. Without this guard the loop below ran the first
+    # run: block of every required job, and install-macos's first run: block *is*
+    # `./.claude/verify.sh` -- so the gate executed itself, from inside itself, once per
+    # candidate job. It never fired locally because $RUNNER_TEMP is unset here, which made that
+    # line's redirect fail; on a runner RUNNER_TEMP is set, there is no `set -e` in an extracted
+    # block, and a missing `brew` on ubuntu just carries on to the recursion. It hung seven CI
+    # shards for 78 minutes. A job that never mentions needs.<x>.result cannot be gating on one,
+    # so there is nothing here worth executing it to find out.
+    case "$_g_script" in *'needs.'*'.result'*) ;; *) return 1 ;; esac
+    # Belt and braces: even a real join is someone else's shell, and this gate must not be the
+    # thing that hangs. No timeout(1) on macOS, so bound it with a watchdog subshell.
+    _g_run(){ ( "$@" ) & _g_p=$!; ( sleep 20; kill -9 "$_g_p" 2>/dev/null ) 2>/dev/null & _g_w=$!
+              wait "$_g_p"; _g_rc=$?; kill "$_g_w" 2>/dev/null; return "$_g_rc"; }
     # every needs.X.result -> success, then the one under test -> failure
     _g_ok=$(printf '%s' "$_g_script" | sed -E 's/\$\{\{[[:space:]]*needs\.[A-Za-z0-9_-]+\.result[[:space:]]*\}\}/success/g')
     _g_bad=$(printf '%s' "$_g_script" \
@@ -3560,10 +3573,28 @@ if [ -f "$_c50_wf" ] && [ -f "$_c50_rl" ]; then
       | sed -E 's/\$\{\{[[:space:]]*needs\.[A-Za-z0-9_-]+\.result[[:space:]]*\}\}/success/g')
     # any surviving ${{ ... }} would make bash choke on its own syntax rather than decide
     case "$_g_bad" in *'${{'*) return 1 ;; esac
-    printf '%s\n' "$_g_ok"  | bash >/dev/null 2>&1 || return 1   # positive control
-    printf '%s\n' "$_g_bad" | bash >/dev/null 2>&1 && return 1   # must fail on this job's red
+    _g_f=$(mktemp); printf '%s\n' "$_g_ok"  > "$_g_f"
+    _g_run bash "$_g_f" >/dev/null 2>&1 || { rm -f "$_g_f"; return 1; }   # positive control
+    printf '%s\n' "$_g_bad" > "$_g_f"
+    _g_run bash "$_g_f" >/dev/null 2>&1 && { rm -f "$_g_f"; return 1; }   # must fail on its red
+    rm -f "$_g_f"
     return 0
   }
+
+  # Self-check on the executor itself, before it is trusted to answer anything. install-macos is
+  # a required job whose first run: block is `./.claude/verify.sh`, so "refused, and refused
+  # WITHOUT being run" is the difference between a gate and a fork bomb. Proved by sentinel: the
+  # block writes into $RUNNER_TEMP, so an empty sandbox after the call is evidence it never ran,
+  # not merely that it returned the right number.
+  if [ -n "$_c50_req" ]; then
+    _c50_sent=$(mktemp -d)
+    if RUNNER_TEMP="$_c50_sent" _c50_gates install-macos falsify 2>/dev/null; then
+      c50_errs="$c50_errs\ninstall-macos was accepted as a join gating falsify, but its script asserts no needs.<x>.result at all"
+    fi
+    [ -z "$(ls -A "$_c50_sent" 2>/dev/null)" ] \
+      || c50_errs="$c50_errs\nthe join executor ran install-macos's run: block (it wrote into RUNNER_TEMP) -- that block is ./.claude/verify.sh, so the gate would be running itself"
+    rm -rf "$_c50_sent"
+  fi
 
   if [ -n "$_c50_jobs" ] && [ -n "$_c50_req" ]; then
     # Fold in every job a required job provably gates on, then compare what is left.

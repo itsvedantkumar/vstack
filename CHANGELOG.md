@@ -4,6 +4,39 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.55.0 — 2026-08-31
+
+### v1.54.0's own check 50 hung CI for 78 minutes by running the gate inside the gate
+
+v1.54.0 taught check 50 to admit a job that is fanned into a required check rather than named by
+it, and to prove each one by execution: extract the required job's `run:` script, fill the
+`${{ needs.X.result }}` templates with success except for the job under test, and require a
+non-zero exit.
+
+It executed the first `run:` block of *every* required job. `install-macos`'s first `run:` block
+is `./.claude/verify.sh`. So the gate ran itself, once per candidate job, and each nested gate did
+it again.
+
+It passed locally and shipped. `$RUNNER_TEMP` is unset on a workstation, so that block's
+`> "$RUNNER_TEMP/gate-macos.txt"` redirect failed and the line never executed. On a runner
+`RUNNER_TEMP` is set; an extracted block carries no `set -e`, so a missing `brew` on ubuntu simply
+carried on into the recursion. All seven falsify shards and `verify-core` sat in progress for 78
+minutes before the run was cancelled. v1.54.0 was tagged but never published.
+
+Two fixes, because the second is what makes the first checkable. A required job whose script never
+mentions `needs.<x>.result` cannot be gating on one, so it is refused without being run; and every
+extracted script now runs under a 20-second watchdog, since a real join is still someone else's
+shell and this gate must not be the thing that hangs.
+
+Check 50 now self-checks its own executor before trusting it to answer anything: it calls the
+executor with `install-macos` against a sandboxed `RUNNER_TEMP` and requires both a refusal and an
+empty sandbox afterwards. The empty sandbox is the part that matters. Returning the right number
+while still having run the block is exactly the bug that shipped, and only the sentinel can tell
+those apart.
+
+Row 50d narrows the guard rather than deleting it. A deleted guard would recurse inside the
+falsifiability suite too, and a row has to make the gate go red, not make it never return.
+
 ## 1.54.0 — 2026-08-31
 
 ### The falsifiability sweep took 63-93 minutes because every row re-ran the whole gate
