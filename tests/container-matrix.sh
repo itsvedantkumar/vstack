@@ -297,150 +297,90 @@ fi
 ASSERT_EOF
 cat >> "$ROOT/assertions.sh" <<'ASSERT_EOF'
 
-# --- 8-12(+9b,9c). skill-mandate.sh, all five mandates (breadth/fan-out, conversational,
-# prove-it-works, and -- new in v1.57.0 -- the fan-out batch requirement and the swarm mandate)
-# -----------------------------------------------------------------------------------------------
-# Asserted on the stdout JSON's .reason naming the SPECIFIC mandate, never on exit code -- the
-# hook exits 0 whether or not it blocks, and accepting any block as proof of the RIGHT block is
-# the defect this suite closes.
+# --- mandate cases (a..q, 9b, 10, 11, 12): skill-mandate.sh against the ONE fixture set shared
+# with .claude/verify.sh check 27 via tests/mandate-cases.sh -- previously this harness and check
+# 27 each grew their own fixtures and drifted apart (v1.57.0 changed skill-mandate.sh, check 27's
+# copy was updated, this harness's copy was not, and the first signal was a failed release whose
+# cleanup job deleted the tag from origin). tests/mandate-cases.sh is the union of both sets:
+# container's old case "8" ~= "i", "9" ~= "o", "9c" ~= "q" (collapsed into check 27's equivalents,
+# not a coverage loss); "9b", "10", "11", "12" have no check-27 equivalent and are kept as-is. See
+# tests/mandate-cases.sh's own header for full provenance and the flag vocabulary (STOP_ACTIVE /
+# NO_MANDATE / PRIME2). Asserted on the stdout JSON's .decision/.reason (or emptiness for SILENT),
+# never on exit code -- the hook exits 0 whether or not it blocks.
 MSH="$CDIR/hooks/skill-mandate.sh"
-if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
-  mkdir -p /tmp/mandate
-  jline_text(){ jq -cn --arg t "$1" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'; }
-  jline_tool(){ jq -cn --arg n "$1" --argjson i "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i}]}}'; }
-  # jline_batch: ONE assistant record whose .message.content holds TWO tool_use blocks. This is
-  # the only shape skill-mandate.sh's fanout_batches counts as a real concurrent dispatch (see
-  # the hook's own "what actually runs concurrently in Claude Code" comment) -- two jline_tool
-  # lines back to back is a serial loop instead, which v1.57.0 deliberately stopped crediting.
-  jline_batch(){ jq -cn --arg n "$1" --argjson i1 "$2" --argjson i2 "$3" \
-    '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i1},{type:"tool_use",name:$n,input:$i2}]}}'; }
-  # VSTACK_DELEGATION_LOG must be exported before the pipeline, not prefixed onto just the
-  # printf half of it -- an env-var prefix on one command in a pipe scopes to that command only,
-  # and skill-mandate.sh (the OTHER half of the pipe) would then fall back to its real default
-  # path and write these synthetic fixture Stops straight into the actual installed
-  # ~/.claude/vstack-delegation-log.jsonl, next to genuine session data. The source comment on
-  # VSTACK_DELEGATION_LOG says exactly this must not happen; this scopes the override to the
-  # whole function via a subshell so it never leaks past run_mandate either.
-  run_mandate(){ ( # <fixture-file> <session-id-suffix>
-    export VSTACK_DELEGATION_LOG=/tmp/mandate/drop.jsonl
-    printf '{"transcript_path":"%s","session_id":"beth-%s-%s","stop_hook_active":false}' "$1" "$2" "$LABEL" \
-      | TMPDIR=/tmp bash "$MSH" 2>/tmp/mandate.err
-  ) }
-
-  # 8: breadth across >=3 dirs / >=2 extensions, zero dispatch -> block naming the breadth mandate.
-  { jline_tool Write '{"file_path":"/tmp/mandate/breadth/a/x.sh"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth/b/y.json"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth/c/z.yaml"}'
-    jline_text "Updated the three config files."
-  } > /tmp/mandate/breadth-no-dispatch.jsonl
-  out8=$(run_mandate /tmp/mandate/breadth-no-dispatch.jsonl breadth-nodispatch)
-  dec8=$(printf '%s' "$out8" | jq -r '.decision // "none"' 2>/dev/null)
-  reason8=$(printf '%s' "$out8" | jq -r '.reason // ""' 2>/dev/null)
-  if [ "$dec8" = block ] && printf '%s' "$reason8" | grep -q 'multi-directory work'; then
-    res PASS "8-mandate-breadth-blocks" "breadth with zero dispatch blocked, naming 'multi-directory work'"
-  else
-    res FAIL "8-mandate-breadth-blocks" "decision=$dec8 (want block naming 'multi-directory work'); reason: $(printf '%s' "$reason8" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 9: same breadth, but post-v1.57.0: swarm called first, then TWO Agent dispatches BATCHED in
-  # ONE assistant message (jline_batch -- the only shape fanout_batches counts as concurrent),
-  # plus a named call sign -> stays silent on both the breadth/fan-out mandate and the swarm
-  # mandate (exit 0, empty stdout). This replaces the pre-1.57.0 fixture, which used a single
-  # jline_tool Agent call: that is a serial dispatch, not a batch, and correctly blocks under the
-  # current rules (see 9b) -- the old fixture was proving the wrong thing was silent.
-  { jline_tool Skill '{"skill":"swarm"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth2/a/x.sh"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth2/b/y.json"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth2/c/z.yaml"}'
-    jline_batch Agent '{"prompt":"verify the config changes","subagent_type":"qa"}' '{"prompt":"review the config changes","subagent_type":"code-reviewer"}'
-    jline_text "RICK: dispatched MEESEEKS (qa) and MORTY (code-reviewer) together to verify and review the config changes."
-  } > /tmp/mandate/breadth-with-dispatch.jsonl
-  out9=$(run_mandate /tmp/mandate/breadth-with-dispatch.jsonl breadth-dispatch)
-  if [ -z "$out9" ]; then
-    res PASS "9-mandate-breadth-dispatch-silent" "breadth with swarm called + a batched 2-agent dispatch + attribution stayed silent"
-  else
-    res FAIL "9-mandate-breadth-dispatch-silent" "expected empty stdout, got: $(printf '%s' "$out9" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 9b: same breadth eligibility, swarm called (isolates this from the swarm mandate below), but
-  # only ONE Agent dispatch -- a serial delegation, never 2+ in the same message -> block naming
-  # the breadth/fan-out mandate. This is the direction the pre-1.57.0 fixture (the old case 9)
-  # got backwards: it asserted this exact shape stays silent, and the v1.57.0 release shipped red
-  # on all three container lanes because of it.
-  { jline_tool Skill '{"skill":"swarm"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/a/x.sh"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/b/y.json"}'
-    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/c/z.yaml"}'
-    jline_tool Agent '{"prompt":"verify the config changes","subagent_type":"qa"}'
-    jline_text "RICK: dispatched MEESEEKS to verify, then moved on."
-  } > /tmp/mandate/breadth-serial.jsonl
-  out9b=$(run_mandate /tmp/mandate/breadth-serial.jsonl breadth-serial)
-  dec9b=$(printf '%s' "$out9b" | jq -r '.decision // "none"' 2>/dev/null)
-  reason9b=$(printf '%s' "$out9b" | jq -r '.reason // ""' 2>/dev/null)
-  if [ "$dec9b" = block ] && printf '%s' "$reason9b" | grep -q 'multi-directory work'; then
-    res PASS "9b-mandate-breadth-serial-blocks" "breadth-eligible + swarm called + ONE dispatch (serial loop, no batch) blocked, naming 'multi-directory work'"
-  else
-    res FAIL "9b-mandate-breadth-serial-blocks" "decision=$dec9b (want block naming 'multi-directory work'); reason: $(printf '%s' "$reason9b" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 9c: a Task/Agent dispatch where the swarm skill was never called (no breadth writes at all,
-  # so this isolates the swarm mandate from the breadth one above) -> block naming swarm.
-  { jline_tool Agent '{"prompt":"verify the config changes","subagent_type":"qa"}'
-    jline_text "RICK: dispatched MEESEEKS to verify."
-  } > /tmp/mandate/swarm-not-called.jsonl
-  out9c=$(run_mandate /tmp/mandate/swarm-not-called.jsonl swarm-notcalled)
-  dec9c=$(printf '%s' "$out9c" | jq -r '.decision // "none"' 2>/dev/null)
-  reason9c=$(printf '%s' "$out9c" | jq -r '.reason // ""' 2>/dev/null)
-  if [ "$dec9c" = block ] && printf '%s' "$reason9c" | grep -q 'the swarm skill'; then
-    res PASS "9c-mandate-swarm-required-blocks" "a Task/Agent dispatch with swarm never invoked blocked, naming the swarm mandate"
-  else
-    res FAIL "9c-mandate-swarm-required-blocks" "decision=$dec9c (want block naming the swarm mandate); reason: $(printf '%s' "$reason9c" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 10: purely conversational turn (no tool_use at all) -> stays silent.
-  jline_text "Sure -- here's how the retry loop's exponential backoff is computed." > /tmp/mandate/conversational.jsonl
-  out10=$(run_mandate /tmp/mandate/conversational.jsonl conversational)
-  if [ -z "$out10" ]; then
-    res PASS "10-mandate-conversational-silent" "a purely conversational turn stayed silent"
-  else
-    res FAIL "10-mandate-conversational-silent" "expected empty stdout, got: $(printf '%s' "$out10" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 11: prove-it-works -- an edit, then a completion claim, with NO Bash/Read/Task/Agent call
-  # anywhere in the turn -> block naming prove-it-works.
-  { jline_tool Write '{"file_path":"/tmp/mandate/piw/fix.sh"}'
-    jline_text "The fix is done."
-  } > /tmp/mandate/piw-unverified.jsonl
-  out11=$(run_mandate /tmp/mandate/piw-unverified.jsonl piw-unverified)
-  dec11=$(printf '%s' "$out11" | jq -r '.decision // "none"' 2>/dev/null)
-  reason11=$(printf '%s' "$out11" | jq -r '.reason // ""' 2>/dev/null)
-  if [ "$dec11" = block ] && printf '%s' "$reason11" | grep -q 'prove-it-works'; then
-    res PASS "11-mandate-prove-it-works-blocks" "edit + completion claim with no verification blocked, naming 'prove-it-works'"
-  else
-    res FAIL "11-mandate-prove-it-works-blocks" "decision=$dec11 (want block naming 'prove-it-works'); reason: $(printf '%s' "$reason11" | tr '\n' ' ' | cut -c1-200)"
-  fi
-
-  # 12: same shape, but a Bash call is present in the turn -> stays silent.
-  { jline_tool Write '{"file_path":"/tmp/mandate/piw2/fix.sh"}'
-    jline_tool Bash '{"command":"bash /tmp/mandate/piw2/fix.sh --selftest"}'
-    jline_text "The fix is done."
-  } > /tmp/mandate/piw-verified.jsonl
-  out12=$(run_mandate /tmp/mandate/piw-verified.jsonl piw-verified)
-  if [ -z "$out12" ]; then
-    res PASS "12-mandate-prove-it-works-silent" "edit + completion claim WITH a Bash call in the turn stayed silent"
-  else
-    res FAIL "12-mandate-prove-it-works-silent" "expected empty stdout, got: $(printf '%s' "$out12" | tr '\n' ' ' | cut -c1-200)"
-  fi
+MDCASES="/work/repo/tests/mandate-cases.sh"
+MANDATE_OK=1
+MANDATE_MISSING_REASON=""
+_mc_add_reason(){ MANDATE_MISSING_REASON="${MANDATE_MISSING_REASON:+$MANDATE_MISSING_REASON; }$1"; }
+[ -x "$MSH" ] || { MANDATE_OK=0; _mc_add_reason "$MSH missing or not executable"; }
+command -v jq >/dev/null 2>&1 || { MANDATE_OK=0; _mc_add_reason "jq unavailable"; }
+if [ -f "$MDCASES" ]; then
+  # shellcheck source=/dev/null
+  . "$MDCASES"
 else
-  res FAIL "8-mandate-breadth-blocks" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "9-mandate-breadth-dispatch-silent" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "9b-mandate-breadth-serial-blocks" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "9c-mandate-swarm-required-blocks" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "10-mandate-conversational-silent" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "11-mandate-prove-it-works-blocks" "$MSH missing or not executable, or jq unavailable"
-  res FAIL "12-mandate-prove-it-works-silent" "$MSH missing or not executable, or jq unavailable"
+  MANDATE_OK=0
+  _mc_add_reason "$MDCASES missing -- this harness and .claude/verify.sh check 27 share their fixtures from tests/mandate-cases.sh, so neither can drift from the other"
 fi
+mkdir -p /tmp/mandate
+_mc_has_flag(){ case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac; }
+# _mc_call: exports VSTACK_DELEGATION_LOG to a scratch file INSIDE a subshell -- an env prefix on
+# one command in a pipe scopes to that command only, and skill-mandate.sh (the other half of the
+# pipe) would otherwise fall back to its real default and write synthetic fixture rows into the
+# operator's actual ~/.claude/vstack-delegation-log.jsonl. Scoping the export to a subshell keeps
+# that guarantee for every invocation below, including the PRIME2 priming calls.
+_mc_call(){ ( # <case-id> <session-id> <stop_hook_active> <env-prefix-or-empty>
+  export VSTACK_DELEGATION_LOG=/tmp/mandate/drop.jsonl
+  mandate_case_lines "$1" > "/tmp/mandate/mc-$1.jsonl"
+  printf '{"transcript_path":"%s","session_id":"%s","stop_hook_active":%s}' \
+    "/tmp/mandate/mc-$1.jsonl" "$2" "$3" \
+    | TMPDIR=/tmp env $4 bash "$MSH" 2>>/tmp/mandate.err
+) }
 ASSERT_EOF
+
+# The per-case res call sites below are unrolled HOST-SIDE (this loop runs before any docker
+# command) so that $ROOT/assertions.sh contains 21 literal `res PASS "mandate-<id>" ...` /
+# `res FAIL "mandate-<id>" ...` call sites -- one pair per MANDATE_CASE_IDS entry -- rather than a
+# single runtime `for` loop. EXPECTED_LANES below is derived by grepping this assembled file for
+# literal call-site text; a runtime loop would collapse all 21 cases into one call site and
+# silently undercount the declared lane total, which is the exact class of defect this repo exists
+# to catch (see tests/mandate-cases.sh's own header for the drift incident this unification fixes).
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
+MDCASES_LOCAL="$SCRIPT_DIR/mandate-cases.sh"
+if [ ! -f "$MDCASES_LOCAL" ]; then
+  echo "container-matrix.sh: $MDCASES_LOCAL missing -- cannot generate the mandate lanes" >&2
+  exit 1
+fi
+# shellcheck source=tests/mandate-cases.sh
+. "$MDCASES_LOCAL"
+for id in $MANDATE_CASE_IDS; do
+  desc=$(mandate_case_desc "$id")
+  cat >> "$ROOT/assertions.sh" <<MANDATE_CASE_EOF
+
+# --- mandate case $id: $desc ---
+if [ "\$MANDATE_OK" != 1 ]; then
+  res FAIL "mandate-$id" "\$MANDATE_MISSING_REASON"
+else
+  flags=\$(mandate_case_flags "$id")
+  sha=false
+  _mc_has_flag "\$flags" STOP_ACTIVE && sha=true
+  envp=""
+  _mc_has_flag "\$flags" NO_MANDATE && envp="VSTACK_NO_MANDATE=1"
+  sid="beth-mandate-$id-\$LABEL"
+  if _mc_has_flag "\$flags" PRIME2; then
+    _mc_call "$id" "\$sid" "\$sha" "\$envp" >/dev/null
+    _mc_call "$id" "\$sid" "\$sha" "\$envp" >/dev/null
+  fi
+  mc_out=\$(_mc_call "$id" "\$sid" "\$sha" "\$envp")
+  mc_detail=\$(mandate_case_judge "$id" "\$mc_out")
+  mc_rc=\$?
+  if [ "\$mc_rc" -eq 0 ]; then
+    res PASS "mandate-$id" "\$mc_detail"
+  else
+    res FAIL "mandate-$id" "\$mc_detail"
+  fi
+fi
+MANDATE_CASE_EOF
+done
 cat >> "$ROOT/assertions.sh" <<'ASSERT_EOF'
 
 # --- 13-17. guard-destructive.sh, all three tiers -----------------------------------------------
