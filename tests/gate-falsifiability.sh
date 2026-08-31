@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -296,6 +296,7 @@ files_for(){ case "$1" in
   58c) printf 'claude/inventory.json' ;;
   59)  printf 'claude/hooks/goal-gate.sh' ;;
   60)  printf 'docs/checks-that-inherit-their-answer.md' ;;
+  12b) printf 'README.md' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -394,6 +395,7 @@ label_for(){ case "$1" in
   58c) printf "the release gate's wait ceiling clears the job it waits for" ;;
   59)  printf "the goal gate blocks on an open goal and only on an open goal" ;;
   60)  printf "catalogue count derived and agreed" ;;
+  12b) printf "doc counts match tree" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -681,6 +683,14 @@ exit 7
       awk '/^## Named, not counted$/ && !d { print "**Planted entry.** Falsifiability row 60."; print ""; d = 1 } { print }' \
         docs/checks-that-inherit-their-answer.md > docs/checks-that-inherit-their-answer.md.t \
         && mv docs/checks-that-inherit-their-answer.md.t docs/checks-that-inherit-their-answer.md ;;
+
+  12b) # Row 12 breaks a README TABLE cell, so it proves only check 12's table extractor. The
+      # prose extractor, want_for's noun map and the count each noun resolves to are a separate
+      # lane, and the "falsifiability rows" noun was added to close a claim that had been wrong
+      # for four releases while the table lane stayed green. Falsify the prose claim instead.
+      # Anchored on the phrase and not on the number, because the number is the thing that moves.
+      sed -i.t -E 's/[0-9]+ falsifiability rows/1 falsifiability rows/' README.md \
+        && rm -f README.md.t ;;
   58c) # Remove the check count the measurement was taken at. Without it the recorded cost cannot
       # be scaled to this gate's size, so it would silently stay frozen at the size it was
       # measured on, which is how the constant it replaced went stale in the first place. A

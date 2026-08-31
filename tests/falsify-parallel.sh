@@ -2,7 +2,7 @@
 # falsify-parallel.sh — run tests/gate-falsifiability.sh across isolated clones, in parallel.
 #
 # The sweep is O(rows x checks): every row breaks one file, runs the WHOLE gate to see which
-# check goes red, and restores. At 100 rows and a ~84s gate that is over two hours serially, and
+# check goes red, and restores. At 101 rows and a ~84s gate that is over two hours serially, and
 # it is the single slowest thing anyone waits for in this repository. CI has shared it 7 ways
 # since v1.55.0 and finishes in about 18 minutes; this is the same split, locally.
 #

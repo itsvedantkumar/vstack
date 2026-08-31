@@ -4185,7 +4185,7 @@ fi
 # the first draft of this check said so, and both were right.
 #
 # Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
-# function of the gate's own size: adding a check makes all 100 rows slower. So the recorded
+# function of the gate's own size: adding a check makes all 101 rows slower. So the recorded
 # measurement carries the check count it was taken at, and the model scales it by the gate size
 # it finds right here. Adding checks to this file raises the floor it derives, automatically.
 #

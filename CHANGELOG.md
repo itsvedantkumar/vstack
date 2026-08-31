@@ -4,6 +4,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.60.0 — 2026-09-01
+
+### The lane that was added to close a rot was itself unproven
+
+1.59.0 taught check 12 the noun "falsifiability rows", after four releases of README and three
+other files publishing a row count that was 6 to 9 short of the live one. Row 12 breaks a README
+*table* cell, so it exercises only the table extractor. The prose extractor, `want_for`'s noun
+map, and the count each noun resolves to are a separate lane, and nothing broke it. New row 12b
+falsifies the prose claim directly, anchored on the phrase rather than on the number, since the
+number is the thing that moves.
+
+Adding the row moved the row count, which the new noun then caught in five files at once. That is
+the check working, and it is the reason the number is worth deriving rather than writing down.
+
 ## 1.59.0 — 2026-09-01
 
 ### Three files published three different counts for the same catalogue
