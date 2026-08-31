@@ -234,7 +234,7 @@ say(){ printf '%s\n' "$*"; }
 #   Conductor files are unconditional in every profile: the brief's own core definition names
 #   "hooks, wrappers, doctor, trust, the Stop gate" as what core keeps, and none of the other
 #   three profiles narrows that set back down.
-PROFILE_HOOK_CORE="compat-canary.sh failure-diagnose.sh format.sh guard-destructive.sh verify-gate.sh"
+PROFILE_HOOK_CORE="compat-canary.sh failure-diagnose.sh format.sh guard-destructive.sh verify-gate.sh goal-gate.sh"
 PROFILE_HOOK_TEAM_ONLY="dispatch-counter.sh skill-mandate.sh"
 
 PROFILE_AGENT_UI="ui-engineer.md design-reviewer.md accessibility-auditor.md"
@@ -740,7 +740,8 @@ elif [ "$DRY" = 0 ]; then
               hooks: [ {type:"command", command:($h+"/dispatch-counter.sh"), statusMessage:"dispatch count"} ] } ],
           Stop: [
             { hooks: [ {type:"command", command:($h+"/verify-gate.sh")},
-                       {type:"command", command:($h+"/skill-mandate.sh")} ] } ],
+                       {type:"command", command:($h+"/skill-mandate.sh")},
+                       {type:"command", command:($h+"/goal-gate.sh")} ] } ],
           PostToolUseFailure: [
             { matcher:"*", hooks: [ {type:"command", command:($h+"/failure-diagnose.sh")} ] } ]
         } as $ours
@@ -753,7 +754,8 @@ elif [ "$DRY" = 0 ]; then
       # whole thing is one bash single-quoted string, and bash does not know jq comment syntax.)
       | ([$ours | .. | .command? // empty] | map(split("/") | last) | unique) as $ourbasenames
       # $ours narrowed to the current profile, filtered per individual hook rather than per
-      # group -- Stop carries verify-gate.sh and skill-mandate.sh as two hooks inside ONE group,
+      # group -- Stop carries verify-gate.sh, skill-mandate.sh and goal-gate.sh as three hooks
+      # inside ONE group,
       # so dropping skill-mandate.sh for core/ui has to remove one array element, not the group
       # both share. A group that empties out is dropped; an event whose groups all emptied out
       # is dropped with it, which is what lets PostToolUse end up format.sh-only under core.

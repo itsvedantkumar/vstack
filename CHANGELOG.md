@@ -4,6 +4,38 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.58.0 — 2026-09-01
+
+### The goal command shipped without its reader
+
+`claude/commands/goal.md` has always described itself as "Only stops when fully verified". It
+could not do that. A command is text injected the moment you type it, and nothing read the
+`.goal/<slug>/goal.md` file it writes: `grep -rn '\.goal' claude/hooks/` returned zero matches.
+The writer shipped and the reader never did, so a recorded goal had no effect on any later turn
+and the agent stopped as soon as the immediate request was answered. Four releases carried the
+promise; none carried the mechanism.
+
+- **New Stop hook `claude/hooks/goal-gate.sh`.** Blocks finishing while a `.goal/*/goal.md` has
+  unchecked items under its `## Rubric` heading. Wired into both lanes: `claude/settings.json`
+  for the full install and `claude/hooks/hooks.json` for the plugin. It reads markdown and never
+  executes anything out of the repo, so unlike `verify-gate.sh` it needs no `vstack trust` entry,
+  which is why it can live in the plugin lane at all.
+- **Three narrowings, each load-bearing.** Only the `## Rubric` section is read, because a
+  `## Residuals` box is by definition work its author handed to a human. A goal whose `Status:`
+  says complete is never reopened. An item tagged `(needs: user)` is reported and never blocks.
+  Without these the gate blocks forever on work the agent cannot do, which is a livelock, not
+  persistence.
+- **The 3-block cap goes open, not shut** — deliberately opposite to `verify-gate.sh`'s B-12 fix.
+  A red test is always fixable by the agent, so that gate keeps blocking. An unchecked box may
+  not be, so this one stands down with a `systemMessage` naming what is still open. Different
+  asymmetry, different direction.
+- **`mkdir` is the attempt counter.** Numbered directories claimed atomically, so concurrent
+  Stops from parallel sub-agents each take a distinct number. `verify-gate.sh` had to grow a
+  spin-lock around an unlocked read-modify-write to get the same property.
+- **Check 59** drives the hook on five synthetic repos and asserts the decision each time, plus
+  the cap engaging at exactly 3 and both lanes naming the hook. Falsifiability row `59` inverts
+  the gate's one predicate, flipping both directions at once.
+
 ## 1.57.0 — 2026-08-31
 
 ### A mandate for delegation that one serially-dispatched agent satisfied

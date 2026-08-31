@@ -23,7 +23,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 58 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 59 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -152,7 +152,7 @@ checks the right one; see [Day to day](#day-to-day)).
 | Skills | 28 | `~/.claude/skills/` |
 | Subagents | 14 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
-| Hooks | 8 | `~/.claude/hooks/` |
+| Hooks | 9 | `~/.claude/hooks/` |
 | CLI wrappers | 6 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
 
@@ -167,7 +167,7 @@ recognise alone. Check 21 fails if it deletes a key this repository never shippe
 | Skills | 28 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
 | Subagents | 14 | `~/.claude/plugins/cache/vstack/vstack/<version>/agents/` |
 | Commands | 15 | `~/.claude/plugins/cache/vstack/vstack/<version>/commands/` |
-| Hooks | 2 (routing only) | `claude/hooks/hooks.json`, run from the plugin cache |
+| Hooks | 3 (routing only) | `claude/hooks/hooks.json`, run from the plugin cache |
 | CLI wrappers | 0 (not this lane) | full install only |
 | MCP servers | 0 — `claude/.claude-plugin/plugin.json` declares none | full install only |
 
@@ -195,7 +195,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 58 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 59 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -204,7 +204,7 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 58 checks
+./.claude/verify.sh                  # 59 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```

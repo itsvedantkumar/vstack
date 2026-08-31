@@ -4233,6 +4233,77 @@ else
     "$c58_rel, $c58_ver or $c58_fal is missing -- these are tracked files in this repository, not an environment dependency, so their absence is a failure and not a skip"
 fi
 
+# --- 59. the goal gate blocks on an open goal and only on an open goal -------------------------
+# vstack shipped claude/commands/goal.md, which promises the agent "only stops when fully
+# verified", and shipped no reader for the .goal/<slug>/goal.md it writes. The writer had no
+# reader for 4 releases: the file was produced and then consulted by nothing. This check is the
+# join. It drives the hook end to end on synthetic repos rather than reading it, because the
+# question "does a recorded goal actually stop the agent" is only answerable by a decision.
+#
+# Both directions matter, and the NEGATIVE ones matter more. A gate that blocks whenever it sees
+# a checkbox is worse than no gate: two of the four silent cases below are items only the
+# operator can finish, and blocking on those loops the agent forever on work it cannot do.
+if command -v jq >/dev/null; then
+  c59_d=$(mktemp -d)
+  mkdir -p "$c59_d/nogoal" "$c59_d/tmp"
+  c59_repo(){ _n=$1; shift; mkdir -p "$c59_d/$_n/.goal/x"; printf '%s\n' "$@" > "$c59_d/$_n/.goal/x/goal.md"; }
+  c59_repo open  '# G' 'Status: **in progress**' '## Rubric' '- [x] R1' '- [ ] R2 wire it' '## Residuals' '- [ ] not mine'
+  c59_repo shut  '# G' 'Status: **complete**'    '## Rubric' '- [ ] R1 never ticked'
+  c59_repo resid '# G' 'Status: **in progress**' '## Rubric' '- [x] R1' '## Residuals' '- [ ] vercel login'
+  c59_repo human '# G' 'Status: **in progress**' '## Rubric' '- [ ] R2 run pmset (needs: user)'
+
+  # A distinct session id per case: the hook caps at 3 blocks per session, so reusing one id
+  # would let case 4 pass because the cap latched, not because the hook decided correctly.
+  c59_run(){ printf '{"session_id":"%s"}' "$2" \
+    | env TMPDIR="$c59_d/tmp" CLAUDE_PROJECT_DIR="$c59_d/$1" bash claude/hooks/goal-gate.sh 2>/dev/null; }
+  c59_errs=""
+  c59_want(){ # <repo> <sid> <block|silent> <what>
+    _o=$(c59_run "$1" "$2")
+    if [ "$3" = block ]; then
+      printf '%s' "$_o" | jq -e '.decision=="block"' >/dev/null 2>&1 \
+        || c59_errs="$c59_errs\n$4: expected decision:block, got '$_o'"
+    else
+      [ -z "$_o" ] || c59_errs="$c59_errs\n$4: expected silence, got '$_o'"
+    fi
+  }
+  c59_want nogoal c59a silent "a repo with no .goal directory"
+  c59_want open   c59b block  "an open goal with an unchecked rubric item"
+  c59_want shut   c59c silent "a goal whose Status says complete"
+  c59_want resid  c59d silent "unchecked items only under ## Residuals"
+  c59_want human  c59e silent "an unchecked item tagged (needs: user)"
+
+  # The cap must go OPEN, not shut. Deliberately opposite to verify-gate.sh's B-12 fix: a red
+  # test is always fixable by the agent, an unchecked box may not be, so looping forever here
+  # costs more than releasing does. Four Stops on one session: three block, the fourth stands
+  # down with a systemMessage rather than a decision.
+  c59_n=0
+  c59_i=0
+  while [ "$c59_i" -lt 4 ]; do
+    c59_i=$((c59_i + 1))
+    c59_o=$(c59_run open c59cap)
+    printf '%s' "$c59_o" | jq -e '.decision=="block"' >/dev/null 2>&1 && c59_n=$((c59_n + 1))
+  done
+  [ "$c59_n" -eq 3 ] || c59_errs="$c59_errs\nthe 3-block cap did not engage: $c59_n of 4 stops blocked (expected exactly 3)"
+  printf '%s' "$c59_o" | jq -e '.systemMessage' >/dev/null 2>&1 \
+    || c59_errs="$c59_errs\nat the cap the hook went silent instead of naming what is still open"
+
+  # The wiring half. A hook nothing invokes is the defect this check exists to close, so assert
+  # both shipped lanes name it -- settings.json for the full install, hooks.json for the plugin.
+  jq -e '[.hooks.Stop[].hooks[].command] | any(test("goal-gate\\.sh"))' claude/settings.json >/dev/null 2>&1 \
+    || c59_errs="$c59_errs\nclaude/settings.json does not wire goal-gate.sh into Stop"
+  jq -e '[.hooks.Stop[].hooks[].command] | any(test("goal-gate\\.sh"))' claude/hooks/hooks.json >/dev/null 2>&1 \
+    || c59_errs="$c59_errs\nclaude/hooks/hooks.json does not wire goal-gate.sh into Stop"
+
+  rm -rf "$c59_d"
+  if [ -z "$c59_errs" ]; then
+    ok "the goal gate blocks on an open goal and only on an open goal (5 decisions, 3-block cap, both lanes wired)"
+  else
+    bad "the goal gate blocks on an open goal and only on an open goal" "$(printf '%b' "$c59_errs")"
+  fi
+else
+  skip "the goal gate blocks on an open goal and only on an open goal" "jq is not installed"
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

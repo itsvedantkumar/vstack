@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.57.0",
+    "version": "1.58.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -12,7 +12,7 @@
   },
   "derived_at": {
     "head": "474e108c0a34eeeb43bd82b967773a47abd388d5",
-    "payload_digest": "43a27ad3916a8b2586ee7ab96c6f5ac5cc4cc051870dc91def2aaf261305b45e",
+    "payload_digest": "4aa9069496b3dfff2b0ae9c578faee679b26f71a991e51922dd6d0257c0f6c55",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
@@ -102,6 +102,7 @@
         "Stop"
       ],
       "hook_scripts_wired": [
+        "goal-gate.sh",
         "inject-session-context.sh",
         "skill-mandate.sh"
       ],
@@ -341,7 +342,7 @@
       "dir": "claude/hooks",
       "pattern": "*.sh",
       "kind": "file",
-      "count": 8,
+      "count": 9,
       "floor": 7,
       "floor_reason": "Derived, not literal: the floor is the number of distinct hook scripts install.sh's own jq rebuild program names. Every one of those must exist on disk or the user lane installs a hook command pointing at nothing. Recomputed from install.sh on every validation, so it cannot go stale.",
       "lanes": [
@@ -354,6 +355,7 @@
         "dispatch-counter.sh",
         "failure-diagnose.sh",
         "format.sh",
+        "goal-gate.sh",
         "guard-destructive.sh",
         "inject-session-context.sh",
         "skill-mandate.sh",
@@ -385,6 +387,7 @@
             "dispatch-counter.sh",
             "failure-diagnose.sh",
             "format.sh",
+            "goal-gate.sh",
             "guard-destructive.sh",
             "inject-session-context.sh",
             "skill-mandate.sh",
@@ -398,9 +401,10 @@
             "Stop"
           ],
           "scripts": [
+            "goal-gate.sh",
             "inject-session-context.sh",
-            "verify-gate.sh",
-            "skill-mandate.sh"
+            "skill-mandate.sh",
+            "verify-gate.sh"
           ]
         }
       },
@@ -553,7 +557,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 58,
+      "declared_checks": 59,
       "check_ids": [
         "0",
         "1",
@@ -612,7 +616,8 @@
         "55",
         "56",
         "57",
-        "58"
+        "58",
+        "59"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
@@ -633,14 +638,14 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 98,
+        "rows": 99,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way.",
         "cost_model": {
           "seconds_per_row": 65,
           "checks_at_measurement": 58,
           "fixed_seconds": 300,
           "measured_from_run": "33361832175",
-          "note": "The slowest falsify shard of that run took 1034s over 16 rows (13 mutation + the 3 fixed rows every shard repeats), 64.6s each, rounded up, with the gate at 58 checks. Check 58 of .claude/verify.sh does not hardcode a per-row cost: it scales this measurement by the gate size it finds, because every row runs the WHOLE gate, so adding a check makes every row slower. fixed_seconds is NOT measured and is not claimed to be: one run gives one equation for two unknowns, and the two 16-row shards of that run took 1034s and 690s, so per-row cost varies by row and fixed cost is not separable from it. It is a stated assumption, dominated by the 2x margin check 58 applies. Re-derive seconds_per_row and checks_at_measurement together when re-deriving REQUIRE_CHECKS_WAIT_SECONDS; the query is in the comment beside that value."
+          "note": "The slowest falsify shard of that run took 1034s over 16 rows (13 mutation + the 3 fixed rows every shard repeats), 64.6s each, rounded up, with the gate then declaring the number recorded in checks_at_measurement (58). Check 58 of .claude/verify.sh does not hardcode a per-row cost: it scales this measurement by the gate size it finds, because every row runs the WHOLE gate, so adding a check makes every row slower. fixed_seconds is NOT measured and is not claimed to be: one run gives one equation for two unknowns, and the two 16-row shards of that run took 1034s and 690s, so per-row cost varies by row and fixed cost is not separable from it. It is a stated assumption, dominated by the 2x margin check 58 applies. Re-derive seconds_per_row and checks_at_measurement together when re-deriving REQUIRE_CHECKS_WAIT_SECONDS; the query is in the comment beside that value."
         }
       },
       {
