@@ -197,6 +197,98 @@ actually go red before trusting either to report clean.
 
 Usage: `tests/bin-scripts.sh [case-name ...]` (default: all).
 
+## hook-latency.sh
+
+Nothing under `tests/` ever timed a hook before this file existed, and the first version of it
+budgeted in milliseconds — which measured its own defect while proving the point:
+`skill-mandate.sh` moved from 171ms mean to 858ms mean between two runs with zero code change,
+because seven concurrent `tests/gate-falsifiability.sh` shards were contending for the same CPU on
+the same machine. `.claude/verify.sh`'s own founding subject is a check that is correct about the
+question it actually asked; "does this hook finish in under N absolute milliseconds" is a question
+scoped to the machine and moment it ran on, not to the hook, and this repo has shipped that defect
+before elsewhere. `tests/hook-latency.sh` budgets in **fork-cost units** instead: every declared
+hook forks `jq` 1-3 times plus some mix of `stat`/`grep`/`sed`/`mkdir`/`cat`, and that fork+exec
+floor moves with machine load exactly as much as the hook itself does. Each sample times one
+baseline unit (`jq -nr now`, timed the identical way as the hook) **immediately before** the hook
+sample it pairs with — interleaved throughout the run, never measured once up front — so a load
+spike mid-run raises the numerator and the denominator together instead of just the numerator, and
+the ratio (hook_ms / that sample's own baseline_ms) is close to load-invariant.
+
+It drives all eight hooks wired in `claude/settings.json` (`compat-canary.sh`,
+`dispatch-counter.sh`, `failure-diagnose.sh`, `format.sh`, `guard-destructive.sh`,
+`inject-session-context.sh`, `skill-mandate.sh`, `verify-gate.sh`) with each hook's own real stdin
+JSON shape, n=30 each, offline, no model calls, well under a minute even under heavy concurrent
+load.
+
+Two claims, two controls, not one standing in for the other. A positive control times `sleep 0.2`
+through the exact same jq-`now`/`awk` function every hook and every baseline sample is timed with,
+and refuses to trust anything below it until that comes back at least 195ms — this proves the
+clock runs. The interleaved baseline itself is the second, separate claim: that the fork-cost unit
+budgets are calibrated against a real, current fork+exec cost rather than an arbitrary constant.
+`date +%s%N` was the obvious portable-looking timer for either and was rejected on purpose: it is a
+GNU-date-ism, not something to build a script on that also has to run on macOS's BSD date.
+
+Every sample asserts the hook's own documented success signal in the same invocation it timed —
+`dispatch-counter.sh`'s counter file actually incremented and a row landed in its replay log,
+`skill-mandate.sh` actually blocked on an unmandated `Write`, `failure-diagnose.sh`'s redaction
+actually fired and the raw secret did not leak through, and so on for the other five. A hook that
+bails early on malformed input is fast for the wrong reason, and a latency number with no
+correctness check next to it cannot tell that apart from a real pass.
+
+Two budget tables live at the top of the file. `REFERENCE_MEAN_*`/`REFERENCE_P95_*` (milliseconds)
+is what this file used to gate on; it no longer gates anything and is kept only so each hook's
+result line can say whether the old ms verdict and the new units verdict agree on the same
+samples. `BUDGET_UNITS_MEAN_*`/`BUDGET_UNITS_P95_*` (fork-cost units) is what actually gates
+pass/fail. `dispatch-counter.sh`'s reference row is the pre-existing ~25ms p95 sourced from its own
+header comment (`claude/hooks/dispatch-counter.sh:151-158`) — kept verbatim, not re-derived, and
+disprovable on its own terms: this suite measured that hook at 26-123ms p95 across every run taken
+while writing and normalizing this file, never once inside its own claimed budget, on quiet moments
+and loaded ones alike. That published figure no longer holds and nothing before this file could
+have caught the drift; see the handback in this file's own commit history for the replacement text
+proposed for that header. Its units row, and all seven other units rows, are first recorded
+fork-cost baselines: worst mean/p95 observed across two independent n=30 runs of this interleaved
+harness — not the old ms-only one, which never measured a baseline to divide by — taken back to
+back while those same seven `gate-falsifiability.sh` shards were running, deliberately not waited
+out, times ~1.3 headroom. Same "measure, then set a ceiling with headroom, tighten later" move
+`.claude/verify.sh`'s own check 58 makes of its own `FIXED` constant.
+
+**The normalization is falsifiable in the same run that uses it, and the numbers show it working.**
+Across the two calibration runs, `skill-mandate.sh`'s raw mean swung 217.7ms → 132.9ms (1.6x, zero
+code change) while its normalized mean read 18.86u → 18.43u (1.02x) on the same two runs;
+`verify-gate.sh` swung 43.3ms → 27.5ms raw (1.6x) against 5.07u → 5.01u normalized (1.01x). A run
+taken afterward under continued heavy load found five of eight hooks failing their old
+(informational, no-longer-gating) ms budget while passing their units budget comfortably — the
+script prints this explicitly as a **verdict divergence** block, naming each hook and which
+direction it moved. One hook did not converge: `skill-mandate.sh` exceeded its own units p95
+budget by ~3x on that same "current load" run (100.6u against a 35.3u budget, mean only 16% over)
+— a real, disclosed finding, not a normalization failure. It reads as this hook forking several
+`jq` processes per invocation (it parses a whole transcript), so severe contention can inflate its
+tail latency super-linearly against a single-fork baseline in a way a lighter hook's ratio would
+not show; flagged for follow-up rather than papered over by raising its budget.
+
+Isolated by design: every hook writes to `${TMPDIR:-/tmp}/vstack-*`,
+`~/.claude/vstack-replay-log.jsonl` or `~/.claude/vstack-compat-canary.json` unless redirected, and
+this script exports its own `TMPDIR` and points every override
+(`VSTACK_REPLAY_LOG`/`VSTACK_COMPAT_CANARY_LOG`/`VSTACK_NO_DELEGATION_LOG`/`CLAUDE_PROJECT_DIR`) at
+a private `mktemp -d`. Nothing here touches a real counter, log or trust store on the machine it
+runs on.
+
+Ends the same way `.claude/verify.sh` and `tests/gate-falsifiability.sh` do: a `declared`/`ran`/
+`skipped` accounting line, hard-failing if `ran + skipped != declared`, and failing on its own if
+`ran == 0` even when the arithmetic balances (the shape `tests/vstack-cli.sh`'s own section above
+warns about: every hook skipped satisfies the accounting while measuring nothing). A hook whose
+interleaved baseline unit cannot be measured for a sample (jq itself fails, or returns a
+non-positive duration) discards that sample rather than dividing by zero or by garbage; a hook
+whose baseline fails on every attempt is reported SKIPPED and named, same as a hook that cannot be
+executed at all.
+
+Not wired into `.claude/verify.sh` or CI as of this writing — it is a standalone script, run by
+hand, the same status `bin-scripts.sh` and `container-matrix.sh` started from.
+
+```bash
+tests/hook-latency.sh
+```
+
 ## evals/
 
 `evals/run-pathways.sh` and `evals/swebench/run.sh` score this bundle against

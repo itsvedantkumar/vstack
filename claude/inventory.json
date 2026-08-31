@@ -11,8 +11,8 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "e843a412bba6f19bbc6437d8db14366203f5077c",
-    "payload_digest": "d4873ba669449aa9bc632f7d859ed73d073d57915a4a6e06db7c42ae641d8aee",
+    "head": "4fc3f1cdbbcbeb0ca2997c1e9a1be349b17f3d9f",
+    "payload_digest": "5a1a5546027bb58638c8ad8135e23ccf67382de1b6b0d605aa4ddb8ce0ab7788",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",

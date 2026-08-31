@@ -57,6 +57,44 @@ against the derived list, so N shards each green over a partial list fails inste
 
 `tests/README.md` claimed the sweep "runs offline in about 30 seconds". Same class as the ceiling.
 
+### A latency budget in milliseconds is a claim about the machine, not the code
+
+`dispatch-counter.sh`'s header stated a "~25ms p95 budget this hook is held to" and recorded that
+folding three `jq` calls into one restored it. Nothing re-derived that figure, and it does not
+hold: `tests/hook-latency.sh` measures the hook at 26-123ms p95 depending only on what else the
+machine is doing.
+
+The first version of that suite gated on absolute milliseconds and duly reported three hooks over
+budget while seven falsifiability shards ran on the same box. `skill-mandate.sh` moved 171ms to
+858ms with no code change. That is this repository's founding defect holding a stopwatch: a verdict
+correct about the question it asked, where the question was scoped to the machine it ran on.
+
+Budgets are now in fork-cost units, each hook's cost over a single `jq` fork timed immediately
+before that same sample, interleaved rather than once up front so a mid-run spike moves both. Two
+back-to-back runs under identical load: raw means moved 1.6x, normalized means moved 1.01-1.02x.
+The old millisecond figures are kept as non-gating reference values purely to report divergence,
+and this run reported two hooks where the ms budget would fail and the unit budget passes.
+
+Disclosed rather than smoothed: `skill-mandate.sh` forks several `jq` processes per call, so under
+heavy contention its tail inflates super-linearly against a single-fork baseline, and one run put
+it over budget on p95 alone. The budget was not loosened in response.
+
+### dispatch-counter.sh's log rotation had never been executed by a test
+
+It and `skill-mandate.sh` carry independent copies of the same 2MB cap and `tail -n 5000` rewrite.
+PROOF 5 of `tests/delegation-drift.sh` pins its hook variable to `skill-mandate.sh`, so one copy
+was exercised and the other only read. PROOF 13 drives the other one.
+
+Two things a naive fixture would get wrong, both read off the hook's source rather than assumed.
+It is a PostToolUse hook, so stdin is a tool payload and not a transcript fixture. And its size
+check is sampled every 20th dispatch rather than run on every write, so the counter is pre-seeded
+to land the dispatch on a checked count instead of silently skipping the path under test.
+
+It asserts more than "the file shrank": the padding rows carry an incrementing sequence, so a
+rotation that kept the OLDEST rows fails, and the freshly appended row must survive, so one that
+dropped the append while keeping old padding fails too. Both pass a bare size check while
+destroying exactly the data rotation exists to protect.
+
 ## 1.55.0 — 2026-08-31
 
 ### v1.54.0's own check 50 hung CI for 78 minutes by running the gate inside the gate

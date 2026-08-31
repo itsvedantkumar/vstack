@@ -37,7 +37,13 @@ SHA=$(git rev-parse HEAD)
 
 # The one derivation. Same sed CI's falsify-plan uses and the same line check 16 of the gate
 # polices, so a row added to CHECKS= lands in some shard here on its very next run.
-ROWS=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh)
+# VSTACK_FALSIFY_ROWS scopes the run to a subset, the same spelling gate-falsifiability.sh takes,
+# passed straight through to each shard. Without it, every row runs.
+if [ -n "${VSTACK_FALSIFY_ROWS:-}" ]; then
+  ROWS="$VSTACK_FALSIFY_ROWS"
+else
+  ROWS=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh)
+fi
 NROWS=0
 for _r in $ROWS; do NROWS=$((NROWS+1)); done
 if [ "$NROWS" -eq 0 ]; then
@@ -73,9 +79,33 @@ for s in $(seq 0 $((JOBS-1))); do
   (
     git clone -q "$SRC" "$d" 2>/dev/null && git -C "$d" checkout -q --detach "$SHA" 2>/dev/null || {
       printf 'clone failed\n' > "$d.log"; echo 2 > "$d.rc"; exit 0; }
-    ( cd "$d" && VSTACK_FALSIFY_ROWS="$ids" ./tests/gate-falsifiability.sh ) > "$d.log" 2>&1
+    # A private TMPDIR per shard, not just a private tree. The shipped hooks keep per-session
+    # state under ${TMPDIR:-/tmp} -- skill-mandate.sh's block counter, dispatch-counter.sh's
+    # dispatch count, their lock directories -- so shards with separate checkouts still collide
+    # there, and so does any unrelated process on the machine that drives a hook. Measured: five
+    # of seven shards refused at baseline with "FAIL skill mandate decides correctly" while two
+    # test suites elsewhere on this box were invoking the same hooks. .claude/verify.sh:829 wrote
+    # this lesson down for one check ("with a shared TMPDIR and a fixed session id"); it applies
+    # to the whole sweep.
+    mkdir -p "$d.tmp"
+    ( cd "$d" && TMPDIR="$d.tmp" VSTACK_FALSIFY_ROWS="$ids" ./tests/gate-falsifiability.sh ) > "$d.log" 2>&1
     echo $? > "$d.rc"
   ) &
+done
+
+# A twenty-minute run that prints nothing is indistinguishable from a hung one, and the first
+# thing anyone does with a silent long job is kill it. Report each shard as its rc lands.
+_seen=0
+while [ "$_seen" -lt "$JOBS" ]; do
+  sleep 5
+  for s in $(seq 0 $((JOBS-1))); do
+    if [ -f "$WORK/shard-$s.rc" ] && [ ! -f "$WORK/shard-$s.seen" ]; then
+      : > "$WORK/shard-$s.seen"
+      _seen=$((_seen+1))
+      printf '  shard %d done (rc=%s, %d/%d)\n' \
+        "$s" "$(cat "$WORK/shard-$s.rc")" "$_seen" "$JOBS"
+    fi
+  done
 done
 wait
 
