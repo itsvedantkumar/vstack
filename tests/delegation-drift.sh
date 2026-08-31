@@ -19,6 +19,19 @@
 #   Primary: breadth-eligible-window delegation rate (hit = task_count>=1, skill-mandate.sh's own
 #   definition of "already delegated" -- it is what suppresses that mandate's block), pooled by
 #   normalised session position into first-third vs last-third.
+#
+#   AMENDMENT (SUMMER, 2026-08-31, skill-mandate.sh v1.57.0+): the "it is what suppresses that
+#   mandate's block" clause above stopped being true and is left as written, not edited, for the
+#   same reason tests/delegation-drift.py's own header states its matching amendment in full --
+#   this repo does not rewrite its own record. The live hook now suppresses its breadth block on
+#   `fanout_batches != 0` (skill-mandate.sh:710: 2+ Task/Agent calls in the SAME assistant
+#   message), not on task_count>=1, which still reads true for purely serial dispatches the hook
+#   now blocks anyway. The primary metric above is UNCHANGED -- task_count>=1, code-renamed to
+#   any_dispatch() -- so its published numbers stay one comparable series across this amendment. A
+#   second, NOT pre-registered, no-verdict metric was added reading fanout_batches directly, scored
+#   only over rows that carry that field (fanout_present()); see tests/delegation-drift.py's header
+#   for the full reasoning, including why historical rows lacking the field are excluded from that
+#   metric's denominator rather than scored as misses.
 #     SIGNAL (decay)   iff last-third <= SIGNAL_DECAY_RATIO(0.7)x first-third, AND
 #                       >= MIN_ELIGIBLE_PER_TERTILE(8) eligible windows per tertile, AND
 #                       >= MIN_CONTRIBUTING_SESSIONS(5) contributing sessions.
@@ -48,7 +61,16 @@
 # "A harness change invalidates its own prior findings" section already states for
 # tests/auto-trigger.sh and tests/compaction-effect.sh); identical per-session outcome vectors
 # (auto-detected by tests/delegation-drift.py -- extraction broken, not real invariance); any
-# floor unmet (the NOT EVALUATED path above, not a separate failure).
+# floor unmet (the NOT EVALUATED path above, not a separate failure); a change to the SUPPRESSION
+# CONDITION ITSELF (not just dir/ext counting) straddling the pooled data without a control
+# re-run -- this is exactly what the 2026-08-31 amendment above documents already happened once
+# (task_count>=1 replaced by fanout_batches!=0 at skill-mandate.sh v1.57.0) and is why the primary
+# metric was left computing task_count>=1 rather than silently redefined: redefining a
+# pre-registered metric's hit predicate on a live pool is indistinguishable, from the printed
+# output alone, from the delegation rate itself having moved, which is precisely the failure this
+# repository is named for. Any FUTURE change to what the live hook treats as "already delegated"
+# must add its own amendment paragraph here and in tests/delegation-drift.py, not edit the primary
+# metric's predicate in place.
 #
 # Zero model calls. Two sources, one schema (session_id, checkpoint_index, dir_count, ext_count,
 # task_count, named): the forward log claude/hooks/skill-mandate.sh writes on every evaluated

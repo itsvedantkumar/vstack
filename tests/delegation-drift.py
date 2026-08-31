@@ -64,6 +64,30 @@ tests/delegation-drift.sh's own header for the order of operations and the inval
   once per Stop in the live hook -- checkpoint ordinal is the finest granularity common to both
   sources and the granularity the mandate itself operates at. This is the one place this script
   had to choose an operationalization BETH's spec left implicit; flagged here rather than silently.]
+
+  AMENDMENT (SUMMER, 2026-08-31, claude/hooks/skill-mandate.sh v1.57.0+): the clause just above --
+  "task_count>=1 is skill-mandate.sh's own definition of 'already delegated', it is what
+  suppresses the breadth block" -- was true when this was pre-registered and is FALSE as of the
+  hook's current source. It is left in place rather than edited or deleted: it correctly described
+  the hook up to v1.57.0 and this repository does not rewrite its own record. What actually
+  suppresses the live breadth block today (skill-mandate.sh:710) is `fanout_batches != 0` -- 2+
+  Task/Agent tool_use blocks landing in the SAME assistant message, the only shape Claude Code
+  actually runs concurrently -- not `task_count>=1`, which also reads true for N delegations spread
+  across N separate serial turns and is no longer sufficient to avoid the block. The PRIMARY metric
+  below is UNCHANGED: it still reports task_count>=1, renamed in code from delegated() to
+  any_dispatch() to say what it actually measures, so every number this file has ever published and
+  every number it publishes after this amendment remain the same series and stay directly
+  comparable. A new, separate, NOT-pre-registered metric was added alongside it (see
+  delegated_fanout() / the "breadth-eligible-window suppression rate" section below) that reads
+  fanout_batches directly and reports the real suppression condition -- computed only over rows
+  that actually carry that field (forward-log rows written by a hook new enough to log it; see
+  fanout_present()), with that population's own N printed next to it rather than folded into the
+  primary's denominator. Historical forward-log rows written before this field existed are excluded
+  from that metric's denominator, not scored as failures -- see fanout_present()'s docstring. It
+  carries no SIGNAL/KEEPS-WORKING verdict of its own: no threshold for it was fixed before any data
+  existed under it, and fixing one now, after the rate is already visible, is exactly the
+  threshold-picked-after-seeing-the-number move this file refuses to let its own primary and
+  secondary metrics make.
   SIGNAL (decay) iff last-third rate <= SIGNAL_DECAY_RATIO(0.7)x first-third rate, AND
     >= MIN_ELIGIBLE_PER_TERTILE(8) eligible windows in EACH tertile, AND
     >= MIN_CONTRIBUTING_SESSIONS(5) distinct sessions contributing >=1 eligible window to either
@@ -353,10 +377,10 @@ def measured(row):
     expensive to pay unconditionally (1438ms mean / 1536ms p95 on a 17.5MB transcript) and
     MEESEEKS chose not to. A latched Stop is therefore KNOWN-UNMEASURED: it is neither
     zero-breadth (eligible() returning False on a null row would silently claim "measured and
-    small") nor not-delegated (delegated() would silently claim "measured and no dispatch").
+    small") nor not-delegated (any_dispatch() would silently claim "measured and no dispatch").
     Both readings would misrepresent a missing measurement as a negative one, which is exactly
     the shape of the corpus-filter-that-looks-like-a-decision bug this repo keeps re-finding.
-    Every caller that pools eligible()/delegated() results MUST check measured() first and
+    Every caller that pools eligible()/any_dispatch() results MUST check measured() first and
     exclude -- not zero-fill -- an unmeasured row; see pool_tertiles() and
     detect_broken_extraction() for the two call sites that do."""
     return row.get("dir_count") is not None
@@ -375,7 +399,16 @@ def eligible(row):
     return dir_count >= 3 and ext_count >= 2
 
 
-def delegated(row):
+def any_dispatch(row):
+    """PRIMARY metric's hit predicate: task_count>=1, i.e. at least one Task/Agent call landed
+    anywhere in the checkpoint's window, in any number of turns, together or apart.
+
+    Formerly named delegated() -- renamed, not redefined, so this says what it has always
+    computed rather than what it was once believed to mean. See the PRE-REGISTRATION/AMENDMENT
+    block in this file's module docstring: this WAS skill-mandate.sh's own suppression condition
+    for the breadth block up to v1.57.0 and is NOT any longer. Kept exactly as it was (same
+    null-guard, same threshold) so every number this file publishes stays one comparable series;
+    see delegated_fanout() below for the metric keyed to the CURRENT suppression condition."""
     # Same defensive null-guard as eligible() -- see its comment.
     task_count = row.get("task_count")
     if task_count is None:
@@ -383,13 +416,49 @@ def delegated(row):
     return task_count >= 1
 
 
+def fanout_present(row):
+    """True iff this row actually carries a measured fanout_batches value -- i.e. it was written
+    by a forward-log hook new enough to compute it (claude/hooks/skill-mandate.sh v1.57.0+) AND
+    that Stop was not latched (see measured()). False covers two different populations that MUST
+    NOT be conflated with a real 0: (a) the key is simply absent -- every forward-log row written
+    before this field existed, and every replay-derived row, since replay never recomputes it
+    (disclosed the same way this file's replay already under-counts dir_count/ext_count -- see the
+    module docstring's REPLAY IS A CONSERVATIVE UNDER-COUNT section); (b) the key is present but
+    JSON null -- a latched row (skill-mandate.sh writes fanout_batches:null there same as its other
+    counts). Scoring either case as fanout_batches==0 would silently read "not measured" as "the
+    hook's suppression condition was unmet", manufacturing a fake collapse in delegated_fanout()'s
+    rate at exactly the schema boundary where the field started being written. Callers MUST check
+    this before calling delegated_fanout() and exclude -- never zero-fill -- a row that fails it."""
+    return row.get("fanout_batches") is not None
+
+
+def delegated_fanout(row):
+    """NOT pre-registered (added 2026-08-31, see the AMENDMENT block in the module docstring).
+    Hit predicate keyed to the REAL, CURRENT suppression condition the live hook checks at
+    skill-mandate.sh:710 (`[ "$fanout_batches" -eq 0 ]`, negated): 2+ Task/Agent calls landed in
+    the SAME assistant message at least once in this checkpoint's window. Callers MUST check
+    fanout_present(row) first -- this returns a bare False on an absent/null field, same defensive
+    shape as eligible()/any_dispatch(), but that False must never be pooled as a real miss; see
+    fanout_present()'s docstring for why."""
+    fanout_batches = row.get("fanout_batches")
+    if fanout_batches is None:
+        return False
+    return fanout_batches != 0
+
+
 def pool_tertiles(all_checkpoints):
     """Returns dict with first/last tertile eligible-window counts, hits, and contributing
-    sessions, plus the same for the secondary attribution metric."""
+    sessions, for the primary metric, the secondary attribution metric, and the (not
+    pre-registered) fanout-suppression metric -- the last one pooled only over eligible windows
+    that also pass fanout_present(), with the windows that didn't counted separately so that
+    exclusion is visible rather than silently shrinking the denominator."""
     first_n = last_n = first_hits = last_hits = 0
     first_named_n = last_named_n = first_named_hits = last_named_hits = 0
+    first_fanout_n = last_fanout_n = first_fanout_hits = last_fanout_hits = 0
+    fanout_absent_in_tertiles = 0
     contributing = set()
     contributing_named = set()
+    contributing_fanout = set()
     latched_in_tertiles = 0
     for sid, pos, row in all_checkpoints:
         if pos is None:
@@ -408,11 +477,25 @@ def pool_tertiles(all_checkpoints):
             contributing.add(sid)
             if is_first:
                 first_n += 1
-                first_hits += 1 if delegated(row) else 0
+                first_hits += 1 if any_dispatch(row) else 0
             else:
                 last_n += 1
-                last_hits += 1 if delegated(row) else 0
-        if delegated(row):
+                last_hits += 1 if any_dispatch(row) else 0
+            # Fanout-suppression pool: same eligible-window population as the primary, further
+            # restricted to rows carrying a real fanout_batches measurement. A row that fails
+            # fanout_present() is excluded from this pool's n and hits entirely -- not zero-filled
+            # -- and counted in fanout_absent_in_tertiles so the exclusion has a visible count.
+            if fanout_present(row):
+                contributing_fanout.add(sid)
+                if is_first:
+                    first_fanout_n += 1
+                    first_fanout_hits += 1 if delegated_fanout(row) else 0
+                else:
+                    last_fanout_n += 1
+                    last_fanout_hits += 1 if delegated_fanout(row) else 0
+            else:
+                fanout_absent_in_tertiles += 1
+        if any_dispatch(row):
             contributing_named.add(sid)
             if is_first:
                 first_named_n += 1
@@ -432,6 +515,12 @@ def pool_tertiles(all_checkpoints):
         "last_named_hits": last_named_hits,
         "contributing_sessions_secondary": len(contributing_named),
         "latched_in_tertiles": latched_in_tertiles,
+        "first_fanout_n": first_fanout_n,
+        "first_fanout_hits": first_fanout_hits,
+        "last_fanout_n": last_fanout_n,
+        "last_fanout_hits": last_fanout_hits,
+        "contributing_sessions_fanout": len(contributing_fanout),
+        "fanout_absent_in_tertiles": fanout_absent_in_tertiles,
     }
 
 
@@ -575,7 +664,9 @@ def main():
     all_checkpoints = positioned_checkpoints(merged)
     single_checkpoint_sessions = sum(1 for sid, rows in merged.items() if len(rows) < 2)
     total_checkpoints = len(all_checkpoints)
-    latched_checkpoints = sum(1 for _sid, _pos, row in all_checkpoints if not measured(row))
+    latched_checkpoints = sum(
+        1 for _sid, _pos, row in all_checkpoints if not measured(row)
+    )
     pooled = pool_tertiles(all_checkpoints)
 
     print()
@@ -632,6 +723,50 @@ def main():
         "  "
         + rate_report("last-third ", pooled["last_named_hits"], pooled["last_named_n"])
         + f"  [{sec_note}]"
+    )
+
+    print()
+    print(
+        "=== NOT PRE-REGISTERED, added 2026-08-31 (see AMENDMENT in tests/delegation-drift.py's "
+        "module docstring): breadth-eligible-window SUPPRESSION rate via the live hook's real "
+        "fanout_batches!=0 condition (skill-mandate.sh:710), no verdict ==="
+    )
+    fan_contrib = pooled["contributing_sessions_fanout"]
+    fan_underpowered = (
+        pooled["first_fanout_n"] < MIN_ELIGIBLE_PER_TERTILE
+        or pooled["last_fanout_n"] < MIN_ELIGIBLE_PER_TERTILE
+        or fan_contrib < MIN_CONTRIBUTING_SESSIONS
+    )
+    # Same floors as the primary metric, same reason as the secondary's sec_note above: an
+    # unqualified rate reads as a finding regardless of the caveat printed above it, so the power
+    # indicator travels with the number. This metric's denominator is ALSO restricted to rows that
+    # pass fanout_present() -- fanout_absent_in_tertiles (never folded into first/last_fanout_n)
+    # is the count of eligible tertile windows that were excluded rather than zero-filled because
+    # they predate the field or came from replay; see fanout_present()'s docstring for why a
+    # missing field must never be scored as fanout_batches==0.
+    fan_note = (
+        f"UNDERPOWERED: {fan_contrib} contributing session(s) (need >= {MIN_CONTRIBUTING_SESSIONS}), "
+        f"windows first={pooled['first_fanout_n']} last={pooled['last_fanout_n']} (need >= {MIN_ELIGIBLE_PER_TERTILE} each) -- no verdict"
+        if fan_underpowered
+        else f"{fan_contrib} contributing session(s) -- no verdict"
+    )
+    print(
+        "  "
+        + rate_report(
+            "first-third", pooled["first_fanout_hits"], pooled["first_fanout_n"]
+        )
+        + f"  [{fan_note}]"
+    )
+    print(
+        "  "
+        + rate_report(
+            "last-third ", pooled["last_fanout_hits"], pooled["last_fanout_n"]
+        )
+        + f"  [{fan_note}]"
+    )
+    print(
+        f"  eligible tertile windows excluded (no fanout_batches on the row -- pre-field forward "
+        f"log or replay, never scored as 0): {pooled['fanout_absent_in_tertiles']}"
     )
 
     print()
