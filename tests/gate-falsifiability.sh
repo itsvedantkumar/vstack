@@ -321,7 +321,9 @@ files_for(){ case "$1" in
   24)  printf 'claude/.claude-plugin/plugin.json' ;;
   25)  printf 'claude/hooks/failure-diagnose.sh' ;;
   26)  printf 'README.md' ;;
-  27|27b|27c) printf 'claude/hooks/skill-mandate.sh' ;;
+  27)  printf 'claude/hooks/skill-mandate.sh' ;;
+  27b) printf 'claude/hooks/skill-mandate.sh' ;;
+  27c) printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
   29)  printf 'bin/cloudflare-mcp' ;;
   29b) printf 'ui-gate/rules/browser.sh' ;;
@@ -416,7 +418,9 @@ label_for(){ case "$1" in
   24)  printf 'declared version matches what installs' ;;
   25)  printf 'failure tail redacts credentials' ;;
   26)  printf 'documented platforms match CI' ;;
-  27|27b|27c) printf 'skill mandate decides correctly' ;;
+  27)  printf 'skill mandate decides correctly' ;;
+  27b) printf 'skill mandate decides correctly' ;;
+  27c) printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
   29b) printf 'shellcheck clean' ;;
