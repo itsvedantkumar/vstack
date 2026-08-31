@@ -4123,6 +4123,56 @@ else
     "jq, or both shasum and sha256sum, are unavailable -- the probe needs jq to read doctor's verdict and a hasher to arm the store"
 fi
 
+# --- 58. the release gate's wait ceiling clears the job it waits for --------------------------
+# REQUIRE_CHECKS_WAIT_SECONDS bounds how long release.yml's `resolve` waits for `verify` to
+# decide. It has been below that job twice -- v1.51.0 gave up eight seconds before the run it
+# was waiting for went green -- and both times for the same reason: the suite grew, the comment
+# beside the number did not, and nothing compared the two. The comment said so about itself and
+# was right. So derive the floor from the tree rather than trusting any measurement to stay true.
+#
+# `verify` is a join; its wall clock is bounded by the slowest falsify shard, which runs
+# ceil(rows/shards) mutation rows plus the 3 fixed rows every shard repeats, at PER_ROW seconds
+# each, after FIXED seconds of checkout and install. PER_ROW=75 is the slowest shard of run
+# 33361832175 rounded up: 1034s for 13 mutation + 3 fixed rows, 64.6s each. FIXED=300 covers the
+# install every shard duplicates and clears install-macos (408s), the slowest non-falsify lane
+# the join also waits on, at the shard counts this repo uses.
+#
+# The ceiling must clear TWICE that floor. A ceiling merely above the floor is a coin flip: the
+# two failures were 90 minutes against 93, and 25 minutes against 27.
+c58_pr=75; c58_fx=300
+c58_rel=".github/workflows/release.yml"; c58_ver=".github/workflows/verify.yml"
+c58_fal="tests/gate-falsifiability.sh"
+if [ -f "$c58_rel" ] && [ -f "$c58_ver" ] && [ -f "$c58_fal" ]; then
+  c58_wait=$(sed -n 's/^ *REQUIRE_CHECKS_WAIT_SECONDS: *"\([0-9]*\)".*/\1/p' "$c58_rel" | head -1)
+  c58_sh=$(sed -n 's/^ *FALSIFY_SHARDS: *"\([0-9]*\)".*/\1/p' "$c58_ver" | head -1)
+  c58_rows=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' "$c58_fal" | tr ' ' '\n' | grep -c '[0-9]')
+  c58_errs=""
+  # Every anchor must be found. An extractor that silently returns nothing is how check 18's
+  # published-figure guard went quiet for 18 commits: a missing anchor has to be a failure.
+  [ -n "$c58_wait" ] || c58_errs="$c58_errs\nno REQUIRE_CHECKS_WAIT_SECONDS: \"<n>\" line in $c58_rel"
+  [ -n "$c58_sh" ] && [ "$c58_sh" -gt 0 ] 2>/dev/null \
+    || c58_errs="$c58_errs\nno positive FALSIFY_SHARDS: \"<n>\" line in $c58_ver"
+  [ "${c58_rows:-0}" -gt 0 ] 2>/dev/null \
+    || c58_errs="$c58_errs\nno CHECKS=\"...\" row list in $c58_fal"
+  if [ -z "$c58_errs" ]; then
+    c58_per=$(( (c58_rows + c58_sh - 1) / c58_sh + 3 ))
+    c58_floor=$(( c58_fx + c58_per * c58_pr ))
+    c58_min=$(( c58_floor * 2 ))
+    if [ "$c58_wait" -lt "$c58_min" ]; then
+      bad "the release gate's wait ceiling clears the job it waits for" \
+        "REQUIRE_CHECKS_WAIT_SECONDS is ${c58_wait}s, under the ${c58_min}s this tree needs: $c58_rows rows over $c58_sh shard(s) is $c58_per rows on the slowest shard, ${c58_pr}s each plus ${c58_fx}s fixed = ${c58_floor}s, doubled. Raise it in $c58_rel, or shard further"
+    else
+      ok "the release gate's wait ceiling clears the job it waits for (${c58_wait}s >= ${c58_min}s: $c58_rows rows / $c58_sh shards -> $c58_per rows x ${c58_pr}s + ${c58_fx}s, doubled)"
+    fi
+  else
+    bad "the release gate's wait ceiling clears the job it waits for" \
+      "$(printf 'the ceiling cannot be derived, so it is not being checked at all:%b' "$c58_errs")"
+  fi
+else
+  bad "the release gate's wait ceiling clears the job it waits for" \
+    "$c58_rel, $c58_ver or $c58_fal is missing -- these are tracked files in this repository, not an environment dependency, so their absence is a failure and not a skip"
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

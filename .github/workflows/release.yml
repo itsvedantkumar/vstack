@@ -93,39 +93,37 @@ jobs:
           # A tag push and the push of its own commit trigger verify.yml and this workflow within
           # seconds of each other, so on the ordinary path the required checks are still queued
           # when this runs. Wait for them rather than refusing, because the refusal is not free:
-          # it used to delete the tag, and even now it costs a manual re-dispatch. 25 minutes
-          # covers this repo's slowest lane (verify's falsifiability sweep) with margin.
-          # Derived from the workflow it waits for, not chosen. The falsifiability suite
-          # dominates `verify` and grows with every row added: each row breaks the tree, runs
-          # the WHOLE gate, requires it to name the check, and restores. One gate run is 84s
-          # measured locally and about 60s on a runner, so the suite costs a runner minute per
-          # row and the job's duration is roughly the row count in minutes.
+          # it used to delete the tag, and even now it costs a manual re-dispatch.
           #
-          # 1500s was 25 minutes against runs of 27, 27, 28, 36, 52, 52, 59 and 70 -- below all
-          # eight, so every release timed out undecided and needed a manual re-dispatch.
+          # 1500s was 25 minutes against runs of 27, 27, 28, 36, 52, 52, 59 and 70: below all
+          # eight, so every release timed out undecided and needed a hand re-dispatch.
           #
-          # 5400s replaced it and was correct for one release. The last seven successful
-          # `verify` runs took 63, 81, 82, 85, 89, 85 and 93 minutes: 5400s is 90 minutes, which
-          # is BELOW TWO OF THE LAST THREE. v1.51.0 hit it exactly -- resolve gave up at
+          # 5400s was 90 minutes against seven unsharded runs of 63, 81, 82, 85, 89, 85 and 93,
+          # which is BELOW TWO OF THE LAST THREE. v1.51.0 hit it exactly: resolve gave up at
           # "PENDING verify: status=in_progress (after waiting 5400s)" eight seconds before the
-          # run it was waiting for went green, and the tag sat unpublished until a manual
-          # re-dispatch. Nothing was deleted, because an undecided verdict withholds rather
-          # than cleans up, but the release still did not happen on its own.
+          # run it was waiting for went green, and the tag sat unpublished until a re-dispatch.
+          # Nothing was deleted, because an undecided verdict withholds rather than cleans up,
+          # but the release still did not happen on its own.
           #
-          # 7200s is 120 minutes: 27 minutes over the measured 93-minute worst case, which at a
-          # minute per row is about 27 more falsifiability rows of headroom, and well inside
-          # GitHub's 360-minute job ceiling. The cost is a runner minute per minute spent
-          # waiting, paid only while a release is in flight; that is the price of not publishing
-          # over an unread verdict.
+          # 7200s was 120 minutes against that 93-minute worst case. It was never below the job;
+          # it went stale above it. v1.55.0 sharded the falsifiability sweep 7 ways and `verify`
+          # fell from 82-98 minutes to 17m49s (run 33361832175, whole-run wall clock), leaving a
+          # ceiling at 7x the job it waits for, so a hung run cost two hours before anyone heard.
           #
-          # This number goes stale silently. Nothing compares it to how long `verify` actually
-          # takes -- both times it has been wrong, it was wrong because the suite grew and the
-          # comment did not. Re-derive it from the real durations, not from this comment:
-          #   gh run list --workflow verify.yml --limit 14 --json databaseId,conclusion \
-          #     --jq '.[]|select(.conclusion=="success")|.databaseId' \
-          #   | while read r; do gh run view "$r" --json jobs \
-          #       --jq '.jobs[]|select(.name=="verify")|"\(.startedAt) \(.completedAt)"'; done
-          REQUIRE_CHECKS_WAIT_SECONDS: "7200"
+          # 3600s is 60 minutes: 3.4x that measurement, and above the 3150s floor check 58 of
+          # .claude/verify.sh derives from the tree at 93 rows over 7 shards. That check is the
+          # part that matters. This number went stale twice because nothing compared it to the
+          # job, and the comment that used to sit here said exactly that about itself and was
+          # still right the next time. The floor now moves when the row count or the shard count
+          # moves, and the gate goes red at commit time instead of a release timing out.
+          #
+          # Re-derive from the WHOLE verify run, not from the job named `verify`: since v1.55.0
+          # that job is a 4-second join over the shards, and the per-job query that used to live
+          # here now reports 4s.
+          #   gh run list --workflow verify.yml --limit 14 \
+          #     --json conclusion,startedAt,updatedAt \
+          #     --jq '.[]|select(.conclusion=="success")|"\(.startedAt) \(.updatedAt)"'
+          REQUIRE_CHECKS_WAIT_SECONDS: "3600"
         run: |
           # When origin first had this tag, as closely as this workflow can observe it. On the
           # ordinary path -- a tag push -- this run was CREATED BY that push, so its created_at

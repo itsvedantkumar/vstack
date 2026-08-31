@@ -28,9 +28,15 @@ env:
   # same install steps verify-core runs, duplicated per shard so no row degrades to an
   # unexpected skip) estimated at ~3-4 minutes, so roughly 16-18 minutes wall per shard. That
   # runs concurrently with verify-core (~10-15 minutes) rather than after it, so the workflow's
-  # total wall clock is bounded by the falsify pipeline, not their sum: roughly 18-20 minutes
-  # against the 63-93 minutes measured for the unsharded job in release.yml's own comment beside
-  # REQUIRE_CHECKS_WAIT_SECONDS. Not verified by an actual CI run -- see this task's report.
+  # total wall clock is bounded by the falsify pipeline, not their sum.
+  #
+  # Measured on run 33361832175, the first sharded release: 17m49s whole-run wall clock against
+  # 82-98 minutes unsharded. Slowest shard 1034s (13 mutation + 3 fixed rows, 64.6s each, so the
+  # ~60s/row estimate above held); fastest 690s; verify-core 149s and install-macos 408s both
+  # finished well inside the falsify pipeline, as predicted. The `verify` job itself is 4s: it
+  # is a join, so anything timing this workflow has to read the run, not that job. Check 58 of
+  # .claude/verify.sh derives release.yml's REQUIRE_CHECKS_WAIT_SECONDS floor from this shard
+  # count and the row count, so lowering FALSIFY_SHARDS without raising that ceiling goes red.
   FALSIFY_SHARDS: "7"
 
 jobs:

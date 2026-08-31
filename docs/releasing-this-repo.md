@@ -50,8 +50,14 @@ is explicit about tags or it publishes one by accident.
 `resolve` waits for the required checks to decide before publishing, bounded by
 `REQUIRE_CHECKS_WAIT_SECONDS` in `.github/workflows/release.yml`. That ceiling has been below the
 job it waits for twice, because `verify` grows by roughly a runner minute for every falsifiability
-row added and the number was justified against a measurement that then went stale. Re-derive it
-from the API rather than from the comment; the query is in the comment beside the value.
+row added and the number was justified against a measurement that then went stale.
+
+Check 58 of `.claude/verify.sh` now derives the floor from the row count in
+`tests/gate-falsifiability.sh` and `FALSIFY_SHARDS` in `.github/workflows/verify.yml`, and fails
+when the ceiling is under twice that floor, so adding rows or removing shards goes red at commit
+time rather than at release time. The check derives a floor, not a measurement: if you want the
+real durations, read the whole run and not the job named `verify`, which has been a 4-second join
+over the shards since v1.55.0. The query is in the comment beside the value.
 
 When `resolve` times out it exits 2 and the caller withholds publication **without deleting the
 tag**. The tag survives, nothing is published, and a re-dispatch of the release workflow finishes

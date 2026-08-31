@@ -4,6 +4,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.56.0 — 2026-08-31
+
+### The release gate waited two hours for a job that now takes eighteen minutes
+
+`REQUIRE_CHECKS_WAIT_SECONDS` bounds how long `resolve` waits for `verify` to decide. It has been
+wrong twice in this repository, both times because the falsifiability suite grew and the comment
+beside the number did not: 1500s against runs of 27 to 70 minutes, then 5400s against runs of 63
+to 93, where v1.51.0 gave up eight seconds before the run it was waiting for went green.
+
+1.55.0 sharded the sweep and `verify` fell to 17m49s (run 33361832175, whole-run wall clock,
+against 82-98 minutes unsharded). That left 7200s stale in the other direction: a hung run cost
+two hours before anyone was told. It is now 3600s.
+
+Re-deriving it by hand is what failed twice, so check 58 derives the floor from the tree instead.
+The slowest falsify shard runs `ceil(rows/shards)` mutation rows plus the 3 rows every shard
+repeats, at 75s each after 300s of checkout and install, and the ceiling must clear twice that.
+Both historical failures go red under it: unsharding the sweep demands 15000s, and doubling the
+row count demands 5100s. The 75s comes from the slowest shard of that run, 1034s over 16 rows.
+
+The re-derivation query in release.yml's comment was itself stale, which is the same defect one
+level up. It read the job named `verify`, and since 1.55.0 that job is a 4-second join over the
+shards, so it reported 4s. It now reads the run.
+
 ## 1.55.0 — 2026-08-31
 
 ### v1.54.0's own check 50 hung CI for 78 minutes by running the gate inside the gate

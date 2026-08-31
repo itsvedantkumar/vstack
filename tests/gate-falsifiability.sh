@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -291,6 +291,7 @@ files_for(){ case "$1" in
   57b) printf 'claude/statusline.sh' ;;
   57c) printf 'bin/doctor' ;;
   57d) printf 'claude/statusline.sh' ;;
+  58)  printf '.github/workflows/release.yml' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -382,6 +383,7 @@ label_for(){ case "$1" in
   57b) printf "every reader of the trust store answers the gate's question" ;;
   57c) printf "every reader of the trust store answers the gate's question" ;;
   57d) printf "every reader of the trust store answers the gate's question" ;;
+  58)  printf "the release gate's wait ceiling clears the job it waits for" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -635,6 +637,13 @@ exit 7
   57d) # The same omission in the statusline, where it renders every turn.
       sed -i.t 's|\[ -z "$_tm" \] && _tok=1|_tok=1|' \
         claude/statusline.sh && rm -f claude/statusline.sh.t ;;
+
+  58) # Cut the wait ceiling under the floor check 58 derives from the tree. Matched on the key
+      # and not on the current value: a row pinned to "3600" would stop mutating anything the
+      # next time the number is re-derived, and report the check unfalsifiable while proving
+      # nothing about it.
+      sed -i.t 's|\(REQUIRE_CHECKS_WAIT_SECONDS: \)"[0-9]*"|\1"600"|' \
+        .github/workflows/release.yml && rm -f .github/workflows/release.yml.t ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;
