@@ -495,20 +495,75 @@ jobs:
   # conclusion when one of them goes red. require-checks-green.sh treats anything other than
   # `success` as not green either way (skipped included), so this is for a readable log, not for
   # correctness that would otherwise be missing.
+  # The container matrix is the only gate that installs vstack for real inside a foreign distro
+  # and fires the hooks there. It was named by release.yml and no other workflow, so it ran only
+  # after a tag already existed. A failure at that point deletes the tag by design and leaves main
+  # red, so every hook break this repo has shipped was found in the most expensive place available.
+  #
+  # This lane runs the same script against the commit that was just pushed, before any tag exists.
+  # It is possible at all because tests/container-matrix.sh can now resolve a bare commit SHA;
+  # `git clone --branch` resolves only refs/heads and refs/tags and exits 128 on a SHA, which is
+  # the mechanical reason this job could not have been written before.
+  #
+  # Deliberately not run on pull_request. The harness clones the CANONICAL remote by ref, and a
+  # fork's branch does not exist there: it would either fail to clone or resolve an unrelated
+  # same-named branch on this repo and report a confident green about the wrong tree.
+  #
+  # Named container-matrix-pretag and NOT container-matrix, because
+  # .github/scripts/latest-check-run.jq selects on `.name == $n` exactly. Two check-runs sharing
+  # one name become ambiguous the moment either is added to release.yml's REQUIRED_CHECKS.
+  #
+  # timeout-minutes is 20, not release.yml's 45. This job joins `verify`'s needs, and check 58
+  # derives the REQUIRE_CHECKS_WAIT_SECONDS floor from the falsify shard count with no term for
+  # this job. Measured: this script takes about 6 minutes and the slowest falsify shard about 19,
+  # so it hides behind the existing critical path and that floor stays honest. The timeout is what
+  # holds that true by construction instead of by assumption.
+  container-matrix-pretag:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install this exact commit inside three foreign container images
+        env:
+          VSTACK_REF: ${{ github.sha }}
+        run: bash ./tests/container-matrix.sh
+
   verify:
-    needs: [verify-core, falsify-plan, falsify, falsify-reconcile]
+    needs: [verify-core, falsify-plan, falsify, falsify-reconcile, container-matrix-pretag]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Every lane this check speaks for actually succeeded
+        # EVENT_NAME is passed through env rather than interpolated into the script below, and that
+        # is load-bearing, not style. Check 50 proves this job really gates the lanes it names by
+        # EXECUTING this run: block with synthetic needs.<job>.result values in both directions,
+        # and it refuses any block still holding an unresolved ${{ }} after that substitution --
+        # correctly, since it cannot evaluate one. A bare ${{ github.event_name }} here therefore
+        # made the whole join unreadable to the check, and every lane it gates was reported as
+        # having no gate at all.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           rc=0
           for pair in \
             "verify-core:${{ needs.verify-core.result }}" \
             "falsify-plan:${{ needs.falsify-plan.result }}" \
             "falsify:${{ needs.falsify.result }}" \
-            "falsify-reconcile:${{ needs.falsify-reconcile.result }}"; do
+            "falsify-reconcile:${{ needs.falsify-reconcile.result }}" \
+            "container-matrix-pretag:${{ needs.container-matrix-pretag.result }}"; do
             job=${pair%%:*}; result=${pair#*:}
+            # container-matrix-pretag does not run on pull_request, by construction, for the
+            # reason spelled out on the job itself. That is the ONE skip this join accepts: it is
+            # named rather than inferred, and it is bounded to the event that causes it. The same
+            # commit is measured by that job on the push to main. Any other skip, including this
+            # job skipping on a push, stays a failure -- a skip is not a pass.
+            if [ "$job" = container-matrix-pretag ] && [ "$result" = skipped ] \
+               && [ "$EVENT_NAME" = pull_request ]; then
+              echo "unmeasurable  $job: not run on pull_request (a fork branch does not exist on the canonical remote); measured on the push to main"
+              continue
+            fi
             if [ "$result" != success ]; then
               echo "::error::$job did not succeed (result=$result)"
               rc=1
