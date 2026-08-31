@@ -513,15 +513,17 @@ jobs:
   # .github/scripts/latest-check-run.jq selects on `.name == $n` exactly. Two check-runs sharing
   # one name become ambiguous the moment either is added to release.yml's REQUIRED_CHECKS.
   #
-  # timeout-minutes is 20, not release.yml's 45. This job joins `verify`'s needs, and check 58
+  # timeout-minutes is 15, not release.yml's 45. This job joins `verify`'s needs, and check 58
   # derives the REQUIRE_CHECKS_WAIT_SECONDS floor from the falsify shard count with no term for
-  # this job. Measured: this script takes about 6 minutes and the slowest falsify shard about 19,
-  # so it hides behind the existing critical path and that floor stays honest. The timeout is what
-  # holds that true by construction instead of by assumption.
+  # this job, so anything this job adds to the join is invisible to that floor. Measured on run
+  # 053e6d7: this job 6m45s, falsify shards 14m32s to 19m07s. 15 is chosen to sit under the
+  # FASTEST observed shard, not the slowest: at 20 a hung job could outlast a fast shard by five
+  # minutes and inflate the join while check 58 stayed green. The measurement says the timeout is
+  # never reached; the number is what makes the claim hold when it is.
   container-matrix-pretag:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
