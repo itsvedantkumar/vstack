@@ -191,6 +191,30 @@ reports `1 skipped` in every lane, because `plugin manifests valid` needs an aut
 `claude` CLI and no credentials are mounted. That is a structural limit of running without
 credentials, not a passing result.
 
+Two things had to be true before this suite could run anywhere except after a tag, and each was
+wrong in a way that read as correct.
+
+`git clone --branch` resolves refs/heads and refs/tags and nothing else, so handing it a commit SHA
+exits 128 with "Remote branch not found in upstream origin". That one flag is why the harness could
+only ever be aimed at something already published, and so why a hook break surfaced first as a
+failed release with the tag deleted by the cleanup job. A SHA is now fetched by object id instead,
+with the named-ref path left byte-identical so the published-artifact lane takes the code path it
+always did. `tests/container-ref-resolve.sh` extracts that classifier out of `container-matrix.sh`
+and executes it rather than restating it, so it cannot pass against a fix whose behaviour it never
+ran, and its mutation mode is checked against the landed change and not only against the fixture it
+was written with.
+
+The `1 skipped` above used to be true only at a tag. A depth-1 clone of a tag carries that tag; a
+branch or a SHA carries none, and `.claude/verify.sh` check 24 then skips itself with "no tags in
+this checkout". The lane published that second skip under the credentials banner, because the
+classifier grepped the joined reason string and let one correct match vouch for every other skip
+present, so the check that pins the declared version to a real tag was dark while the line above it
+read as understood. Tags are now backfilled when the checkout has none, which puts check 24 back in
+the measured set, and the classifier requires the credential-attributable count to equal the total
+skip count before the unmeasurable verdict is available at all. Anything left over is a failure
+naming it. `tests/container-skip-classify.sh` runs the real block against synthetic gate output
+across six cases, and the one that matters is one credentials skip plus one that is not.
+
 ## bin-scripts.sh
 
 `bin/claude-bg.sh`, `bin/claude-task.sh` and `bin/deploy-auto.sh` install to every user's
