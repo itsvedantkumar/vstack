@@ -297,7 +297,9 @@ fi
 ASSERT_EOF
 cat >> "$ROOT/assertions.sh" <<'ASSERT_EOF'
 
-# --- 8-12. skill-mandate.sh, all four directions (five sub-cases: prove-it-works needs two) ----
+# --- 8-12(+9b,9c). skill-mandate.sh, all five mandates (breadth/fan-out, conversational,
+# prove-it-works, and -- new in v1.57.0 -- the fan-out batch requirement and the swarm mandate)
+# -----------------------------------------------------------------------------------------------
 # Asserted on the stdout JSON's .reason naming the SPECIFIC mandate, never on exit code -- the
 # hook exits 0 whether or not it blocks, and accepting any block as proof of the RIGHT block is
 # the defect this suite closes.
@@ -306,6 +308,12 @@ if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
   mkdir -p /tmp/mandate
   jline_text(){ jq -cn --arg t "$1" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'; }
   jline_tool(){ jq -cn --arg n "$1" --argjson i "$2" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i}]}}'; }
+  # jline_batch: ONE assistant record whose .message.content holds TWO tool_use blocks. This is
+  # the only shape skill-mandate.sh's fanout_batches counts as a real concurrent dispatch (see
+  # the hook's own "what actually runs concurrently in Claude Code" comment) -- two jline_tool
+  # lines back to back is a serial loop instead, which v1.57.0 deliberately stopped crediting.
+  jline_batch(){ jq -cn --arg n "$1" --argjson i1 "$2" --argjson i2 "$3" \
+    '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:$i1},{type:"tool_use",name:$n,input:$i2}]}}'; }
   # VSTACK_DELEGATION_LOG must be exported before the pipeline, not prefixed onto just the
   # printf half of it -- an env-var prefix on one command in a pipe scopes to that command only,
   # and skill-mandate.sh (the OTHER half of the pipe) would then fall back to its real default
@@ -334,18 +342,59 @@ if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
     res FAIL "8-mandate-breadth-blocks" "decision=$dec8 (want block naming 'multi-directory work'); reason: $(printf '%s' "$reason8" | tr '\n' ' ' | cut -c1-200)"
   fi
 
-  # 9: same breadth, but WITH an Agent dispatch + a named call sign -> stays silent (exit 0, empty stdout).
-  { jline_tool Write '{"file_path":"/tmp/mandate/breadth2/a/x.sh"}'
+  # 9: same breadth, but post-v1.57.0: swarm called first, then TWO Agent dispatches BATCHED in
+  # ONE assistant message (jline_batch -- the only shape fanout_batches counts as concurrent),
+  # plus a named call sign -> stays silent on both the breadth/fan-out mandate and the swarm
+  # mandate (exit 0, empty stdout). This replaces the pre-1.57.0 fixture, which used a single
+  # jline_tool Agent call: that is a serial dispatch, not a batch, and correctly blocks under the
+  # current rules (see 9b) -- the old fixture was proving the wrong thing was silent.
+  { jline_tool Skill '{"skill":"swarm"}'
+    jline_tool Write '{"file_path":"/tmp/mandate/breadth2/a/x.sh"}'
     jline_tool Write '{"file_path":"/tmp/mandate/breadth2/b/y.json"}'
     jline_tool Write '{"file_path":"/tmp/mandate/breadth2/c/z.yaml"}'
-    jline_tool Agent '{"prompt":"verify the config changes","subagent_type":"qa"}'
-    jline_text "Delegated verification to RICK for follow-up."
+    jline_batch Agent '{"prompt":"verify the config changes","subagent_type":"qa"}' '{"prompt":"review the config changes","subagent_type":"code-reviewer"}'
+    jline_text "RICK: dispatched MEESEEKS (qa) and MORTY (code-reviewer) together to verify and review the config changes."
   } > /tmp/mandate/breadth-with-dispatch.jsonl
   out9=$(run_mandate /tmp/mandate/breadth-with-dispatch.jsonl breadth-dispatch)
   if [ -z "$out9" ]; then
-    res PASS "9-mandate-breadth-dispatch-silent" "breadth with an Agent dispatch + attribution stayed silent"
+    res PASS "9-mandate-breadth-dispatch-silent" "breadth with swarm called + a batched 2-agent dispatch + attribution stayed silent"
   else
     res FAIL "9-mandate-breadth-dispatch-silent" "expected empty stdout, got: $(printf '%s' "$out9" | tr '\n' ' ' | cut -c1-200)"
+  fi
+
+  # 9b: same breadth eligibility, swarm called (isolates this from the swarm mandate below), but
+  # only ONE Agent dispatch -- a serial delegation, never 2+ in the same message -> block naming
+  # the breadth/fan-out mandate. This is the direction the pre-1.57.0 fixture (the old case 9)
+  # got backwards: it asserted this exact shape stays silent, and the v1.57.0 release shipped red
+  # on all three container lanes because of it.
+  { jline_tool Skill '{"skill":"swarm"}'
+    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/a/x.sh"}'
+    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/b/y.json"}'
+    jline_tool Write '{"file_path":"/tmp/mandate/breadth3/c/z.yaml"}'
+    jline_tool Agent '{"prompt":"verify the config changes","subagent_type":"qa"}'
+    jline_text "RICK: dispatched MEESEEKS to verify, then moved on."
+  } > /tmp/mandate/breadth-serial.jsonl
+  out9b=$(run_mandate /tmp/mandate/breadth-serial.jsonl breadth-serial)
+  dec9b=$(printf '%s' "$out9b" | jq -r '.decision // "none"' 2>/dev/null)
+  reason9b=$(printf '%s' "$out9b" | jq -r '.reason // ""' 2>/dev/null)
+  if [ "$dec9b" = block ] && printf '%s' "$reason9b" | grep -q 'multi-directory work'; then
+    res PASS "9b-mandate-breadth-serial-blocks" "breadth-eligible + swarm called + ONE dispatch (serial loop, no batch) blocked, naming 'multi-directory work'"
+  else
+    res FAIL "9b-mandate-breadth-serial-blocks" "decision=$dec9b (want block naming 'multi-directory work'); reason: $(printf '%s' "$reason9b" | tr '\n' ' ' | cut -c1-200)"
+  fi
+
+  # 9c: a Task/Agent dispatch where the swarm skill was never called (no breadth writes at all,
+  # so this isolates the swarm mandate from the breadth one above) -> block naming swarm.
+  { jline_tool Agent '{"prompt":"verify the config changes","subagent_type":"qa"}'
+    jline_text "RICK: dispatched MEESEEKS to verify."
+  } > /tmp/mandate/swarm-not-called.jsonl
+  out9c=$(run_mandate /tmp/mandate/swarm-not-called.jsonl swarm-notcalled)
+  dec9c=$(printf '%s' "$out9c" | jq -r '.decision // "none"' 2>/dev/null)
+  reason9c=$(printf '%s' "$out9c" | jq -r '.reason // ""' 2>/dev/null)
+  if [ "$dec9c" = block ] && printf '%s' "$reason9c" | grep -q 'the swarm skill'; then
+    res PASS "9c-mandate-swarm-required-blocks" "a Task/Agent dispatch with swarm never invoked blocked, naming the swarm mandate"
+  else
+    res FAIL "9c-mandate-swarm-required-blocks" "decision=$dec9c (want block naming the swarm mandate); reason: $(printf '%s' "$reason9c" | tr '\n' ' ' | cut -c1-200)"
   fi
 
   # 10: purely conversational turn (no tool_use at all) -> stays silent.
@@ -385,6 +434,8 @@ if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
 else
   res FAIL "8-mandate-breadth-blocks" "$MSH missing or not executable, or jq unavailable"
   res FAIL "9-mandate-breadth-dispatch-silent" "$MSH missing or not executable, or jq unavailable"
+  res FAIL "9b-mandate-breadth-serial-blocks" "$MSH missing or not executable, or jq unavailable"
+  res FAIL "9c-mandate-swarm-required-blocks" "$MSH missing or not executable, or jq unavailable"
   res FAIL "10-mandate-conversational-silent" "$MSH missing or not executable, or jq unavailable"
   res FAIL "11-mandate-prove-it-works-blocks" "$MSH missing or not executable, or jq unavailable"
   res FAIL "12-mandate-prove-it-works-silent" "$MSH missing or not executable, or jq unavailable"
