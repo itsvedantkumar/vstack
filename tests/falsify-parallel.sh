@@ -118,12 +118,15 @@ wait
 FAILED=0; RAN=0; SKIPPED=0
 for s in $(seq 0 $((JOBS-1))); do
   d="$WORK/shard-$s"; rc=$(cat "$d.rc" 2>/dev/null || echo 99)
-  # sed -E, not a BRE. `\|` alternation is a GNU extension; BSD sed matches it literally, so the
-  # BRE spelling of this silently extracted nothing on macOS and the reconciliation below then
-  # reported every row as unrun -- a red for the right reason by accident, which is luck, not a
-  # design. And `grep -c` PRINTS 0 while EXITING 1 on no match, so a `|| echo 0` fallback emits
-  # two lines and the arithmetic below fails on the second.
-  n=$(sed -E -n 's/^(ok|FAIL|skip)  check ([^ ]+) .*/\2/p' "$d.log" 2>/dev/null | tee -a "$WORK/reported" | wc -l | tr -d ' ')
+  # Three ways this one line was wrong, all found by running it over 3 rows before trusting it
+  # with 96. `\|` alternation is a GNU extension and BSD sed matches it literally. The column
+  # widths are NOT uniform -- gate-falsifiability.sh pads `ok` to four spaces and `FAIL`/`skip`
+  # to two -- so a pattern with a literal two spaces matched only the failures and skips, and
+  # this reconciliation could never once have gone green. And `grep -c` PRINTS 0 while EXITING 1
+  # on no match, so a `|| echo 0` fallback emits two lines and the arithmetic fails on the second.
+  # Match whitespace as whitespace: a reconciler keyed to a printf's column padding is one
+  # cosmetic edit away from silently reporting that nothing ran.
+  n=$(sed -E -n 's/^(ok|FAIL|skip)[[:space:]]+check[[:space:]]+([^[:space:]]+).*/\2/p' "$d.log" 2>/dev/null | tee -a "$WORK/reported" | wc -l | tr -d ' ')
   k=$(/usr/bin/grep -c '^skip  check ' "$d.log" 2>/dev/null); k=${k:-0}
   RAN=$((RAN+n)); SKIPPED=$((SKIPPED+k))
   if [ "$rc" -ne 0 ]; then
