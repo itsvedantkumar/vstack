@@ -1978,6 +1978,13 @@ if command -v jq >/dev/null; then
     P='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/main.py"}}]}}'
     TA='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"running"}]}}'
     TB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"qa (BETH J-42)"}]}}'
+    SW='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"swarm"}}]}}'
+    # TWO dispatches inside ONE record's content array -- this is what concurrent looks like.
+    TWO='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP and GLOOTIE"}]}}'
+    # The same two dispatches in SEPARATE records with no shared message id -- a serial loop.
+    # task_count cannot tell these two fixtures apart; that is the whole point of fanout_batches.
+    ON1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP"}]}}'
+    ON2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"GLOOTIE"}]}}'
 
     # blocks when the rule is unmet
     say_ "$W"; hit_ a | grep -q '"decision":"block"' || errs="$errs\nwrote prose without unslop and it did not block"
@@ -1998,21 +2005,34 @@ if command -v jq >/dev/null; then
     F3='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".editorconfig","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"home/.gitignore","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"proj/.npmrc","content":""}}]}}'
     say_ "$F3"; [ -z "$(hit_ j)" ] || errs="$errs\nthree dotfiles across three dirs falsely blocked multi-dir mandate"
     # agent naming: dispatch attribution required
-    say_ "$TA"; hit_ k | grep -q '"decision":"block"' || errs="$errs\nTask call with no call sign did not block"
-    say_ "$TB"; [ -z "$(hit_ l)" ] || errs="$errs\nTask call with call sign (BETH) blocked anyway"
+    # Asserts the reason, not just that something blocked: TA also trips the swarm mandate,
+    # so a bare '"decision":"block"' test would pass even if the naming rule were deleted.
+    say_ "$SW" "$TA"; hit_ k | grep -q 'agent naming' || errs="$errs\nTask call with no call sign did not block on the naming rule"
+    # SW first: TB dispatches a Task, and the swarm mandate now blocks any dispatch made
+    # without calling the swarm skill. Without SW this case would still go silent-or-block for
+    # a reason that has nothing to do with the naming rule it is here to prove.
+    say_ "$SW" "$TB"; [ -z "$(hit_ l)" ] || errs="$errs\nTask call with call sign (BETH) blocked anyway"
     say_ "$P"; [ -z "$(hit_ m)" ] || errs="$errs\nzero Task calls falsely blocked on naming rule"
     say_ "$TA"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ n)" ] || errs="$errs\nVSTACK_NO_MANDATE=1 did not disable agent naming block"
 
-    # "*vfy-[a-n]*" not "vfy-*": the mandate latch split (f4f5468) inserts "ckpt-" between the
+    # fan-out: two dispatches in one message satisfy breadth; the same two spread across two
+    # messages do not. Under the old rule both fixtures had task_count=2 and both went silent,
+    # so a serial loop cleared a mandate whose entire subject is doing the work concurrently.
+    say_ "$F2" "$SW" "$TWO"; [ -z "$(hit_ o)" ] || errs="$errs\ntwo dispatches in ONE message did not satisfy the breadth mandate"
+    say_ "$F2" "$SW" "$ON1" "$ON2"; hit_ p | grep -q 'same message' || errs="$errs\ntwo dispatches in SEPARATE messages satisfied breadth anyway -- a serial loop cleared the fan-out mandate"
+    # swarm: dispatching without routing through the skill blocks, and calling it clears.
+    say_ "$TB"; hit_ q | grep -q 'swarm' || errs="$errs\ndispatched without calling the swarm skill and it did not block"
+
+    # "*vfy-[a-q]*" not "vfy-*": the mandate latch split (f4f5468) inserts "ckpt-" between the
     # "vstack-mandate-" anchor and the session id, and the delegation-family counters (h/i/j
     # exercise the breadth mandate) append ".delegate"/".delegate-ts"/".delegate-scan"/".lock"
     # after it -- a bare "vfy-*" anchor matches none of the ckpt files and missed every one of
     # them (verified: 12 stale vstack-mandate-ckpt-vfy-* sat in $TMPDIR across runs of this gate
     # before this fix). Anchored on both ends the way 76d2366 fixed the identical bug in
-    # tests/test-breadth-mandate.sh: "vfy-[a-n]" is exactly the 14 single-letter session ids this
+    # tests/test-breadth-mandate.sh: "vfy-[a-q]" is exactly the 14 single-letter session ids this
     # block hands to hit_ above, so this cannot reach a file this check did not create.
-    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-n]* 2>/dev/null
-    [ -z "$errs" ] && ok "skill mandate decides correctly (14 cases, both directions)" \
+    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-q]* 2>/dev/null
+    [ -z "$errs" ] && ok "skill mandate decides correctly (17 cases, both directions)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
   fi
 else
@@ -2388,17 +2408,28 @@ if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_m
   # Every byte is paid on every session there, and check 18 cannot see this variant because it
   # probes the source copy, which is not an overlay and never appends the policy.
   #
-  # 7168 (7 KiB) is not fitted to a single reading. With both leaks above pinned, this scenario
-  # measured 6886 B on macOS (the longest $TMPDIR: /private/var/folders/.../T/tmp.XXXXXXXXXX) and
-  # 6754-6784 B in debian, alpine and ubuntu containers (short /tmp/tmp.XXXXXXXXXX, and
-  # init.defaultBranch varies main/master by 2 bytes) — same commit, same content, ~130 B of pure
-  # tmpdir-naming noise, the same kind of machine-to-machine drift check 18 already documents in
-  # its own README-comparison tolerance. 7168 clears the worst of those with ~280 B of headroom,
-  # matching check 18's absolute margin on its own baseline (441 B) and skills (382 B) rows: room
-  # for a sentence added on purpose, not for a block that ran away.
+  # 8704 (8.5 KiB). The previous cap was 7168, fitted to a 6886 B reading on macOS (the longest
+  # $TMPDIR: /private/var/folders/.../T/tmp.XXXXXXXXXX) against 6754-6784 B in debian, alpine and
+  # ubuntu containers (short /tmp/tmp.XXXXXXXXXX, and init.defaultBranch varies main/master by
+  # 2 bytes) -- ~130 B of tmpdir-naming noise, the same machine-to-machine drift check 18
+  # documents in its own README tolerance. That cap claimed ~280 B of headroom, "room for a
+  # sentence added on purpose, not for a block that ran away".
+  #
+  # Measured at v1.56.0: 7167 B against the 7168 cap. ONE byte. All 280 of those bytes had been
+  # spent across intervening releases and this gate said nothing, because a threshold reports the
+  # same ok at 1 byte of margin as at 280 -- it can only speak once the margin is already gone,
+  # which is exactly when saying so stops being useful. So the headroom is now printed on every
+  # run (see the ok line below). Erosion becomes visible while it is happening rather than as a
+  # failure in whichever release finally crosses the line.
+  #
+  # 8704 carries the two dispatch rules added to the policy document in 1.57.0 (FAN OUT THROUGH
+  # swarm, ISOLATE THE WRITERS, +825 B after compression) with ~625 B left. A deliberate spend,
+  # not an accommodation: these bytes are paid on every session in every overlaid repo, and the
+  # number to watch is the headroom in the ok line, not this constant.
+  o_cap=8704
   o_sz=$(printf '%s' "$o_out" | wc -c | tr -d ' ')
-  [ "${o_sz:-0}" -le 7168 ] \
-    || o_errs="$o_errs\n  the sandbox session block is $o_sz bytes, over the 7168 cap"
+  [ "${o_sz:-0}" -le "$o_cap" ] \
+    || o_errs="$o_errs\n  the sandbox session block is $o_sz bytes, over the $o_cap cap (every byte is paid on every session in every overlaid repo)"
 
   # This machine: ~/.claude/CLAUDE.md carries the policy, so the overlay must not add a second.
   o_gh="$o_tmp/withglobal"; mkdir -p "$o_gh/.claude/hooks"
@@ -2421,7 +2452,7 @@ if command -v jq >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && [ -n "$o_m
 
   rm -rf "$o_tmp"
   [ -z "$o_errs" ] \
-    && ok "the policy document reaches a session exactly once (sandbox $o_sz B, 6 cases)" \
+    && ok "the policy document reaches a session exactly once (sandbox $o_sz B, $((o_cap - o_sz)) B headroom, 6 cases)" \
     || bad "the policy document reaches a session exactly once" "$(printf '%b' "$o_errs")"
 else
   skip "the policy document reaches a session exactly once" "jq or git missing, or the policy document is empty"
@@ -2854,9 +2885,23 @@ if command -v jq >/dev/null; then
     # invocation of $sm below, piped or not.
     export VSTACK_DELEGATION_LOG="$c40_log"
 
-    # An unmet mandate every time it is asked: prose written, unslop never run. What matters
-    # here is the latch, not which mandate trips it, so the simplest one that trips reliably.
-    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}' \
+    # Trips ALL THREE skill-family mandates on every Stop: a prose write with no unslop, a .tsx
+    # edit with no typescript-best-practices, and a turn that closes claiming done with no
+    # Bash/Read/Task/Agent call to back it (prove-it-works). One mandate is no longer enough.
+    #
+    # 1.57.0 split the 2-strike latch per mandate, because one shared counter meant two unrelated
+    # unslop misses disarmed the other mandates for the rest of the session -- measured at the
+    # family level in f4f5468 and still live one level down. The family-level short-circuit this
+    # check drives to now needs every skill-family mandate individually latched, so an
+    # unslop-only fixture never reaches it: Stop 3 falls through to the ordinary evaluator and
+    # logs a dense latched:false row instead. That is correct behaviour, and a fixture that only
+    # trips one mandate would quietly stop testing the latch at all while still passing its two
+    # dense-row assertions.
+    #
+    # Each mandate's counter is CLEARED when it is evaluated and not hit, so all three have to
+    # trip on the same Stop to accumulate together. Verified against the real hook: Stops 1 and 2
+    # block and log dense rows, Stop 3 is silent and logs latched:true with all four counts null.
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}},{"type":"text","text":"All done, the feature is complete and working."}]}}' \
       > "$c40_transcript"
 
     c40_hit(){
