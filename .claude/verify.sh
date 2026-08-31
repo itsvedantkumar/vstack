@@ -3608,7 +3608,15 @@ if [ -f "$_c50_wf" ] && [ -f "$_c50_rl" ]; then
     # Belt and braces: even a real join is someone else's shell, and this gate must not be the
     # thing that hangs. No timeout(1) on macOS, so bound it with a watchdog subshell.
     _g_run(){ ( "$@" ) & _g_p=$!; ( sleep 20; kill -9 "$_g_p" 2>/dev/null ) 2>/dev/null & _g_w=$!
-              wait "$_g_p"; _g_rc=$?; kill "$_g_w" 2>/dev/null; return "$_g_rc"; }
+              wait "$_g_p"; _g_rc=$?
+              # Reap the watchdog, do not just signal it. An unreaped killed job is reported
+              # asynchronously by the shell -- five "Terminated: 15" lines on stderr, at whatever
+              # line happens to be running when bash next notices, which is why they read like a
+              # crash in an unrelated check. The `wait` collects it and the redirect covers the
+              # notification the `wait` itself prints. Signalling alone cannot suppress it: the
+              # message comes from this shell reaping the job, not from the job's own stderr.
+              { kill "$_g_w" 2>/dev/null; wait "$_g_w"; } 2>/dev/null
+              return "$_g_rc"; }
     # every needs.X.result -> success, then the one under test -> failure
     _g_ok=$(printf '%s' "$_g_script" | sed -E 's/\$\{\{[[:space:]]*needs\.[A-Za-z0-9_-]+\.result[[:space:]]*\}\}/success/g')
     _g_bad=$(printf '%s' "$_g_script" \
