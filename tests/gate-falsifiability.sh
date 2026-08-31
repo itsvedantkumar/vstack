@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -292,6 +292,8 @@ files_for(){ case "$1" in
   57c) printf 'bin/doctor' ;;
   57d) printf 'claude/statusline.sh' ;;
   58)  printf '.github/workflows/release.yml' ;;
+  58b) printf 'claude/inventory.json' ;;
+  58c) printf 'claude/inventory.json' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -384,6 +386,8 @@ label_for(){ case "$1" in
   57c) printf "every reader of the trust store answers the gate's question" ;;
   57d) printf "every reader of the trust store answers the gate's question" ;;
   58)  printf "the release gate's wait ceiling clears the job it waits for" ;;
+  58b) printf "the release gate's wait ceiling clears the job it waits for" ;;
+  58c) printf "the release gate's wait ceiling clears the job it waits for" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -644,6 +648,21 @@ exit 7
       # nothing about it.
       sed -i.t 's|\(REQUIRE_CHECKS_WAIT_SECONDS: \)"[0-9]*"|\1"600"|' \
         .github/workflows/release.yml && rm -f .github/workflows/release.yml.t ;;
+
+  58b) # Raise the RECORDED per-row measurement past what the ceiling can absorb. Check 58 does
+      # not hardcode a per-row cost; it scales this number by the gate's size. If the recorded
+      # measurement were decorative -- present, cited in a comment, read by nothing -- this
+      # mutation would change no verdict at all, which is the exact failure mode check 58 exists
+      # to prevent, one level down inside the checker.
+      sed -i.t 's|\("seconds_per_row": \)[0-9]*|\1650|' \
+        claude/inventory.json && rm -f claude/inventory.json.t ;;
+
+  58c) # Remove the check count the measurement was taken at. Without it the recorded cost cannot
+      # be scaled to this gate's size, so it would silently stay frozen at the size it was
+      # measured on, which is how the constant it replaced went stale in the first place. A
+      # missing anchor has to be a failure and not a skip.
+      sed -i.t '/"checks_at_measurement":/d' \
+        claude/inventory.json && rm -f claude/inventory.json.t ;;
 
   9b) perl -0pi -e 's{\.hooks = \(}{.hooks = (\$ship.hooks) | .DEADCODE = (}' overlay.sh ;;
   10) sed -i.t '/^description:/d' claude/agents/debugger.md && rm -f claude/agents/debugger.md.t ;;

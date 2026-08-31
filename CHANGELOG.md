@@ -27,6 +27,36 @@ The re-derivation query in release.yml's comment was itself stale, which is the 
 level up. It read the job named `verify`, and since 1.55.0 that job is a 4-second join over the
 shards, so it reported 4s. It now reads the run.
 
+The first draft of check 58 hardcoded PER_ROW=75 and FIXED=300 from that run, and two independent
+reviews said the same thing: a constant inside the checker, justified by a run that already
+happened, is the defect being fixed, moved one level down into the thing doing the checking. One
+of them named the mechanism that makes it bite. Every falsifiability row runs the WHOLE gate, so
+per-row cost is a function of the gate's own size, and this repository adds a check most releases.
+
+So PER_ROW is no longer a constant. `claude/inventory.json` records the measurement with the run
+id AND the check count it was taken at (65s per row at 58 checks), and check 58 scales it by the
+gate size it finds. Adding checks to `.claude/verify.sh` now raises the floor it derives, without
+anyone remembering to. Rows 58b and 58c falsify both halves: raise the recorded per-row cost and
+the check must go red, remove the check count it was measured at and it must refuse rather than
+silently freeze at the size it was measured on.
+
+FIXED stays an assumption and is now labelled one. A single run gives one equation for two
+unknowns, and that run's two 16-row shards took 1034s and 690s, so per-row cost varies by row and
+fixed cost is not separable from it.
+
+### The sweep that gates every release took two hours to run locally
+
+`tests/falsify-parallel.sh` runs `gate-falsifiability.sh` across isolated clones on the same
+round-robin split CI uses: about 20 minutes instead of over two hours. The clones are not an
+optimisation. Rows mutate tracked files in place, so two sweeps sharing a tree would each read the
+other's mutation as a concurrent edit and the restore-integrity guard would refuse, correctly.
+
+It refuses on a dirty tree, because a clone carries HEAD and the verdict would silently be about a
+different tree than the one you are looking at. And it reconciles the row ids the shards printed
+against the derived list, so N shards each green over a partial list fails instead of passing.
+
+`tests/README.md` claimed the sweep "runs offline in about 30 seconds". Same class as the ceiling.
+
 ## 1.55.0 — 2026-08-31
 
 ### v1.54.0's own check 50 hung CI for 78 minutes by running the gate inside the gate

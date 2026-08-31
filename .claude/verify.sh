@@ -4132,21 +4132,44 @@ fi
 #
 # `verify` is a join; its wall clock is bounded by the slowest falsify shard, which runs
 # ceil(rows/shards) mutation rows plus the 3 fixed rows every shard repeats, at PER_ROW seconds
-# each, after FIXED seconds of checkout and install. PER_ROW=75 is the slowest shard of run
-# 33361832175 rounded up: 1034s for 13 mutation + 3 fixed rows, 64.6s each. FIXED=300 covers the
-# install every shard duplicates and clears install-macos (408s), the slowest non-falsify lane
-# the join also waits on, at the shard counts this repo uses.
+# each, after FIXED seconds of checkout and install. The ceiling must clear TWICE that floor. A
+# ceiling merely above the floor is a coin flip: the two failures were 90 minutes against 93, and
+# 25 minutes against 27.
 #
-# The ceiling must clear TWICE that floor. A ceiling merely above the floor is a coin flip: the
-# two failures were 90 minutes against 93, and 25 minutes against 27.
-c58_pr=75; c58_fx=300
+# PER_ROW is NOT a constant here, and that is the whole point. A constant inside the checker,
+# justified by a run that already happened, is the same defect this check exists to stop being
+# trusted -- moved one level down into the thing doing the checking. Two independent reviews of
+# the first draft of this check said so, and both were right.
+#
+# Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
+# function of the gate's own size: adding a check makes all 94 rows slower. So the recorded
+# measurement carries the check count it was taken at, and the model scales it by the gate size
+# it finds right here. Adding checks to this file raises the floor it derives, automatically.
+#
+# Read with sed rather than jq on purpose. Every other reader of inventory.json in this file may
+# skip when jq is absent, and a check whose whole subject is a number nobody re-derives must not
+# be the one that stops enforcing on a machine without a JSON parser.
+#
+# What this still does NOT close, stated rather than papered over. FIXED is an assumption, not a
+# measurement: one run gives one equation for two unknowns, and that run's two 16-row shards took
+# 1034s and 690s, so per-row cost varies by row and fixed cost is not separable from it. And a
+# single new row costing far more than the average moves the real job time while the model sees
+# only an average. The 2x margin absorbs both unless one row alone exceeds twice the recorded
+# per-row cost. Rows 58b and 58c falsify the two halves that ARE load-bearing.
+c58_fx=300
 c58_rel=".github/workflows/release.yml"; c58_ver=".github/workflows/verify.yml"
 c58_fal="tests/gate-falsifiability.sh"
 if [ -f "$c58_rel" ] && [ -f "$c58_ver" ] && [ -f "$c58_fal" ]; then
   c58_wait=$(sed -n 's/^ *REQUIRE_CHECKS_WAIT_SECONDS: *"\([0-9]*\)".*/\1/p' "$c58_rel" | head -1)
   c58_sh=$(sed -n 's/^ *FALSIFY_SHARDS: *"\([0-9]*\)".*/\1/p' "$c58_ver" | head -1)
   c58_rows=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' "$c58_fal" | tr ' ' '\n' | grep -c '[0-9]')
+  c58_meas=$(sed -n 's/.*"seconds_per_row": *\([0-9]*\).*/\1/p' claude/inventory.json | head -1)
+  c58_mck=$(sed -n 's/.*"checks_at_measurement": *\([0-9]*\).*/\1/p' claude/inventory.json | head -1)
   c58_errs=""
+  [ -n "$c58_meas" ] && [ "$c58_meas" -gt 0 ] 2>/dev/null \
+    || c58_errs="$c58_errs\nno cost_model.seconds_per_row recorded in claude/inventory.json, so the per-row cost below would be justified by nothing in this tree"
+  [ -n "$c58_mck" ] && [ "$c58_mck" -gt 0 ] 2>/dev/null \
+    || c58_errs="$c58_errs\nno cost_model.checks_at_measurement recorded in claude/inventory.json, so the recorded per-row cost cannot be scaled to this gate's size and would silently stay frozen at the size it was measured on"
   # Every anchor must be found. An extractor that silently returns nothing is how check 18's
   # published-figure guard went quiet for 18 commits: a missing anchor has to be a failure.
   [ -n "$c58_wait" ] || c58_errs="$c58_errs\nno REQUIRE_CHECKS_WAIT_SECONDS: \"<n>\" line in $c58_rel"
@@ -4155,14 +4178,16 @@ if [ -f "$c58_rel" ] && [ -f "$c58_ver" ] && [ -f "$c58_fal" ]; then
   [ "${c58_rows:-0}" -gt 0 ] 2>/dev/null \
     || c58_errs="$c58_errs\nno CHECKS=\"...\" row list in $c58_fal"
   if [ -z "$c58_errs" ]; then
+    # Scale the recorded per-row cost by this gate's size against the size it was measured at.
+    c58_pr=$(( (c58_meas * TOTAL + c58_mck - 1) / c58_mck ))
     c58_per=$(( (c58_rows + c58_sh - 1) / c58_sh + 3 ))
     c58_floor=$(( c58_fx + c58_per * c58_pr ))
     c58_min=$(( c58_floor * 2 ))
     if [ "$c58_wait" -lt "$c58_min" ]; then
       bad "the release gate's wait ceiling clears the job it waits for" \
-        "REQUIRE_CHECKS_WAIT_SECONDS is ${c58_wait}s, under the ${c58_min}s this tree needs: $c58_rows rows over $c58_sh shard(s) is $c58_per rows on the slowest shard, ${c58_pr}s each plus ${c58_fx}s fixed = ${c58_floor}s, doubled. Raise it in $c58_rel, or shard further"
+        "REQUIRE_CHECKS_WAIT_SECONDS is ${c58_wait}s, under the ${c58_min}s this tree needs: $c58_rows rows over $c58_sh shard(s) is $c58_per rows on the slowest shard, ${c58_pr}s each (${c58_meas}s measured at $c58_mck checks, scaled to $TOTAL) plus ${c58_fx}s fixed = ${c58_floor}s, doubled. Raise it in $c58_rel, shard further, or re-derive the measurement in claude/inventory.json"
     else
-      ok "the release gate's wait ceiling clears the job it waits for (${c58_wait}s >= ${c58_min}s: $c58_rows rows / $c58_sh shards -> $c58_per rows x ${c58_pr}s + ${c58_fx}s, doubled)"
+      ok "the release gate's wait ceiling clears the job it waits for (${c58_wait}s >= ${c58_min}s: $c58_rows rows / $c58_sh shards -> $c58_per rows x ${c58_pr}s + ${c58_fx}s, doubled; ${c58_meas}s/row measured at $c58_mck checks, scaled to $TOTAL)"
     fi
   else
     bad "the release gate's wait ceiling clears the job it waits for" \

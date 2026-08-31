@@ -60,6 +60,12 @@ time rather than at release time. The check derives a floor, not a measurement: 
 real durations, read the whole run and not the job named `verify`, which has been a 4-second join
 over the shards since v1.55.0. The query is in the comment beside the value.
 
+The per-row cost that floor is built on lives in `claude/inventory.json` under
+`verification.required[falsifiability].cost_model`, with the run id it came from and the check
+count it was taken at. Check 58 scales it by the gate's current size, so adding checks moves the
+floor on its own; re-derive the recorded numbers when you re-derive the ceiling, and update
+`checks_at_measurement` in the same edit or the scaling silently compares against the wrong base.
+
 When `resolve` times out it exits 2 and the caller withholds publication **without deleting the
 tag**. The tag survives, nothing is published, and a re-dispatch of the release workflow finishes
 the job once the required checks are green. A red verdict deletes; an undecided one does not.
