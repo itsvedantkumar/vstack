@@ -120,17 +120,60 @@ bash --version | head -1
 git --version
 jq --version
 
+# `git clone --branch` resolves refs/heads and refs/tags and NOTHING else. Handed a commit SHA it
+# exits 128 with "Remote branch <sha> not found in upstream origin" (measured against this remote,
+# not inferred), which is the mechanical reason this harness could never be aimed at an untagged
+# commit -- and therefore the reason the only gate exercising the installed hooks in a real
+# container ran exclusively after a tag already existed. A SHA has to be fetched by object id;
+# GitHub advertises reachable commits for shallow fetch, so --depth 1 still applies.
+#
+# The named-ref path below is left byte-identical on purpose. release.yml feeds this a resolved
+# tag, and `clone --branch <tag>` brings THE TAG ITSELF into the clone, which .claude/verify.sh
+# check 24 then reads. Fetching a SHA brings no tags at all. The two paths therefore hand the
+# gate genuinely different repositories and must not be collapsed into one "simpler" form.
+is_sha_ref(){ # <ref> -- true only for a full 40-char lowercase-hex object id
+  case "$1" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 40 ]
+}
+
 echo "=== clone $REF ==="
 rm -rf /work && mkdir -p /work
-git clone --quiet --branch "$REF" --depth 1 https://github.com/itsvedantkumar/vstack.git /work/repo 2>&1
-CLONE_RC=$?
+if is_sha_ref "$REF"; then
+  REF_KIND="commit sha"
+  ( git init --quiet /work/repo \
+    && git -C /work/repo remote add origin https://github.com/itsvedantkumar/vstack.git \
+    && git -C /work/repo fetch --quiet --depth 1 origin "$REF" \
+    && git -C /work/repo checkout --quiet FETCH_HEAD ) 2>&1
+  CLONE_RC=$?
+else
+  REF_KIND="named ref"
+  git clone --quiet --branch "$REF" --depth 1 https://github.com/itsvedantkumar/vstack.git /work/repo 2>&1
+  CLONE_RC=$?
+fi
 if [ "$CLONE_RC" -ne 0 ]; then
-  res FAIL "clone" "git clone --branch $REF exited $CLONE_RC -- nothing else can run"
+  res FAIL "clone" "resolving $REF as a $REF_KIND exited $CLONE_RC -- nothing else can run"
   echo "checks: 0 declared, 0 ran, 1 skipped (clone failed)"
   exit 1
 fi
 GOT_SHA=$(git -C /work/repo rev-parse HEAD)
-res PASS "clone" "cloned $REF at $GOT_SHA"
+
+# A depth-1 clone of a TAG carries that tag, so the release lane has always had one to compare
+# against. A branch or a SHA carries none, and .claude/verify.sh check 24 -- the check that pins
+# the declared version to a tag that actually exists -- then skips itself with "no tags in this
+# checkout". Measured 2026-08-31: that skip has been happening at every non-tag ref, reported
+# under a credentials banner that had nothing to do with it. Fetch the tags so the check has its
+# comparison set. Guarded on emptiness so a tag ref, which already has what it needs, takes the
+# same code path it always did and this cannot quietly alter the published-artifact lane.
+if [ -z "$(git -C /work/repo tag 2>/dev/null)" ]; then
+  git -C /work/repo fetch --quiet --depth 1 origin 'refs/tags/*:refs/tags/*' 2>&1
+  TAGFETCH_RC=$?
+  TAGN=$(git -C /work/repo tag 2>/dev/null | wc -l | tr -d ' ')
+  echo "=== tag backfill: rc=$TAGFETCH_RC, $TAGN tag(s) now present ==="
+fi
+
+res PASS "clone" "cloned $REF ($REF_KIND) at $GOT_SHA"
 
 # --- 1. install.sh exit code 0, unpiped -------------------------------------------------------
 export HOME=/root
@@ -165,10 +208,22 @@ skip_reasons=$(printf '%s\n' "$out" | grep '^skip ' | tr '\n' ';')
 if [ "$tail_word" = "VERIFIED" ] && [ "${skipped:-1}" = 0 ]; then
   res PASS "3-verify-gate" "$acct / $tail_word"
 else
-  needs_auth=0
-  printf '%s' "$skip_reasons" | grep -qi 'plugin manifest\|authenticat\|claude CLI' && needs_auth=1
-  if [ "$needs_auth" = 1 ]; then
-    res SKIP "3-verify-gate" "UNMEASURABLE WITHOUT CREDENTIALS: $acct / $tail_word; skip reasons: $skip_reasons"
+  # "Unmeasurable without credentials" is only true if EVERY skip present says so. The previous
+  # form grepped the JOINED reason string and, on a single credentials match, stamped that banner
+  # across all of them. Measured 2026-08-31: at a non-tag ref the gate skips twice -- the plugin
+  # manifest (genuinely credentials) and check 24, which reports "no tags in this checkout
+  # (shallow clone?), so there is nothing to compare against". The second was being published
+  # under a credentials explanation that is simply untrue about it, so the one check that pins
+  # the declared version to a real tag was dark while the line above it read as understood.
+  # Counting both sides and requiring them to agree is what makes the label falsifiable at all.
+  n_skip=$(printf '%s\n' "$out" | grep -c '^skip ')
+  n_cred=$(printf '%s\n' "$out" | grep '^skip ' | grep -ci 'plugin manifest\|authenticat\|claude CLI')
+  unexplained=$(printf '%s\n' "$out" | grep '^skip ' \
+    | grep -vi 'plugin manifest\|authenticat\|claude CLI' | tr '\n' ';')
+  if [ "$tail_word" = "VERIFIED" ] && [ "${n_skip:-0}" -gt 0 ] && [ "${n_skip:-0}" = "${n_cred:-0}" ]; then
+    res SKIP "3-verify-gate" "UNMEASURABLE WITHOUT CREDENTIALS (all $n_skip skip(s) accounted for): $acct / $tail_word; skip reasons: $skip_reasons"
+  elif [ -n "$unexplained" ]; then
+    res FAIL "3-verify-gate" "$acct / $tail_word: $n_cred of $n_skip skip(s) are credential-related; these are NOT and are therefore unmeasured for a reason nobody has stated: $unexplained"
   else
     res FAIL "3-verify-gate" "$acct / $tail_word (exit=$vrc); skip reasons: $skip_reasons"
   fi
