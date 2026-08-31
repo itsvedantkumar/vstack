@@ -51,6 +51,21 @@ the shards themselves printed are diffed against the derived list, so N shards e
 green over a partial list fails instead of passing. That reconciliation reads the shards' output,
 not the plan that produced it, because a plan compared against itself agrees forever.
 
+It also reaps. The harness used to background its shards and never kill them: when the parent died
+the children kept running the gate with nobody collecting them, and one orphan was measured alive
+3h22m against a comparable 20 minute run. The trap now kills the shard tree before it removes the
+workdir, in that order, because the old trap deleted the tree the shards were still running inside.
+`INT` and `TERM` get their own handlers that call `exit`, since a single `trap ... EXIT INT TERM`
+runs its body on a signal and then resumes the interrupted statement, which meant Ctrl-C reaped the
+shards and then left the script polling for result files in a directory it had just deleted.
+
+`FALSIFY_TIMEOUT_S` bounds the whole run, 3600 by default, `0` to disable. On expiry it kills the
+tree and prints `NOT RUN` with exit 2 rather than any verdict, because the thing that makes a dead
+sweep dangerous is not the wasted CPU, it is that waiting on one is indistinguishable from waiting
+on one that will still report. `tests/falsify-parallel-reap.sh` proves all of this in about half a
+minute without running the real sweep, and `REAP_SELFCHECK=1` mutates its own assertions to show
+they still go red.
+
 ## inventory-fixture.sh
 
 `gate-falsifiability.sh` above proves the *checks* in `.claude/verify.sh` fail when their input
