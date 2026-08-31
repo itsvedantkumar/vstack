@@ -85,6 +85,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 SRC=$(pwd)
 PY="$SRC/tests/delegation-drift.py"
 HOOK="$SRC/claude/hooks/skill-mandate.sh"
+DC_HOOK="$SRC/claude/hooks/dispatch-counter.sh"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "SKIP: python3 not on PATH; this analysis needs stdlib json/math/re/datetime."
@@ -116,6 +117,13 @@ sweep_ddstate_(){
   rm -f "${TMPDIR:-/tmp}"/vstack-mandate-ckpt-ddproof[0-9]* 2>/dev/null
   rm -f "${TMPDIR:-/tmp}"/vstack-mandate-ddproof[0-9]* 2>/dev/null
   rm -rf "${TMPDIR:-/tmp}"/vstack-mandate-ddproof[0-9]*.lock 2>/dev/null
+  # PROOF 13's dispatch counter (claude/hooks/dispatch-counter.sh, keyed by session_id under
+  # ${TMPDIR:-/tmp}/vstack-dispatch-count-<sid>, a different path/lock scheme from the
+  # skill-mandate.sh state swept above) -- same reason: a stray leftover count from a manual
+  # debug invocation using this fixture's session_id would land the sampled 1-in-20 rotation
+  # check on the wrong dispatch, a false FAIL against unchanged code.
+  rm -f "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc13 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc13.lock 2>/dev/null
 }
 sweep_ddstate_
 trap 'sweep_ddstate_; rm -rf "$WORK"' EXIT
@@ -320,6 +328,64 @@ if printf '%s' "$out12" | grep -qF 'distinct sessions in replay: 0'; then
   ok "PROOF 12: replay excludes a transcript whose mtime predates CUTOFF_COMMIT_ISO"
 else
   bad "PROOF 12: replay excludes a transcript whose mtime predates CUTOFF_COMMIT_ISO" "$out12"
+fi
+
+# --- PROOF 13: claude/hooks/dispatch-counter.sh's OWN rotation engages past its OWN ~2MB cap, ----
+# dropping the oldest rows and keeping the newest ----------------------------------------------
+# claude/hooks/dispatch-counter.sh:275-279 carries a second, independent copy of the exact
+# 2097152-byte cap / `tail -n 5000` rewrite that PROOF 5 exercises above -- but PROOF 5 only ever
+# drives $HOOK (pinned to skill-mandate.sh) past the cap. Nothing before this proof ever pushed
+# dispatch-counter.sh's own replay log (a DIFFERENT file, DIFFERENT function, ported verbatim but
+# not shared code -- see that file's own "ROTATION AND CAP" comment) past 2MB, so that file's
+# rotation path had never actually run under test, only been read. Two things this fixture has to
+# get right that PROOF 5 did not, both read off dispatch-counter.sh's own source rather than
+# assumed:
+#   (1) it is a PostToolUse hook, not a Stop hook -- stdin is a tool_name/session_id/tool_input/
+#       tool_response payload, not a transcript_path fixture file, so this proof drives it with
+#       that shape directly rather than reusing $fixture4/$fixture1.
+#   (2) its size check is SAMPLED, not run on every write: dispatch-counter.sh only stats the log
+#       when `$cnt % 20 == 0` (dispatch-counter.sh:275, a cost trade-off documented in that file's
+#       own comment). $cnt is the atomic per-session dispatch counter this hook maintains at
+#       ${TMPDIR:-/tmp}/vstack-dispatch-count-<sid> -- pre-seeded to 19 below so the single
+#       dispatch this proof drives lands on cnt=20, a checked count, rather than silently skipping
+#       the size check the way dispatches 1-19 would.
+# The padding rows carry an incrementing pad_seq so this proof can tell a rotation that kept the
+# newest data apart from one that kept the oldest: after rotation, line 1 of the file must NOT be
+# pad_seq 1 (the oldest row, which a rotation that kept the wrong end would still show), and the
+# LAST line must be this proof's own freshly-appended row (tool_use_id="proof13-id") -- a rotation
+# that silently dropped the append itself while keeping old padding would pass a bare size/line-
+# count check while still destroying exactly the data rotation exists to protect.
+sid13="ddproofdc13"
+replay13="$WORK/replay13.jsonl"
+cnt_file13="${TMPDIR:-/tmp}/vstack-dispatch-count-$sid13"
+rm -rf "$cnt_file13" "$cnt_file13.lock" "$replay13" 2>/dev/null
+printf '%s' 19 > "$cnt_file13"
+python3 -c "
+import sys
+target = 2200000
+with open(sys.argv[1], 'w') as fh:
+    written = 0
+    i = 0
+    while written < target:
+        i += 1
+        line = '{\"pad_seq\":%d,\"session_id\":\"pad\",\"ts\":\"pad\"}\n' % i
+        fh.write(line)
+        written += len(line)
+" "$replay13"
+sz_before13=$(stat -f%z "$replay13" 2>/dev/null || stat -c%s "$replay13" 2>/dev/null)
+printf '{"hook_event_name":"PostToolUse","tool_name":"Task","session_id":"%s","tool_input":{"subagent_type":"tester","description":"proof13","prompt":"x"},"tool_response":{"success":true},"duration_ms":5,"tool_use_id":"proof13-id"}' "$sid13" \
+  | VSTACK_REPLAY_LOG="$replay13" bash "$DC_HOOK" >/dev/null 2>&1
+lines_after13=$(wc -l < "$replay13" 2>/dev/null | tr -d ' ')
+first_pad13=$(head -n 1 "$replay13" 2>/dev/null | jq -r '.pad_seq // empty' 2>/dev/null)
+last_tid13=$(tail -n 1 "$replay13" 2>/dev/null | jq -r '.tool_use_id // empty' 2>/dev/null)
+rm -rf "$cnt_file13" "$cnt_file13.lock" 2>/dev/null
+if [ -n "$sz_before13" ] && [ "$sz_before13" -gt 2097152 ] && [ -n "$lines_after13" ] \
+   && [ "$lines_after13" -le 5000 ] && [ -n "$first_pad13" ] && [ "$first_pad13" != "1" ] \
+   && [ "$last_tid13" = "proof13-id" ]; then
+  ok "PROOF 13: dispatch-counter.sh's own replay-log rotation engages past its own ~2MB cap (sampled every 20th dispatch), drops the oldest rows, and keeps the newest write"
+else
+  bad "PROOF 13: dispatch-counter.sh's own replay-log rotation engages past its own ~2MB cap (sampled every 20th dispatch), drops the oldest rows, and keeps the newest write" \
+      "size_before=$sz_before13 lines_after=$lines_after13 first_pad_seq=[$first_pad13] last_tool_use_id=[$last_tid13]"
 fi
 
 printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
