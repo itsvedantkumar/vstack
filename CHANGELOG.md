@@ -4,6 +4,76 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.57.0 — 2026-08-31
+
+### A mandate for delegation that one serially-dispatched agent satisfied
+
+`skill-mandate.sh` blocks when work spreads across three directories and two file types and no
+subagent was dispatched. The condition was `task_count -eq 0`, a flat count of every Task/Agent
+block anywhere in the transcript, so one agent sent on its own cleared a rule whose entire subject
+is doing the work concurrently. A serial loop and a parallel batch produced identical counts, and
+check 27 never built a fixture with more than one dispatch in it, so nothing could tell them apart.
+
+It now counts batches. `fanout_batches` folds the transcript into maximal runs of CONSECUTIVE
+assistant records sharing a non-null `.message.id` and counts runs holding two or more dispatches.
+Consecutive matters: in one 29701-line transcript, 3097 distinct ids spanned 3105 contiguous runs
+because 8 ids reappear thousands of lines later after compaction, so a global grouping would merge
+two unrelated turns into one inflated batch.
+
+The same shape defeats measurement from outside. Claude Code streams each tool_use block as its own
+JSONL record, so counting Agent blocks per record scores a four-agent batch as four solo dispatches
+and returns 0.0 fan-out on every input ever. Measured both ways over the same 1008 dispatches: 0.0
+per record, 53.0% per run.
+
+### Every dispatch now routes through the swarm skill, and the mandates stopped sharing a fuse
+
+Measured across 2536 transcripts and 20508 assistant tool-using messages: 516 Skill invocations,
+2.52 per 100. Three skills shipped by this repository have never fired once -- `writing-plans`,
+`test-driven-development`, `executing-plans` -- and they are links 2, 3 and 4 of a single chain the
+session digest stated in one line. Link 1, `brainstorming`, fired 23 times. Routing took the first
+step and stopped, so the line is now four lines with mutually exclusive preconditions: nothing
+written down, written with no test, failing test against a plan.
+
+`swarm` joined the mandate. Dispatching without calling it now blocks. The latch that would have
+undone this is split per mandate: it was one counter per family, and f4f5468 already measured that
+bleed one level up, where two early skill mandates disarmed the delegation mandate for a whole
+session while a forced re-scan read dir_count=36, ext_count=61, task_count=90. Adding `swarm` as a
+fourth sibling on a shared counter would have meant two unrelated naming strikes silencing it.
+
+### A guard anchored on another file's prose, disarmed by editing that prose
+
+The `VSTACK_PROFILE=skills` branch carried two `sed -e` clauses quoting the routing heredoc's own
+sentences verbatim. Rewriting those sentences orphaned both patterns: the sed still ran, matched
+nothing, changed nothing, and every gate stayed green. Three things touch that branch and none
+reads what it emits -- check 18 and `compare-baseline.sh` count its bytes, check 47 asserts exit 0
+and valid JSON. The dead clauses are gone. Nothing yet asserts that a substitution keyed to prose
+still matches that prose; that check is designed and deliberately not shipped here.
+
+### The policy budget had one byte left and said nothing about it
+
+Check 34 caps the session block an overlaid repo pays on every session. The cap was 7168 with a
+comment claiming ~280 B of headroom from a 6886 B reading. Measured at v1.56.0: **7167 B**. Every
+one of those 280 bytes had been spent across intervening releases while the check reported `ok`,
+because a threshold reads the same at 1 byte of margin as at 280 and can only speak once the margin
+is gone. The headroom is now printed on every run, so erosion is visible while it happens. The cap
+is 8704, carrying this release's two policy rules (+825 B after compression) with ~625 B left.
+
+### Isolation became observable; batch membership is not, and is not faked
+
+`dispatch-counter.sh` recorded nothing about whether a dispatch was concurrent or where it worked,
+so two rules this release states in policy were unmeasurable after the fact. It now records `cwd`,
+`isolation` and `run_in_background`, all confirmed present in the PostToolUse payload against the
+CLI's own schema rather than assumed, plus one field named `derived_prev_dispatch_gap_s` that is
+labelled derived because it is. A parent-message identifier is NOT on that payload -- verified
+twice against the object literal that constructs it -- so batch membership still cannot be
+recovered from the shipped logs. It travels on `PostToolBatch`, a different event this matcher
+never receives. Recording something plausible in its place was the available shortcut and is
+exactly the defect this repository exists to catch.
+
+Row width grew 223->313 B minimal and 251->394 B realistic, putting post-rotation size at ~1.5-1.9
+MB against a documented 1-1.5 MB. The comment stating the old figure is corrected in the same diff
+that invalidated it. Rotation stays bounded at 2 MB; the slack it runs on is smaller.
+
 ## 1.56.0 — 2026-08-31
 
 ### The release gate waited two hours for a job that now takes eighteen minutes
