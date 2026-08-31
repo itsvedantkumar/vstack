@@ -107,8 +107,6 @@ _delegation_log_row() {
   fi
 }
 
-cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
-
 # Monotonic per-session Stop counter for the delegation-drift logger (tests/delegation-drift.sh).
 # Lives under the same lock as $cnt_file for the same reason: concurrent Stop invocations racing
 # an unlocked read-modify-write would produce duplicate or skipped indices.
@@ -130,74 +128,125 @@ ckpt=$(cat "$ckpt_file" 2>/dev/null || echo 0)
 ckpt=$((ckpt + 1))
 printf '%s' "$ckpt" > "$ckpt_file" 2>/dev/null
 
-# Delegation-family counter (breadth + agent-naming), deliberately separate from $cnt above and
-# from $cnt_file on disk. Filenames use a ".delegate"/".delegate-ts" suffix ON TOP of $cnt_file's
-# own name rather than a different prefix so that anything that already sweeps "$cnt_file*" (this
-# repo's own tests do -- see tests/test-breadth-mandate.sh's sweep_latch_) keeps sweeping these
-# too without having to know they exist.
+# Per-mandate latch (coordinator-directed, replacing the two SHARED family counters above).
+# f4f5468 already proved a shared counter bleeds across unrelated mandates -- measured, not
+# theorized: skill-mandate's original single $cnt hit 2 within a session's first two evaluated
+# Stops and silenced the UNRELATED delegation breadth mandate for the remaining 7 Stops of a real
+# 64-minute, 90-dispatch, 36-directory session, latched:true with every count null the whole way.
+# That commit split skill-vs-delegation into two counters. It did not split further: within the
+# skill family, unslop/typescript-best-practices/prove-it-works still shared ONE counter, so two
+# unrelated unslop misses disarmed typescript-best-practices and prove-it-works for the rest of
+# the session even though neither had ever been tried, let alone failed -- the identical bleed,
+# one level down. Same shape inside the delegation family once swarm became a third sibling of
+# breadth/agent-naming on $dcnt: two naming strikes would have silenced the swarm mandate this
+# release exists to add. Every mandate below now gets its own counter file and its own 2-strike
+# cap, so tripping one never silences another.
 #
-# Why separate from $cnt at all: dogfooded against this repo's own real 18MB session transcript
-# (2026-08-23, 5b14be87-2cee-4661-96ea-6106ef15f313), $cnt hit 2 within the session's first two
-# evaluated Stops and every one of the 7 Stops logged after that -- 64 minutes, 90 Task/Agent
-# dispatches, 36 directories -- came back latched:true, null counts, mandate silently unable to
-# fire for the entire remainder. That is the specific failure this splits: prose/typescript/
-# prove-it-works are "the model was asked and chose not to", where a 3rd nag rarely changes a
-# 3rd answer. Breadth/naming are "the model forgot", because the situation resets every time a
-# new stretch of multi-directory work starts -- reminding it again after the model has moved on
-# to a new part of the session is not the same failure as reminding it again about the same one.
+# The cap itself is UNCHANGED at 2, and the reason is unchanged too: a mandate the model
+# genuinely cannot satisfy (the Skill tool itself broken, or a skill file missing/corrupt) must
+# not trap the session in an unbounded block-retry loop -- proven by simulation in 4693558 (the
+# verify-gate latch this file's design was copied from): 5 Stops against an always-failing check
+# produced exactly 3 blocks then silence once the counter was made to persist instead of reset.
+# VSTACK_NO_MANDATE=1 is printed in every block reason as the escape hatch, but it needs an
+# operator to act on it -- env vars set inside one Bash tool_use do not persist to the next
+# Bash call in Claude Code's execution model, so the model cannot reliably self-administer it
+# mid-session. The 2-strike cap is what actually bounds the wedge when nobody is there to read
+# the escape-hatch line. Splitting the counter narrows WHICH mandate goes quiet after 2 misses;
+# it does not touch whether it does, or when.
 #
-# Bounded the same way $cnt is bounded (2 strikes), but the strikes expire: no unmet delegation
-# Stop in VSTACK_DELEGATE_RESET_SECS (default 1800s = 30min) rearms it at 0. A session that is
-# CONTINUOUSLY multi-directory and un-delegated pays for the full transcript scan again at most
-# once per window once $cnt has already latched shut -- not every Stop, not on the 1-in-10
-# schedule this file's own comment above rejected on tail-latency grounds. This is deliberately
-# sparser than that rejected proposal specifically so the same p95 1.4-2.1s cost objection does
-# not reapply at a materially higher frequency; it still applies once per window, which is the
-# trade being made here, not a way around it.
-dcnt_file="$cnt_file.delegate"
-dts_file="$cnt_file.delegate-ts"
-dcnt=$(cat "$dcnt_file" 2>/dev/null || echo 0)
-case "$dcnt" in ''|*[!0-9]*) dcnt=0 ;; esac
-dts=$(cat "$dts_file" 2>/dev/null || echo 0)
-case "$dts" in ''|*[!0-9]*) dts=0 ;; esac
+# Filenames: still "$cnt_file" (== "vstack-mandate-$sid") as the base, one distinct suffix per
+# mandate on top of it, same convention the original $cnt_file.delegate split already used -- so
+# anything that already sweeps "$cnt_file*" (tests/test-breadth-mandate.sh's sweep_latch_, and
+# check 27's own cleanup glob "vstack-mandate-*vfy-[a-q]*", which is anchored loosely enough on
+# both ends to already cover any suffix appended after the session id) keeps sweeping every one
+# of these without needing to know the new names:
+#   skill family (session-persistent, no window):
+#     $cnt_file.unslop  $cnt_file.typescript  $cnt_file.proveitworks
+#   delegation family (windowed, cnt+timestamp pair per mandate):
+#     $cnt_file.delegate-breadth(-ts)  $cnt_file.delegate-naming(-ts)  $cnt_file.delegate-swarm(-ts)
+# $cnt_file.delegate-scan (the re-scan cooldown) and $cnt_file.lock stay singular and family-wide
+# -- neither one is a strike counter, both exist purely to bound how often the expensive
+# transcript scan itself runs, which is a family-wide cost regardless of which member mandate
+# would have paid for it.
+# Bash `read` builtin, not `cat`: reading a counter file this way costs zero process forks --
+# `read -r v < "$file"` opens and consumes the file entirely inside the current shell, where
+# `v=$(cat "$file")` pays for both a subshell (to capture the command substitution) AND a
+# separate `cat` exec. That difference is the whole reason this is written this way instead of
+# the more obvious cat-based one-liner: nine of these run every Stop now (six mandates, three of
+# them windowed with a paired timestamp file), where the shared-counter design before this only
+# ever paid for three. Measured, not assumed: the first cat-based draft of this block landed
+# skill-mandate.sh's own fork-cost mean at 24.15u against tests/hook-latency.sh's 24.6u budget --
+# technically under, but close enough that a noisier run could tip it red for a reason that has
+# nothing to do with what the hook actually decided. `read`'s own error message on a missing
+# input file would otherwise leak to stderr; `2>/dev/null` must sit BEFORE the `<` redirection on
+# the same simple command, because redirections attach left to right and the failure happens
+# while opening `<` itself, before a later `2>/dev/null` would take effect.
+_read_cnt() { # <file> -> sets $_rc to a sanitized non-negative integer, 0 if missing/garbage
+  _rc=""
+  read -r _rc 2>/dev/null < "$1" || _rc=0
+  case "$_rc" in ''|*[!0-9]*) _rc=0 ;; esac
+}
+_read_wcnt() { # <cntfile> <tsfile> <now> <window_secs> -> sets $_rc, windowed reset applied
+  _read_cnt "$1"; _wc=$_rc
+  _read_cnt "$2"; _wt=$_rc
+  if [ "$_wt" -gt 0 ] && [ "$3" -gt 0 ] && [ $(( $3 - _wt )) -ge "$4" ]; then _wc=0; fi
+  _rc=$_wc
+}
+
 now_d=$(date +%s 2>/dev/null || echo 0)
 DELEGATE_RESET_SECS="${VSTACK_DELEGATE_RESET_SECS:-1800}"
-if [ "$dts" -gt 0 ] && [ "$now_d" -gt 0 ] && [ $((now_d - dts)) -ge "$DELEGATE_RESET_SECS" ]; then
-  dcnt=0
-fi
 
-# Second, SHORTER gate: how often to bother re-scanning at all once skill mandates are already
-# latched, independent of whether delegation has struck. $dcnt>=2 alone is not a sufficient skip
-# condition on its own -- a session that is skill-latched but NEVER breadth-eligible (a long
-# single-directory prose session that tripped unslop twice and then just keeps writing more
-# prose in the same directory) would have dcnt permanently stuck at 0 (nothing to strike on) and
-# would otherwise fail the "$dcnt>=2" test forever, paying the full transcript scan on literally
-# every remaining Stop of the session -- the exact regression this file's own sampling-rejection
-# comment above was written to avoid, reintroduced by accident. $dscan_file records the last
-# time a full scan ran for delegation's sake AT ALL (met or unmet, struck or not); once skill
-# mandates are latched, a scan within the last $VSTACK_DELEGATE_SCAN_COOLDOWN_SECS (default 60s)
-# is skipped regardless of $dcnt. 60s is short enough to be invisible at the real Stop cadence
-# this file was dogfooded against (7 Stops over 64 minutes, ~9 min apart) and long enough to
-# absorb a burst of Stops firing back-to-back (parallel sub-agents finishing within the same
-# second) without re-paying the scan on each one.
+_read_cnt "$cnt_file.unslop";       cnt_unslop=$_rc
+_read_cnt "$cnt_file.typescript";   cnt_typescript=$_rc
+_read_cnt "$cnt_file.proveitworks"; cnt_proveitworks=$_rc
+_read_wcnt "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_breadth=$_rc
+_read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
+_read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
+
+eval_unslop=1;       [ "$cnt_unslop" -ge 2 ]       && eval_unslop=0
+eval_typescript=1;   [ "$cnt_typescript" -ge 2 ]   && eval_typescript=0
+eval_proveitworks=1; [ "$cnt_proveitworks" -ge 2 ] && eval_proveitworks=0
+eval_breadth=1;      [ "$cnt_breadth" -ge 2 ]      && eval_breadth=0
+eval_naming=1;       [ "$cnt_naming" -ge 2 ]       && eval_naming=0
+eval_swarm=1;        [ "$cnt_swarm" -ge 2 ]        && eval_swarm=0
+
+# Second, SHORTER gate: how often to bother re-scanning at all once every skill-family mandate is
+# already latched, independent of whether delegation has struck. Family-exhausted alone is not a
+# sufficient skip condition on its own -- a session that is skill-latched but NEVER
+# breadth-eligible (a long single-directory prose session that tripped unslop twice and then
+# just keeps writing more prose in the same directory) would have every delegation counter stuck
+# at 0 (nothing to strike on) and would otherwise fail the "family exhausted" test forever,
+# paying the full transcript scan on literally every remaining Stop of the session -- the exact
+# regression this file's own sampling-rejection comment (further down) was written to avoid.
+# $dscan_file records the last time a full scan ran for delegation's sake AT ALL (met or unmet,
+# struck or not, regardless of which of the three delegation mandates); once skill mandates are
+# latched, a scan within the last $VSTACK_DELEGATE_SCAN_COOLDOWN_SECS (default 60s) is skipped.
 dscan_file="$cnt_file.delegate-scan"
-dscan=$(cat "$dscan_file" 2>/dev/null || echo 0)
-case "$dscan" in ''|*[!0-9]*) dscan=0 ;; esac
+_read_cnt "$dscan_file"; dscan=$_rc
 DELEGATE_SCAN_COOLDOWN_SECS="${VSTACK_DELEGATE_SCAN_COOLDOWN_SECS:-60}"
 dscan_recent=0
 if [ "$dscan" -gt 0 ] && [ "$now_d" -gt 0 ] && [ $((now_d - dscan)) -lt "$DELEGATE_SCAN_COOLDOWN_SECS" ]; then
   dscan_recent=1
 fi
 
+# Family-level flags, derived from the six per-mandate flags above by OR (ANY member of the
+# family still has headroom): used ONLY for the top-level scan-skip decision below and for the
+# turn_json/prove-it-works cost gate further down, never for deciding whether an individual
+# mandate contributes to $unmet -- each mandate's own eval_* flag alone decides that now.
+skill_eval=1
+[ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && skill_eval=0
+deleg_eval=1
+[ "$eval_breadth" = 0 ] && [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && deleg_eval=0
+
 # Combined latch: skip the transcript-driven evaluation entirely only when NEITHER family can
-# still act on it. $cnt<2 alone is enough to keep paying for the scan every Stop, unchanged from
-# before. Once $cnt>=2, the scan still runs if delegation has strikes left in the current
-# $DELEGATE_RESET_SECS window AND was not just looked at within $DELEGATE_SCAN_COOLDOWN_SECS --
-# both conditions bounded, so this can never accumulate into "every Stop forever" the way the
-# rejected 1-in-k sampling proposal above would have. The delegation-drift log still gets a row
-# for this Stop when both are exhausted -- it just cannot carry dir_count/ext_count/task_count/
-# named, same reasoning as before, now conditioned on the fuller gate rather than one counter.
-if [ "$cnt" -ge 2 ] && { [ "$dcnt" -ge 2 ] || [ "$dscan_recent" = 1 ]; }; then
+# still act on it. skill_eval=1 alone is enough to keep paying for the scan every Stop, unchanged
+# from before. Once skill_eval=0 (every skill-family mandate individually latched), the scan
+# still runs if delegation has a mandate with strikes left in the current $DELEGATE_RESET_SECS
+# window AND was not just looked at within $DELEGATE_SCAN_COOLDOWN_SECS -- both conditions
+# bounded, so this can never accumulate into "every Stop forever". The delegation-drift log
+# still gets a row for this Stop when both are exhausted -- it just cannot carry
+# dir_count/ext_count/task_count/named, same reasoning as before.
+if [ "$skill_eval" = 0 ] && { [ "$deleg_eval" = 0 ] || [ "$dscan_recent" = 1 ]; }; then
   if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
     (
       ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
@@ -209,15 +258,15 @@ if [ "$cnt" -ge 2 ] && { [ "$dcnt" -ge 2 ] || [ "$dscan_recent" = 1 ]; }; then
   exit 0
 fi
 
-# Per-family gates for everything below: which mandates are even allowed to add to $unmet this
-# Stop. skill_eval covers prose/typescript/prove-it-works (still $cnt's 2-per-session cap,
-# unchanged); deleg_eval covers breadth/agent-naming (now $dcnt's 2-per-window cap). One of the
-# two is always 1 here -- the latch above already returned otherwise -- but never assume both:
-# this Stop may have been re-entered ONLY because deleg_eval is 1 while skill_eval is 0.
-skill_eval=1; [ "$cnt" -ge 2 ] && skill_eval=0
-deleg_eval=1; [ "$dcnt" -ge 2 ] && deleg_eval=0
-skill_hit=0
-deleg_hit=0
+# Per-mandate hit flags: which mandates actually added to $unmet this Stop. skill_hit/deleg_hit
+# (family-level ORs of these) still feed the delegation-drift logger's own latched:true/false
+# bookkeeping further down, unchanged in that one role.
+hit_unslop=0
+hit_typescript=0
+hit_proveitworks=0
+hit_breadth=0
+hit_naming=0
+hit_swarm=0
 
 # We are doing a full scan this Stop for at least one reason (skill_eval=1 or deleg_eval=1 --
 # the latch above already exited otherwise). Record it now, unconditionally, so the cooldown
@@ -473,18 +522,18 @@ unmet=""
 # Prose. Any Markdown that is not a machine-written log or a vendored file.
 prose=$(printf '%s\n' "$paths" | grep -iE '\.(md|mdx)$' \
         | grep -viE '(CHANGELOG\.md|node_modules|\.audit/|/(dist|build|vendor)/)' | head -5)
-if [ "$skill_eval" = 1 ] && [ -n "$prose" ] && ! fired unslop; then
+if [ "$eval_unslop" = 1 ] && [ -n "$prose" ] && ! fired unslop; then
   unmet="$unmet
   unslop -- you wrote prose and it never ran: $(printf '%s' "$prose" | tr '\n' ' ')"
-  skill_hit=1
+  hit_unslop=1
 fi
 
 # TypeScript. Reading one is judgement; writing one is not.
 ts=$(printf '%s\n' "$paths" | grep -E '\.(ts|tsx)$' | grep -v node_modules | head -5)
-if [ "$skill_eval" = 1 ] && [ -n "$ts" ] && ! fired typescript-best-practices; then
+if [ "$eval_typescript" = 1 ] && [ -n "$ts" ] && ! fired typescript-best-practices; then
   unmet="$unmet
   typescript-best-practices -- you wrote TypeScript and it never ran: $(printf '%s' "$ts" | tr '\n' ' ')"
-  skill_hit=1
+  hit_typescript=1
 fi
 
 # Multi-directory, multi-type work without delegation. Detects work that spans parts by
@@ -523,6 +572,57 @@ task_count=$( "$JQ" -s '[.[] | select(.type=="assistant") | .message.content[]?
             | select(.type=="tool_use" and (.name=="Task" or .name=="Agent"))] | length' "$tr_" 2>/dev/null )
 case "$task_count" in ''|*[!0-9]*) task_count=0 ;; esac
 
+# fanout_batches: the piece task_count cannot answer -- did any TWO OR MORE of those dispatches
+# actually run concurrently, or were they N separate serial delegations the model happened to
+# make one after another? task_count alone cannot tell "one subagent, dispatched three times"
+# from "three subagents in one batch", and the breadth mandate below used to gate on task_count
+# alone -- satisfied by a single Task call, exactly the failure mode this splits out.
+#
+# What actually runs concurrently in Claude Code is every tool_use block inside ONE assistant
+# message: the harness executes them together and returns their results in the next user turn,
+# not one Task at a time. So the unit that matters is "how many Task/Agent blocks shares one
+# message", not "how many exist in the transcript". Two ways that unit shows up on disk, both
+# handled here:
+#   - a fixture (and some transcript writers) puts a whole message's content array on ONE JSONL
+#     line -- N tool_use blocks in that one line's .message.content are unambiguously one batch.
+#   - a real streaming Claude Code CLI transcript splits one message's content blocks across
+#     MULTIPLE, immediately consecutive JSONL lines that all share the same .message.id --
+#     confirmed against this machine's own 5b14be87 session (see the "dogfooded" comment above):
+#     msg_011CeHz4AqmXQiL4T85zgdpg's content (thinking, text, 3x tool_use) landed as 5 back-to-
+#     back lines, not one.
+# Grouping is done by CONSECUTIVE-run, not by a global "group by message.id": the same session
+# has 8 message.id values that reappear thousands of lines apart after a compaction/resume,
+# each reappearance surrounded by entirely different assistant lines in between -- a global
+# group-by would silently merge two unrelated real turns' dispatches into one inflated batch.
+# uniq-style consecutive grouping (a run ends the moment the id changes, even if that same id
+# value shows up again later) keeps those two turns separate, which matched this file's own
+# adjacency check line for line. A null/missing .message.id (every fixture in this suite, and
+# any transcript writer that never sets one) is never merged with a neighbor even if adjacent --
+# there is no identity to merge on, so each such line is its own singleton batch. That is what
+# makes "two Task calls in two separate lines, neither carrying an id" read as two batches of
+# one, not one batch of two: the exact serial-loop shape this fix exists to catch.
+fanout_calc=$( "$JQ" -sr '
+  ( [ .[] | select(.type=="assistant")
+      | { id: (.message.id // null),
+          n: ( [ .message.content[]? | select(.type=="tool_use" and (.name=="Task" or .name=="Agent")) ] | length ) } ]
+  ) as $entries
+  | ( reduce $entries[] as $e
+        ( {runs: [], cid: null, cn: 0, first: true};
+          if .first then
+            {runs: [], cid: $e.id, cn: $e.n, first: false}
+          elif ($e.id != null and $e.id == .cid) then
+            . + {cn: (.cn + $e.n)}
+          else
+            {runs: (.runs + [{id: .cid, n: .cn}]), cid: $e.id, cn: $e.n, first: false}
+          end
+        )
+    ) as $folded
+  | ( $folded.runs + [{id: $folded.cid, n: $folded.cn}] ) as $all_runs
+  | ( $all_runs | map(select(.n >= 2)) | length )
+' "$tr_" 2>/dev/null | tail -n 1 )
+case "$fanout_calc" in ''|*[!0-9]*) fanout_calc=0 ;; esac
+fanout_batches="$fanout_calc"
+
 # task_fail_count: of those same Task/Agent dispatches, how many resolved with is_error==true on
 # their tool_result. This is the field the delegation-drift ledger was missing entirely -- it
 # could say a session dispatched N subagents, never whether any of them actually failed. A
@@ -556,11 +656,31 @@ if [ "$task_count" -ge 1 ]; then
   # Roster: RICK MEESEEKS MORTY SUMMER ZEEP GLOOTIE JAGUAR BETH BIRDPERSON EVIL-MORTY NOOBNOOB PICKLE-RICK SCARY-TERRY POOPYBUTTHOLE UNITY
   if printf '%s' "$assistant_text" | grep -qiE '\b(RICK|MEESEEKS|MORTY|SUMMER|ZEEP|GLOOTIE|JAGUAR|BETH|BIRDPERSON|EVIL-MORTY|NOOBNOOB|PICKLE-RICK|SCARY-TERRY|POOPYBUTTHOLE|UNITY)\b'; then
     named=true  # at least one call sign found, mandate met
-  elif [ "$deleg_eval" = 1 ]; then
+  elif [ "$eval_naming" = 1 ]; then
     unmet="$unmet
   agent naming -- $task_count subagent call(s) dispatched but no attribution found (name one: RICK MEESEEKS MORTY SUMMER ZEEP GLOOTIE JAGUAR BETH BIRDPERSON EVIL-MORTY NOOBNOOB PICKLE-RICK SCARY-TERRY POOPYBUTTHOLE UNITY)"
-    deleg_hit=1
+    hit_naming=1
   fi
+fi
+
+# Swarm: the operator rule is "every dispatch goes through the swarm skill first" -- every
+# Task/Agent call this session must be preceded, somewhere in the transcript, by a Skill tool_use
+# naming "swarm". Lives in its own delegation-family counter (eval_swarm/$cnt_file.delegate-swarm),
+# same family as agent naming just above (both conditions are keyed off task_count>=1, not off
+# file writes) but its own latch, not naming's or breadth's -- two unrelated naming strikes must
+# not silence this mandate, the exact bleed this round of changes exists to close. Reuses
+# $task_count and $skills/fired(), both already computed above for task_count and the
+# unslop/typescript-best-practices mandates respectively -- no new jq slurp, same discipline the
+# fanout_batches merge above already established.
+#
+# $skills is a session-wide set (order is not tracked, same as fired() everywhere else in this
+# file), so this cannot tell "swarm called before this specific dispatch" from "swarm called once
+# early, then five more dispatches went out unrouted" -- the same session-wide-vs-per-situation
+# gap that applies to unslop/typescript-best-practices too, not a new one introduced here.
+if [ "$task_count" -ge 1 ] && [ "$eval_swarm" = 1 ] && ! fired swarm; then
+  unmet="$unmet
+  swarm -- $task_count subagent call(s) dispatched without calling the swarm skill (call Skill swarm BEFORE dispatching Task/Agent calls, not after -- it routes the dispatch, it does not review one already sent)"
+  hit_swarm=1
 fi
 
 parent_dirs=$( printf '%s\n' "$paths" | sed -E '
@@ -580,15 +700,32 @@ extensions=$( printf '%s\n' "$paths" | sed -E '
   /^$/d
 ' | sort -u )
 ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | grep -c . )
-if [ "$deleg_eval" = 1 ] && [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$task_count" -eq 0 ]; then
+# Satisfied by $fanout_batches, not by $task_count: task_count only asks "did any Task/Agent
+# calls happen anywhere in the transcript", which a single delegation, or N delegations spread
+# across N separate serial turns, both answer yes to -- neither is the parallel batch the
+# mandate exists to require. $fanout_batches (computed above, next to task_count) counts how
+# many times 2+ Task/Agent calls landed in the SAME assistant message, which is the only shape
+# Claude Code actually executes concurrently. Eligibility (dir_count/ext_count) is unchanged --
+# only what counts as having answered it changed.
+if [ "$eval_breadth" = 1 ] && [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$fanout_batches" -eq 0 ]; then
   # Names the actual parts (bounded to 3, same head-N precedent the prose/typescript mandates
   # above already use for file paths) instead of only a count -- "touched 5 directories" tells
   # the model a number it already knew; "touched claude/hooks, tests, docs, ..." tells it which
   # subagent to dispatch at which part.
   dirs_named=$(printf '%s\n' "$parent_dirs" | head -3 | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+  # Distinguishes the two ways fanout_batches can be 0, because the fix is different: nothing
+  # dispatched at all vs. real delegation that never happened together. Without this split, a
+  # session that dispatched 5 subagents one after another reads the same "zero subagents" message
+  # a session that dispatched none did, which is not what happened and does not tell the model
+  # what to change (it already knows it delegated).
+  if [ "$task_count" -eq 0 ]; then
+    fanout_state="zero subagents"
+  else
+    fanout_state="$task_count subagent call(s), but never 2+ in the same message -- $task_count separate serial delegation(s), which Claude Code runs one after another, not concurrently"
+  fi
   unmet="$unmet
-  multi-directory work -- touched $dir_count directories ($dirs_named$([ "$dir_count" -gt 3 ] && echo ', ...')) with $ext_count file types, zero subagents (try /team, or dispatch one directly: code-reviewer, qa, worker, planner, test-writer)"
-  deleg_hit=1
+  multi-directory work -- touched $dir_count directories ($dirs_named$([ "$dir_count" -gt 3 ] && echo ', ...')) with $ext_count file types, $fanout_state. Dispatch 2+ agents in the SAME assistant message, each on a disjoint file set, so they actually run in parallel (try /team, or issue code-reviewer + qa + worker + planner + test-writer together in one turn) -- one Task/Agent call followed by another later does not satisfy this."
+  hit_breadth=1
 fi
 
 # --- delegation-drift logger (tests/delegation-drift.sh) ---------------------------------------
@@ -718,7 +855,12 @@ fi
 # it look like elsewhere. jq's own `-s` slurp-then-slice of the same whole file measured ~170ms,
 # faster than just the `tail` step of the "optimization" meant to beat it. Reverted to the
 # simpler single-pass slurp below in favor of the version that is both less code and faster.
-if [ "$skill_eval" = 1 ]; then
+#
+# Gated on eval_proveitworks specifically, not the family-level skill_eval: this jq slurp is
+# prove-it-works's own cost alone (unslop/typescript-best-practices need none of turn_json), so
+# now that the three no longer share a latch, this must not run just because unslop or
+# typescript-best-practices still has headroom -- only because prove-it-works itself does.
+if [ "$eval_proveitworks" = 1 ]; then
 turn_json=$(
   "$JQ" -sc '
     . as $all
@@ -762,28 +904,49 @@ if [ "$piw_edit_n" -ge 1 ] && [ "$piw_claims" -eq 1 ] \
    && [ "$piw_bash_n" -eq 0 ] && [ "$piw_read_n" -eq 0 ] && [ "$piw_task_n" -eq 0 ]; then
   unmet="$unmet
   prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task/Agent call in the turn to back it up"
-  skill_hit=1
+  hit_proveitworks=1
 fi
-fi # skill_eval: turn_json / prove-it-works
+fi # eval_proveitworks: turn_json / prove-it-works
 
-# Per-family bookkeeping. $cnt and $dcnt live on disk as two independent files with two
-# independent lifetimes: $cnt_file counts strikes for the life of the session (unchanged
-# behaviour); $cnt_file.delegate counts strikes within the current $DELEGATE_RESET_SECS window
-# and is written alongside a timestamp so the next Stop can tell whether that window has already
-# elapsed. A family that was evaluated this Stop (its *_eval flag was 1) and did NOT contribute
-# to $unmet had every chance to and passed -- that family's counter resets to 0, mirroring the
-# original single-counter "fully met -> rm -f cnt_file" behaviour, now applied independently so
-# one family clearing does not reset the other's strikes.
-if [ "$skill_hit" = 1 ]; then
-  echo $((cnt + 1)) > "$cnt_file"
-elif [ "$skill_eval" = 1 ]; then
-  rm -f "$cnt_file"
+# Per-mandate bookkeeping, replacing the two shared-counter blocks above: each of the six
+# mandates persists or clears its OWN counter file independently now, so hitting one never
+# advances or resets another's strike count -- the entire point of this change (coordinator-
+# directed, closing the bleed f4f5468 already proved real one level up). A mandate that was
+# evaluated this Stop (its own eval_* flag was 1) and did NOT contribute to $unmet had every
+# chance to and passed -- its own counter resets to 0, the same "fully met -> clear" rule the
+# shared counters used, now scoped to one mandate instead of a whole family.
+if [ "$hit_unslop" = 1 ]; then
+  echo $((cnt_unslop + 1)) > "$cnt_file.unslop"
+elif [ "$eval_unslop" = 1 ]; then
+  rm -f "$cnt_file.unslop"
 fi
-if [ "$deleg_hit" = 1 ]; then
-  echo $((dcnt + 1)) > "$dcnt_file"
-  date +%s > "$dts_file" 2>/dev/null
-elif [ "$deleg_eval" = 1 ]; then
-  rm -f "$dcnt_file" "$dts_file"
+if [ "$hit_typescript" = 1 ]; then
+  echo $((cnt_typescript + 1)) > "$cnt_file.typescript"
+elif [ "$eval_typescript" = 1 ]; then
+  rm -f "$cnt_file.typescript"
+fi
+if [ "$hit_proveitworks" = 1 ]; then
+  echo $((cnt_proveitworks + 1)) > "$cnt_file.proveitworks"
+elif [ "$eval_proveitworks" = 1 ]; then
+  rm -f "$cnt_file.proveitworks"
+fi
+if [ "$hit_breadth" = 1 ]; then
+  echo $((cnt_breadth + 1)) > "$cnt_file.delegate-breadth"
+  date +%s > "$cnt_file.delegate-breadth-ts" 2>/dev/null
+elif [ "$eval_breadth" = 1 ]; then
+  rm -f "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts"
+fi
+if [ "$hit_naming" = 1 ]; then
+  echo $((cnt_naming + 1)) > "$cnt_file.delegate-naming"
+  date +%s > "$cnt_file.delegate-naming-ts" 2>/dev/null
+elif [ "$eval_naming" = 1 ]; then
+  rm -f "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts"
+fi
+if [ "$hit_swarm" = 1 ]; then
+  echo $((cnt_swarm + 1)) > "$cnt_file.delegate-swarm"
+  date +%s > "$cnt_file.delegate-swarm-ts" 2>/dev/null
+elif [ "$eval_swarm" = 1 ]; then
+  rm -f "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts"
 fi
 
 [ -n "$unmet" ] || exit 0
@@ -791,15 +954,32 @@ fi
 reason="A vstack mandate went unmet. These fire every time, not when they seem relevant:
 $unmet
 "
-# Two independent strike counts, stated plainly, because they now expire on two different
-# schedules and a reader has to know which is which to know what happens next.
-if [ "$skill_hit" = 1 ]; then
-  reason="$reason
-Skill-mandate strike $((cnt + 1))/2 this session (unslop / typescript-best-practices / prove-it-works). After 2, these stop being enforced for the rest of the session -- self-police from here."
+# One strike line per mandate that actually hit THIS Stop, not one combined line per family --
+# each mandate now has its own 2-strike cap and its own reset trigger, so the reader needs to
+# know which specific one is about to go quiet, not "the skill family" or "the delegation
+# family" (which, before this change, was frequently a lie: the family could still have two
+# other mandates with a full 2 strikes left).
+_strike_line() { # <label> <new-count> <scope-sentence>
+  printf '
+%s strike %s/2 %s' "$1" "$2" "$3"
+}
+if [ "$hit_unslop" = 1 ]; then
+  reason="$reason$(_strike_line unslop "$((cnt_unslop + 1))"     "this session -- after 2, unslop alone stops being enforced for the rest of the session (self-police from here).")"
 fi
-if [ "$deleg_hit" = 1 ]; then
-  reason="$reason
-Delegation strike $((dcnt + 1))/2 in this ${DELEGATE_RESET_SECS}s window (multi-directory work / agent naming). Rearms at 0 after the window elapses with no further unmet Stop, independent of the skill-mandate count above -- it will keep nagging even in a long session."
+if [ "$hit_typescript" = 1 ]; then
+  reason="$reason$(_strike_line typescript-best-practices "$((cnt_typescript + 1))"     "this session -- after 2, typescript-best-practices alone stops being enforced for the rest of the session (self-police from here).")"
+fi
+if [ "$hit_proveitworks" = 1 ]; then
+  reason="$reason$(_strike_line prove-it-works "$((cnt_proveitworks + 1))"     "this session -- after 2, prove-it-works alone stops being enforced for the rest of the session (self-police from here).")"
+fi
+if [ "$hit_breadth" = 1 ]; then
+  reason="$reason$(_strike_line "multi-directory work" "$((cnt_breadth + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
+fi
+if [ "$hit_naming" = 1 ]; then
+  reason="$reason$(_strike_line "agent naming" "$((cnt_naming + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
+fi
+if [ "$hit_swarm" = 1 ]; then
+  reason="$reason$(_strike_line swarm "$((cnt_swarm + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
 fi
 reason="$reason
 Run each named skill with the Skill tool against the files listed, apply what it says, then finish.

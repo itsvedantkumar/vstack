@@ -52,6 +52,15 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent" "jq not installed"
   skip "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks" "jq not installed"
   skip "PROOF 12: Bash write target containing an unexpanded \$VAR -> not counted as a write" "jq not installed"
+  skip "PROOF 13: Task dispatch with is_error:true tool_result -> logged row's task_fail_count is 1" "jq not installed"
+  skip "PROOF 14: Task dispatch with a clean (non-error) tool_result -> logged row's task_fail_count is 0" "jq not installed"
+  skip "PROOF 15: three-dir/three-ext spread, two dispatches in ONE message -> breadth mandate silent (real fan-out)" "jq not installed"
+  skip "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)" "jq not installed"
+  skip "PROOF 17: Task dispatch with no swarm call -> swarm mandate blocks" "jq not installed"
+  skip "PROOF 18: Task dispatch preceded by a swarm Skill call -> swarm mandate silent" "jq not installed"
+  skip "PROOF 19 (setup 1/3): lone prose write trips unslop" "jq not installed"
+  skip "PROOF 19 (setup 2/3): lone TypeScript edit trips typescript-best-practices (unrelated 2nd strike)" "jq not installed"
+  skip "PROOF 19 (the bleed): a THIRD, never-tried mandate still fires after two UNRELATED strikes" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -110,6 +119,9 @@ run_hook_(){
 
 names_breadth_(){ printf '%s' "$HOOK_REASON" | grep -qF 'multi-directory work --'; }
 names_piw_(){ printf '%s' "$HOOK_REASON" | grep -qF 'prove-it-works --'; }
+names_swarm_(){ printf '%s' "$HOOK_REASON" | grep -qF 'swarm --'; }
+names_unslop_(){ printf '%s' "$HOOK_REASON" | grep -qF 'unslop --'; }
+names_ts_(){ printf '%s' "$HOOK_REASON" | grep -qF 'typescript-best-practices --'; }
 
 # --- PROOF 1: 5 fixture writes, 1 directory, 1 extension, 0 Task calls ------------------------
 # Negative direction. Mechanical repetition (fixtures/case1.json .. case5.json) must not read
@@ -141,22 +153,23 @@ else
       "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
-# --- PROOF 3: same file spread as PROOF 2, plus one attributed Task call -----------------------
-# Negative direction, and the exact defect SCARY-TERRY found: the original fixture added a
-# bare Task call with no call-sign text, which trips the *agent naming* mandate (Task
-# dispatched, nobody attributed) and makes the hook block for a reason that has nothing to do
-# with breadth counting. The Task call here carries a roster call sign in assistant text
-# (BIRDPERSON) specifically so agent naming is satisfied and cannot confound this proof.
-# doc/HOOK.md still trips `unslop`, same as PROOF 2, and is ignored the same way -- what must
-# hold is that task_count>=1 (one delegated subagent) suppresses the breadth line, even though
-# the file spread by itself would have earned it per PROOF 2.
+# --- PROOF 3: same file spread as PROOF 2, plus ONE attributed Task call (serial, not fanned) ---
+# Negative direction for fan-out, positive direction for the bug this round fixes. Before the
+# fan-out contract, the original fixture here asserted that ANY task_count>=1 silenced the
+# breadth line -- which was the defect: one Task dispatch is not "work split into parts", it is
+# a single delegation, and the mandate must still block on it. The Task call carries a roster
+# call sign in assistant text (BIRDPERSON) specifically so *agent naming* is satisfied and
+# cannot confound this proof -- a block here can only be about breadth. doc/HOOK.md still trips
+# `unslop`, same as PROOF 2, ignored the same way. What must hold now: a single Task/Agent call,
+# however attributed, is a fanout_batches of 0 (one dispatch is not a batch of 2+), so the
+# breadth line still names itself.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Task","input":{"skill":"code-reviewer"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
 run_hook_ proof3
-if ! names_breadth_; then
-  ok "PROOF 3: same spread as PROOF 2, attributed Task call -> breadth mandate silent"
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate still blocks (not a fan-out)"
 else
-  bad "PROOF 3: same spread as PROOF 2, attributed Task call -> breadth mandate silent" \
-      "expected no 'multi-directory work --' line once a Task call is present, got: reason=[$HOOK_REASON]"
+  bad "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate still blocks (not a fan-out)" \
+      "expected decision=block naming 'multi-directory work --' (a single dispatch is not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 4: 6 writes, 6 directories, 1 extension (.md), 0 Task calls -------------------------
@@ -256,23 +269,20 @@ else
       "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
-# --- PROOF 10: same file spread as PROOF 2/3, dispatched via the Agent tool name -----------------
-# Negative direction for the exact defect this round of fixes exists to close: the subagent
-# dispatch tool is named "Task" in the classic Claude Code CLI but "Agent" in the Claude Agent
-# SDK build this hook was actually dogfooded against, and before this fix task_count only ever
-# looked for "Task" -- a real 15MB transcript logged 70 "Agent" tool_use blocks and a task_count
-# of 0, so the delegation mandate reported "zero subagents" over 70 of them. This fixture is
-# PROOF 3 with the dispatch tool's name swapped from "Task" to "Agent" and nothing else changed:
-# same 3-dir/3-ext file spread, same roster call sign (BIRDPERSON) in the closing text so agent
-# naming is satisfied and cannot confound the read. If task_count is still only counting "Task",
-# this fails exactly the way the real session did.
+# --- PROOF 10: same file spread as PROOF 2/3, ONE Agent-named call (serial, not fanned) ---------
+# Same fan-out semantics as PROOF 3, over the "Agent" dispatch-tool name (the Claude Agent SDK
+# build's name for the same tool, see the "Dispatch-tool name" comment in the hook): the
+# task_count OR-condition ("Task" or "Agent") is still exercised here, but fanout_batches is
+# what decides the outcome now -- ONE Agent call, however attributed, is not a batch of 2+, so
+# this must still block, not silence, the breadth line. Same 3-dir/3-ext spread, same roster
+# call sign (BIRDPERSON) so agent naming cannot confound the read.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Agent","input":{"subagent_type":"code-reviewer","prompt":"review","description":"review"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
 run_hook_ proof10
-if ! names_breadth_; then
-  ok "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent"
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate still blocks (not a fan-out)"
 else
-  bad "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent" \
-      "expected no 'multi-directory work --' line once an Agent call is present, got: reason=[$HOOK_REASON]"
+  bad "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate still blocks (not a fan-out)" \
+      "expected decision=block naming 'multi-directory work --' (a single dispatch is not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -------------------------
@@ -350,6 +360,124 @@ if [ "$tc14" = "1" ] && [ "$tfc14" = "0" ]; then
 else
   bad "PROOF 14: Task dispatch with a clean (non-error) tool_result -> logged row's task_fail_count is 0" \
       "expected task_count=1 task_fail_count=0 in the logged row, got: $row14"
+fi
+
+# --- PROOF 15: breadth-eligible spread, TWO Task/Agent calls in ONE message -> fan-out, satisfied
+# Positive control for the fan-out contract itself: the same 3-dir/3-ext file spread as PROOF
+# 2/3/10, but this time TWO dispatch tool_use blocks (one "Task", one "Agent") sit in the SAME
+# message's content array, alongside the roster call sign so agent naming cannot confound the
+# read. This is what Claude Code actually runs concurrently -- every tool_use block inside one
+# assistant message executes together, results land in the next turn. fanout_batches must see
+# this as one batch of 2 and the breadth line must go silent, same outcome PROOF 3/10 used to
+# assert for a single dispatch (now correctly denied there) and correctly grants here.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Task","input":{"skill":"code-reviewer"}},{"type":"tool_use","id":"6","name":"Agent","input":{"subagent_type":"qa","prompt":"verify","description":"verify"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 and JAGUAR J-1 together to review and verify."}]}}'
+run_hook_ proof15
+if ! names_breadth_; then
+  ok "PROOF 15: three-dir/three-ext spread, two dispatches in ONE message -> breadth mandate silent (real fan-out)"
+else
+  bad "PROOF 15: three-dir/three-ext spread, two dispatches in ONE message -> breadth mandate silent (real fan-out)" \
+      "expected no 'multi-directory work --' line for a same-message 2-way dispatch, got: reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 16: breadth-eligible spread, TWO Task/Agent calls in SEPARATE messages -> serial, unmet
+# Negative control, and the exact serial-loop shape the old `task_count -eq 0` gate could not
+# see: same 3-dir/3-ext spread as PROOF 15, but the two dispatches land in TWO SEPARATE assistant
+# JSONL lines (no shared message.id -- the same shape a fixture, or a real transcript with no id
+# set, produces for two genuinely sequential turns) instead of one. task_count is 2 either way,
+# identical to PROOF 15's total -- the only difference between "satisfied" and "unmet" here is
+# whether those 2 dispatches ever shared a message, not how many there were. Confirmed against
+# the pre-fix hook (git HEAD's committed version, before this round's changes): with the old
+# `task_count -eq 0` condition, task_count=2 made this fixture read as satisfied (silent) exactly
+# like PROOF 15, unable to tell a real batch from two serial ones. The roster call sign sits in
+# the first message so agent naming cannot confound the read.
+say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Task","input":{"skill":"code-reviewer"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"6","name":"Agent","input":{"subagent_type":"qa","prompt":"verify","description":"verify"}}]}}'
+run_hook_ proof16
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)"
+else
+  bad "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)" \
+      "expected decision=block naming 'multi-directory work --' (2 serial dispatches are not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 17: one Task dispatch, swarm skill never called -> swarm mandate blocks ---------------
+# Positive direction for the new swarm mandate (TASK 1, coordinator-directed): the operator rule
+# is "every dispatch goes through the swarm skill first". One Task call, no Write/Edit anywhere
+# (so breadth/prose/TS cannot confound the read), a roster call sign (BIRDPERSON) so agent naming
+# is satisfied and cannot confound either -- a block here can only be the swarm line. No Skill
+# tool_use named "swarm" appears anywhere in the transcript, so this must block.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review this"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
+run_hook_ proof17
+if [ "$HOOK_DECISION" = "block" ] && names_swarm_; then
+  ok "PROOF 17: Task dispatch with no swarm call -> swarm mandate blocks"
+else
+  bad "PROOF 17: Task dispatch with no swarm call -> swarm mandate blocks" \
+      "expected decision=block naming 'swarm --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 18: one Task dispatch, swarm skill called first -> swarm mandate silent ---------------
+# Negative direction, the same fixture as PROOF 17 with one addition: a Skill tool_use naming
+# "swarm" ahead of the Task call in the same message. $skills (used by fired(), the same function
+# the unslop/typescript-best-practices mandates already use) is a session-wide set, not order-
+# sensitive, so where in the message the Skill call sits does not matter here -- only that it is
+# present. This must not name the swarm line.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Skill","input":{"skill":"swarm"}},{"type":"tool_use","id":"2","name":"Task","input":{"prompt":"review this"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
+run_hook_ proof18
+if ! names_swarm_; then
+  ok "PROOF 18: Task dispatch preceded by a swarm Skill call -> swarm mandate silent"
+else
+  bad "PROOF 18: Task dispatch preceded by a swarm Skill call -> swarm mandate silent" \
+      "expected no 'swarm --' line once the swarm skill was called, got: reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 19: setup 1/2 for the bleed test -- a lone prose write trips unslop -----------------
+# First of a three-Stop sequence sharing ONE session_id (proof19b below), the bleed itself
+# (coordinator-directed): f4f5468 already proved a SHARED counter across unrelated mandates is a
+# real, measured defect at the family level (skill strikes disarming the delegation breadth
+# mandate for 7 Stops of a real session). The same shape survived one level down, inside the
+# skill family itself, where unslop/typescript-best-practices/prove-it-works shared one counter
+# -- so two strikes on ANY MIX of those three, not necessarily the same one twice, reached the
+# shared cap and silenced whichever of the three had never even been tried. This Stop trips ONLY
+# unslop (a lone .md write) -- strike 1 of 2 on the SHARED counter the old code used, strike 1 of
+# 2 on unslop's own counter under the fix.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
+run_hook_ proof19b
+if [ "$HOOK_DECISION" = "block" ] && names_unslop_; then
+  ok "PROOF 19: lone prose write trips unslop (bleed setup 1/3)"
+else
+  bad "PROOF 19: lone prose write trips unslop (bleed setup 1/3)" \
+      "expected decision=block naming 'unslop --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 20: setup 2/2 for the bleed test -- a lone, UNRELATED TypeScript edit, same session --
+# Same session_id as PROOF 19 (proof19b), a FRESH transcript (nothing carries over between Stops
+# except the on-disk counters, so this cannot be confused with PROOF 19's own file). Trips ONLY
+# typescript-best-practices. That is two strikes total across the sequence so far, on two
+# DIFFERENT mandates, neither one hit twice -- exactly what the old SHARED counter could not
+# distinguish from "one mandate hit twice", because it was one integer either way.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Edit","input":{"file_path":"/x/App.tsx"}}]}}'
+run_hook_ proof19b
+if [ "$HOOK_DECISION" = "block" ] && names_ts_; then
+  ok "PROOF 20: lone TypeScript edit trips typescript-best-practices, unrelated 2nd strike (bleed setup 2/3)"
+else
+  bad "PROOF 20: lone TypeScript edit trips typescript-best-practices, unrelated 2nd strike (bleed setup 2/3)" \
+      "expected decision=block naming 'typescript-best-practices --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 21: the bleed itself -- a THIRD, never-tried mandate must still fire ------------------
+# Same session_id again (proof19b), swapped to a THIRD, independent mandate's own trigger
+# (prove-it-works's PROOF-7 shape: an Edit plus a closing completion claim, zero Bash/Read/
+# Task/Agent in the turn), never itself unmet before this Stop. Under the OLD shared-counter code
+# this must NOT fire -- silenced by the two unrelated prior strikes on unslop and
+# typescript-best-practices, neither of which is prove-it-works. Under the per-mandate latch it
+# must fire normally, because prove-it-works's own counter is still at 0: this is the assertion
+# f4f5468 was missing one level up, and the one the coordinator asked to see red before green.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Edit","input":{"file_path":"src/parser.py"}},{"type":"text","text":"Done. It works now."}]}}'
+run_hook_ proof19b
+if [ "$HOOK_DECISION" = "block" ] && names_piw_; then
+  ok "PROOF 21: a THIRD, never-tried mandate still fires after two UNRELATED strikes (the bleed)"
+else
+  bad "PROOF 21: a THIRD, never-tried mandate still fires after two UNRELATED strikes (the bleed)" \
+      "expected decision=block naming 'prove-it-works --' -- two strikes on unslop+typescript must not silence a mandate neither of them is, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 echo
