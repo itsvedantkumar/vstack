@@ -1961,78 +1961,68 @@ if command -v jq >/dev/null; then
   sm="claude/hooks/skill-mandate.sh"
   if [ ! -x "$sm" ]; then
     bad "skill mandate decides correctly" "$sm is missing or not executable"
+  elif [ ! -f tests/mandate-cases.sh ]; then
+    bad "skill mandate decides correctly" \
+        "tests/mandate-cases.sh is missing -- this check and tests/container-matrix.sh share their fixtures from there, so neither can drift from the other"
   else
+    # tests/mandate-cases.sh is the ONE fixture set for this hook, shared with
+    # tests/container-matrix.sh (installed hook, inside containers, release.yml only). It was
+    # two independent, drifted fixture sets before this: this check's own 17 offline cases never
+    # covered prove-it-works or conversational-silence, container-matrix.sh's 7 never covered
+    # unslop or typescript-best-practices, and a v1.57.0 hook change updated one and not the
+    # other -- the first signal was a failed release that deleted its own tag from origin. See
+    # tests/mandate-cases.sh's own header for the full case-by-case provenance and the flag
+    # vocabulary (STOP_ACTIVE / NO_MANDATE / PRIME2) implemented below.
+    # shellcheck source=tests/mandate-cases.sh
+    . tests/mandate-cases.sh
     md=$(mktemp -d); errs=""
-    say_(){ printf '%s\n' "$@" > "$md/t.jsonl"; }
-    # VSTACK_NO_DELEGATION_LOG=1: every hit_ call below feeds the hook a synthetic fixture
+    # VSTACK_NO_DELEGATION_LOG=1: every invocation below feeds the hook a synthetic fixture
     # transcript under a "vfy-*" session id, not a real session. Without this, each gate run
-    # appends ~12 synthetic lines to the operator's real ~/.claude/vstack-delegation-log.jsonl
-    # (one per case that reaches the logger before stop_hook_active/VSTACK_NO_MANDATE/the
-    # 2-strike latch short-circuits it) -- the exact vfy-* contamination found predating any
-    # instrumented run of this suite.
-    hit_(){ printf '{"session_id":"vfy-%s","transcript_path":"%s/t.jsonl","stop_hook_active":%s}' \
-              "$1" "$md" "${2:-false}" | VSTACK_NO_DELEGATION_LOG=1 "./$sm" 2>/dev/null; }
-    W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
-    T='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}}]}}'
-    U='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"unslop"}}]}}'
-    P='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/main.py"}}]}}'
-    TA='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"running"}]}}'
-    TB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"qa (BETH J-42)"}]}}'
-    SW='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"swarm"}}]}}'
-    # TWO dispatches inside ONE record's content array -- this is what concurrent looks like.
-    TWO='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP and GLOOTIE"}]}}'
-    # The same two dispatches in SEPARATE records with no shared message id -- a serial loop.
-    # task_count cannot tell these two fixtures apart; that is the whole point of fanout_batches.
-    ON1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP"}]}}'
-    ON2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"GLOOTIE"}]}}'
+    # appends synthetic lines to the operator's real ~/.claude/vstack-delegation-log.jsonl (one
+    # per case that reaches the logger before stop_hook_active/VSTACK_NO_MANDATE/the 2-strike
+    # latch short-circuits it) -- the exact vfy-* contamination found predating any instrumented
+    # run of this suite.
+    _mc_has_flag() { case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac; }
+    _mc_call() { # <session-id> <stop_hook_active> <env-prefix-or-empty>
+      printf '{"session_id":"%s","transcript_path":"%s/t.jsonl","stop_hook_active":%s}' "$1" "$md" "$2" \
+        | VSTACK_NO_DELEGATION_LOG=1 env $3 "./$sm" 2>/dev/null
+    }
+    n_cases=0
+    for cid in $MANDATE_CASE_IDS; do
+      n_cases=$((n_cases + 1))
+      sid="vfy-$cid"
+      mandate_case_lines "$cid" > "$md/t.jsonl"
+      flags=$(mandate_case_flags "$cid")
+      sha=false
+      _mc_has_flag "$flags" STOP_ACTIVE && sha=true
+      envp=""
+      _mc_has_flag "$flags" NO_MANDATE && envp="VSTACK_NO_MANDATE=1"
+      if _mc_has_flag "$flags" PRIME2; then
+        # Two priming calls on the SAME session id, discarded, so the per-mandate strike
+        # counter this case is testing reaches 2 before the judged call below reads it back.
+        _mc_call "$sid" "$sha" "$envp" >/dev/null
+        _mc_call "$sid" "$sha" "$envp" >/dev/null
+      fi
+      out=$(_mc_call "$sid" "$sha" "$envp")
+      detail=$(mandate_case_judge "$cid" "$out")
+      if [ $? -ne 0 ]; then
+        errs="$errs\n  $detail"
+      fi
+    done
 
-    # blocks when the rule is unmet
-    say_ "$W"; hit_ a | grep -q '"decision":"block"' || errs="$errs\nwrote prose without unslop and it did not block"
-    say_ "$T"; hit_ b | grep -q '"decision":"block"' || errs="$errs\nwrote TypeScript without the ts skill and it did not block"
-    # silent when the rule is met, or does not apply
-    say_ "$W" "$U"; [ -z "$(hit_ c)" ] || errs="$errs\nblocked even though unslop had run"
-    say_ "$P";      [ -z "$(hit_ d)" ] || errs="$errs\nblocked on a file no mandate covers"
-    # cannot trap the session
-    say_ "$W"; [ -z "$(hit_ e true)" ] || errs="$errs\nblocked while stop_hook_active was already true"
-    say_ "$W"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ f)" ] || errs="$errs\nignored VSTACK_NO_MANDATE=1"
-    say_ "$W"; hit_ g >/dev/null; hit_ g >/dev/null
-    [ -z "$(hit_ g)" ] || errs="$errs\ndid not latch open after 2 blocks in one session"
-    # multi-directory, multi-type work: breadth mandate
-    F1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"fix/test1.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test2.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test3.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test4.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test5.sh","content":""}}]}}'
-    say_ "$F1"; [ -z "$(hit_ h)" ] || errs="$errs\nfive fixtures in one dir falsely blocked multi-dir mandate"
-    F2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"a.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"lib/b.json","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"src/c.py","content":""}}]}}'
-    say_ "$F2"; hit_ i | grep -q '"decision":"block"' || errs="$errs\nthree dirs with two extensions did not block multi-dir mandate"
-    F3='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".editorconfig","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"home/.gitignore","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"proj/.npmrc","content":""}}]}}'
-    say_ "$F3"; [ -z "$(hit_ j)" ] || errs="$errs\nthree dotfiles across three dirs falsely blocked multi-dir mandate"
-    # agent naming: dispatch attribution required
-    # Asserts the reason, not just that something blocked: TA also trips the swarm mandate,
-    # so a bare '"decision":"block"' test would pass even if the naming rule were deleted.
-    say_ "$SW" "$TA"; hit_ k | grep -q 'agent naming' || errs="$errs\nTask call with no call sign did not block on the naming rule"
-    # SW first: TB dispatches a Task, and the swarm mandate now blocks any dispatch made
-    # without calling the swarm skill. Without SW this case would still go silent-or-block for
-    # a reason that has nothing to do with the naming rule it is here to prove.
-    say_ "$SW" "$TB"; [ -z "$(hit_ l)" ] || errs="$errs\nTask call with call sign (BETH) blocked anyway"
-    say_ "$P"; [ -z "$(hit_ m)" ] || errs="$errs\nzero Task calls falsely blocked on naming rule"
-    say_ "$TA"; [ -z "$(VSTACK_NO_MANDATE=1 hit_ n)" ] || errs="$errs\nVSTACK_NO_MANDATE=1 did not disable agent naming block"
-
-    # fan-out: two dispatches in one message satisfy breadth; the same two spread across two
-    # messages do not. Under the old rule both fixtures had task_count=2 and both went silent,
-    # so a serial loop cleared a mandate whose entire subject is doing the work concurrently.
-    say_ "$F2" "$SW" "$TWO"; [ -z "$(hit_ o)" ] || errs="$errs\ntwo dispatches in ONE message did not satisfy the breadth mandate"
-    say_ "$F2" "$SW" "$ON1" "$ON2"; hit_ p | grep -q 'same message' || errs="$errs\ntwo dispatches in SEPARATE messages satisfied breadth anyway -- a serial loop cleared the fan-out mandate"
-    # swarm: dispatching without routing through the skill blocks, and calling it clears.
-    say_ "$TB"; hit_ q | grep -q 'swarm' || errs="$errs\ndispatched without calling the swarm skill and it did not block"
-
-    # "*vfy-[a-q]*" not "vfy-*": the mandate latch split (f4f5468) inserts "ckpt-" between the
-    # "vstack-mandate-" anchor and the session id, and the delegation-family counters (h/i/j
-    # exercise the breadth mandate) append ".delegate"/".delegate-ts"/".delegate-scan"/".lock"
-    # after it -- a bare "vfy-*" anchor matches none of the ckpt files and missed every one of
-    # them (verified: 12 stale vstack-mandate-ckpt-vfy-* sat in $TMPDIR across runs of this gate
-    # before this fix). Anchored on both ends the way 76d2366 fixed the identical bug in
-    # tests/test-breadth-mandate.sh: "vfy-[a-q]" is exactly the 14 single-letter session ids this
-    # block hands to hit_ above, so this cannot reach a file this check did not create.
-    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-q]* 2>/dev/null
-    [ -z "$errs" ] && ok "skill mandate decides correctly (17 cases, both directions)" \
+    # "*vfy-[a-q19]*" not "vfy-*": the mandate latch split (f4f5468) inserts "ckpt-" between the
+    # "vstack-mandate-" anchor and the session id, and the delegation-family counters append
+    # ".delegate"/".delegate-ts"/".delegate-scan"/".lock" after it -- a bare "vfy-*" anchor
+    # matches none of the ckpt files and missed every one of them (verified: 12 stale
+    # vstack-mandate-ckpt-vfy-* sat in $TMPDIR across runs of this gate before this fix).
+    # Anchored on both ends the way 76d2366 fixed the identical bug in
+    # tests/test-breadth-mandate.sh. The character class covers every MANDATE_CASE_IDS first
+    # character: the 17 single-letter ids a-q, plus "9b" and "10"/"11"/"12" (first chars 9 and
+    # 1) added when this check and tests/container-matrix.sh were unified onto one fixture set
+    # -- so this still cannot reach a file this check did not create.
+    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-q19]* 2>/dev/null
+    [ -z "$errs" ] \
+      && ok "skill mandate decides correctly ($n_cases cases, shared with tests/container-matrix.sh via tests/mandate-cases.sh)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"
   fi
 else
