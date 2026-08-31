@@ -211,17 +211,20 @@ VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
 
-The full sweep runs the whole gate once per mutation, so it takes about twenty minutes on an
-M-series Mac and there is no partial credit: a run that is interrupted has proven nothing about
-the rows it never reached. Run it against a clone, as above. It mutates the working tree, and
-editing that tree while it runs will be reported as an unrestored file at the end.
+The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks): at 100
+falsifiability rows and a ~84s gate that is over two hours serially. This paragraph claimed
+twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
+`./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones in about 20
+minutes, the split CI uses. Neither gives partial credit: a run that is interrupted has proven
+nothing about the rows it never reached. Run it against a clone, as above. It mutates the working
+tree, and editing that tree while it runs will be reported as an unrestored file at the end.
 
 Run the falsifiability suite in a throwaway clone. It mutates real files.
 
-This exists because checks lie. Eighteen in this repository have been caught passing while
-measuring nothing — a comparison that ran before the commit it was judging, a linter whose
-silence was read as success, an anchor a prose edit moved, a rule that reported OK with every
-one of its own rules skipped. Each is in [CHANGELOG.md](CHANGELOG.md) with the command that
+This exists because checks lie. Seventeen <!-- catalogue-count --> in this repository have been
+caught reporting a verdict they had not measured, sixteen of them by printing `ok`. A
+comparison that ran before the commit it was judging. A linter whose silence was read as success.
+An anchor a prose edit moved. A rule that reported OK with every one of its own rules skipped. Each is in [CHANGELOG.md](CHANGELOG.md) with the command that
 exposed it, and the shape behind all of them is in
 [docs/checks-that-inherit-their-answer.md](docs/checks-that-inherit-their-answer.md).
 

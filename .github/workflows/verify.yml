@@ -16,11 +16,13 @@ on:
 env:
   # Single source for the shard count so the plan step, this comment and anyone reading the run
   # log agree on the same number. Picked from measured cost, not assumed: tests/gate-
-  # falsifiability.sh has 91 declared rows (see falsify-plan's own derivation of the same
-  # CHECKS= line), and release.yml records "~60s on a runner" per row (one full 57-check
-  # ./.claude/verify.sh invocation). 91 divides evenly by 7 (13 rows/shard, no remainder
-  # bucket), and 7 concurrent runners stays well inside every GitHub-hosted concurrency tier
-  # this repo could plausibly be on, unlike e.g. 13 shards (91/13 = 7 rows/shard) which pushes
+  # falsifiability.sh declared 91 rows when 7 was chosen, which divided evenly (13 rows/shard,
+  # no remainder bucket), and release.yml records "~60s on a runner" per row (one full
+  # ./.claude/verify.sh invocation). It declares 100 rows now, so the split is 15 rows for two
+  # shards and 14 for the other five; falsify-plan derives that from the CHECKS= line rather
+  # than from any number written here, so an uneven count buckets itself and this comment going
+  # stale cannot mis-shard anything. 7 concurrent runners stays well inside every GitHub-hosted
+  # concurrency tier this repo could plausibly be on, unlike e.g. 13 shards which pushes
   # total concurrent jobs in this workflow to ~20 and risks queueing on the smallest tier for no
   # latency gain that matters once shard time already dwarfs per-shard setup overhead. At 7
   # shards: ~13 rows x ~60s = ~13 minutes of mutation loop, plus this job's own checkout +
@@ -161,7 +163,7 @@ jobs:
         run: ./.claude/verify.sh
 
       # "Prove every check is falsifiable" (tests/gate-falsifiability.sh) used to run here. It is
-      # O(rows x checks) -- 91 rows, each re-running the whole 57-check gate -- and dominated
+      # O(rows x checks), 100 rows each re-running the whole 60-check gate, and it dominated
       # this job's wall clock (measured 63-93 minutes total). It now runs sharded, in parallel
       # with the rest of this job, as falsify-plan / falsify / falsify-reconcile below, and its
       # result is fanned back into the `verify` join job at the bottom of this file. See that

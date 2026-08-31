@@ -111,7 +111,7 @@ jobs:
           # ceiling at 7x the job it waits for, so a hung run cost two hours before anyone heard.
           #
           # 3600s is 60 minutes: 3.4x that measurement, and above the 3150s floor check 58 of
-          # .claude/verify.sh derives from the tree at 93 rows over 7 shards. That check is the
+          # .claude/verify.sh derives from the tree at 100 rows over 7 shards. That check is the
           # part that matters. This number went stale twice because nothing compared it to the
           # job, and the comment that used to sit here said exactly that about itself and was
           # still right the next time. The floor now moves when the row count or the shard count

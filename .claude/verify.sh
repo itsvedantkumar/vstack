@@ -560,6 +560,13 @@ nck=$TOTAL
 # map. Derived the same way check 29 selects, so the two can never disagree.
 nsh=$(sh_files | grep -c .)
 
+# Third of the same shape. README.md and tests/README.md both quoted the falsifiability suite's
+# row count in prose to justify a runtime figure, and both sat at 94 against a live 100 for four
+# releases, because "rows" was not in the map. It cannot go in as the bare noun: "25 rows",
+# "5000 rows" and "19 rows" are all live, correct claims about other things. So the noun is the
+# full phrase, and the two prose sites say "falsifiability rows" rather than "rows".
+nfr=$(sed -n 's/^CHECKS="\(.*\)"/\1/p' tests/gate-falsifiability.sh | tr ' ' '\n' | grep -c '[0-9]')
+
 # Lane-aware resolution for README's two "## What lands where" tables. Check 12 used to resolve
 # one number per noun for the whole repository, but README states its counts once per install
 # lane, and the two lanes ship different things: the plugin lane wires two routing hooks and
@@ -625,6 +632,7 @@ want_for(){ # noun (lowercased, plural or singular), optional lane ("full"/"plug
     case|cases)                                     printf '%s' "$ncs" ;;
     "mcp server"|"mcp servers")                     printf '%s' "$nmc" ;;
     "shell script"|"shell scripts")                 printf '%s' "$nsh" ;;
+    "falsifiability row"|"falsifiability rows")     printf '%s' "$nfr" ;;
   esac
 }
 
@@ -644,7 +652,7 @@ exempt_phrases(){
 # scripts" sat in the CHANGELOG unchallenged. want_for had no case for it, and even after one
 # was added the claim stayed invisible, because the extractor carried its own separate
 # alternation and nothing compared the two.
-NOUNS='skills?|checks?|agents?|subagents?|sub-agents?|commands?|hooks?|CLI wrappers?|cases?|MCP servers?|shell scripts?'
+NOUNS='skills?|checks?|agents?|subagents?|sub-agents?|commands?|hooks?|CLI wrappers?|cases?|MCP servers?|shell scripts?|falsifiability rows?'
 
 errs=""
 
@@ -4177,7 +4185,7 @@ fi
 # the first draft of this check said so, and both were right.
 #
 # Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
-# function of the gate's own size: adding a check makes all 94 rows slower. So the recorded
+# function of the gate's own size: adding a check makes all 100 rows slower. So the recorded
 # measurement carries the check count it was taken at, and the model scales it by the gate size
 # it finds right here. Adding checks to this file raises the floor it derives, automatically.
 #
@@ -4352,7 +4360,7 @@ twenty-four twenty-five", a, " ")
     c60_errs="$c60_errs\nno file carries the <!-- catalogue-count --> marker; lane 2 would pass on an empty set"
   else
     c60_off=$(git grep -nF -- '<!-- catalogue-count -->' -- '*.md' 2>/dev/null \
-      | grep -vE "(^|[^a-z])$c60_word([^a-z]|\$)")
+      | grep -viE "(^|[^[:alpha:]])$c60_word([^[:alpha:]]|\$)")
     [ -z "$c60_off" ] && : || c60_errs="$c60_errs\nmarked line(s) not saying \"$c60_word\":\n$c60_off"
   fi
 
