@@ -52,8 +52,105 @@ if [ "$NROWS" -eq 0 ]; then
 fi
 [ "$JOBS" -gt "$NROWS" ] && JOBS=$NROWS
 
+# FALSIFY_TIMEOUT_S bounds this run's TOTAL wall clock, not just the wait loop: the comparison
+# below reads $SECONDS, which counts from script start, so row derivation and workdir setup sit
+# inside the bound. Stated because the printed verdict names this number. Without it, a sweep
+# whose shards will never report (killed session, crashed shard, wedged clone) is indistinguishable
+# from one still working -- the rc-collection loop had no bound and would sit forever. 0 disables
+# the bound entirely; any other value is seconds.
+FALSIFY_TIMEOUT_S=${FALSIFY_TIMEOUT_S:-3600}
+
+# kill_tree PID -- kill PID and every descendant, leaves first.
+#
+# Not `pkill -f`: it matches unrelated processes on a shared box. Not `pgrep -P` (absent on
+# busybox/Alpine) and not `kill -- -$$` (assumes every child stayed in the parent's process group,
+# which job control does not guarantee once `wait` starts reaping). Walk the pid/ppid table by
+# hand instead -- it needs nothing but `ps`, which is on every target this has to run on.
+_ps_snapshot() {
+  # -A/-e select every process on the box, not just ones on this controlling terminal -- a
+  # backgrounded shard detaches from the tty the instant it's `&`'d. Some minimal `ps` builds
+  # reject both flags; the bare form is the busybox fallback, which lists unfiltered by default.
+  _snap=$(ps -A -o pid= -o ppid= 2>/dev/null)
+  [ -z "$_snap" ] && _snap=$(ps -e -o pid= -o ppid= 2>/dev/null)
+  [ -z "$_snap" ] && _snap=$(ps -o pid= -o ppid= 2>/dev/null)
+  printf '%s\n' "$_snap"
+}
+
+kill_tree() {
+  _kt_root="$1"
+  [ -z "$_kt_root" ] && return 0
+  _kt_snap=$(_ps_snapshot)
+  [ -z "$_kt_snap" ] && return 0
+
+  # Breadth-first collect every descendant. Each pid has exactly one ppid, so this can't double-add
+  # a victim; a second call (idempotent by construction) is the recovery if the table moved
+  # mid-walk and it missed one.
+  _kt_frontier="$_kt_root"
+  _kt_victims=""
+  while [ -n "$_kt_frontier" ]; do
+    _kt_next=""
+    for _kt_p in $_kt_frontier; do
+      _kt_children=$(printf '%s\n' "$_kt_snap" | awk -v p="$_kt_p" '$2==p{print $1}')
+      for _kt_c in $_kt_children; do
+        _kt_victims="$_kt_victims $_kt_c"
+        _kt_next="$_kt_next $_kt_c"
+      done
+    done
+    _kt_frontier="$_kt_next"
+  done
+
+  # Reverse so leaves die first -- killing a parent while its child is still alive risks the child
+  # surviving unsignalled past this walk, since the walk only knows the tree as it looked at
+  # snapshot time.
+  _kt_reversed=""
+  for _kt_v in $_kt_victims; do
+    _kt_reversed="$_kt_v $_kt_reversed"
+  done
+
+  _kt_hit=0
+  for _kt_v in $_kt_reversed; do kill -TERM "$_kt_v" 2>/dev/null && _kt_hit=1; done
+  kill -TERM "$_kt_root" 2>/dev/null && _kt_hit=1
+  # Nothing was alive to signal. That is the NORMAL path: this runs from the EXIT trap after
+  # `wait` has already reaped every shard, so there is no one left to escalate against. Returning
+  # here is what stops a successful sweep paying one second of sleep per shard -- seven seconds
+  # added to every green run -- to SIGKILL processes that do not exist.
+  [ "$_kt_hit" = 0 ] && return 0
+  # A shard wedged inside its own cleanup can outlive TERM; escalate once after a short grace
+  # period rather than leaving it for whoever finds it next (measured: one orphan alive 3h22m
+  # against a comparable ~20-minute run).
+  sleep 1
+  for _kt_v in $_kt_reversed; do kill -KILL "$_kt_v" 2>/dev/null; done
+  kill -KILL "$_kt_root" 2>/dev/null
+  return 0
+}
+
+kill_all_shards() {
+  for _p in $SHARD_PIDS; do
+    kill_tree "$_p"
+  done
+}
+
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/falsify-parallel.XXXXXX") || exit 2
-trap 'rm -rf "$WORK"' EXIT INT TERM
+# Kill the shard tree BEFORE removing the workdir it's running inside -- the old trap deleted
+# $WORK out from under live shards, which then kept burning CPU with their tree gone and nobody
+# left to collect them. SHARD_PIDS is empty until the launch loop below sets it, so this is a
+# no-op for any exit before shards exist.
+SHARD_PIDS=""
+_CLEANED=0
+_cleanup() {
+  [ "$_CLEANED" = 1 ] && return 0
+  _CLEANED=1
+  kill_all_shards
+  rm -rf "$WORK"
+}
+# INT and TERM get their own handlers that EXIT. A single `trap ... EXIT INT TERM` runs the
+# handler on a signal and then RESUMES the interrupted statement -- so Ctrl-C reaped the shards,
+# deleted $WORK, and left this script polling for .rc files inside a directory it had just
+# removed, until the timeout fired up to an hour later. The operator saw the sweep ignore their
+# Ctrl-C. Nothing in a trap body stops the process unless it says so.
+trap '_cleanup' EXIT
+trap '_cleanup; exit 130' INT
+trap '_cleanup; exit 143' TERM
 
 printf 'falsify-parallel: %d rows over %d shard(s), %s\n\n' "$NROWS" "$JOBS" "${SHA%${SHA#???????}}"
 
@@ -91,12 +188,25 @@ for s in $(seq 0 $((JOBS-1))); do
     ( cd "$d" && TMPDIR="$d.tmp" VSTACK_FALSIFY_ROWS="$ids" ./tests/gate-falsifiability.sh ) > "$d.log" 2>&1
     echo $? > "$d.rc"
   ) &
+  SHARD_PIDS="$SHARD_PIDS $!"
 done
 
 # A twenty-minute run that prints nothing is indistinguishable from a hung one, and the first
-# thing anyone does with a silent long job is kill it. Report each shard as its rc lands.
+# thing anyone does with a silent long job is kill it. Report each shard as its rc lands, and
+# also emit a heartbeat at least every 60s even when nothing has landed -- silence has to be
+# distinguishable from work, not just from the last shard's perspective but from this loop's.
 _seen=0
+_last_heartbeat=$SECONDS
 while [ "$_seen" -lt "$JOBS" ]; do
+  if [ "$FALSIFY_TIMEOUT_S" -gt 0 ] && [ "$SECONDS" -ge "$FALSIFY_TIMEOUT_S" ]; then
+    # Kill before printing: a NOT RUN verdict next to still-running shards is the same lie as the
+    # old trap deleting $WORK out from under them -- the printed state and the real state must
+    # agree at the moment this line hits stdout.
+    kill_all_shards
+    printf 'falsify-parallel: NOT RUN (timed out after %d s; %d/%d shard(s) reported)\n' \
+      "$FALSIFY_TIMEOUT_S" "$_seen" "$JOBS"
+    exit 2
+  fi
   sleep 5
   for s in $(seq 0 $((JOBS-1))); do
     if [ -f "$WORK/shard-$s.rc" ] && [ ! -f "$WORK/shard-$s.seen" ]; then
@@ -106,6 +216,10 @@ while [ "$_seen" -lt "$JOBS" ]; do
         "$s" "$(cat "$WORK/shard-$s.rc")" "$_seen" "$JOBS"
     fi
   done
+  if [ "$_seen" -lt "$JOBS" ] && [ $((SECONDS - _last_heartbeat)) -ge 55 ]; then
+    printf '  ... %ds elapsed, %d/%d shard(s) reported\n' "$SECONDS" "$_seen" "$JOBS"
+    _last_heartbeat=$SECONDS
+  fi
 done
 wait
 
