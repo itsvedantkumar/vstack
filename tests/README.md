@@ -214,11 +214,13 @@ sample it pairs with — interleaved throughout the run, never measured once up 
 spike mid-run raises the numerator and the denominator together instead of just the numerator, and
 the ratio (hook_ms / that sample's own baseline_ms) is close to load-invariant.
 
-It drives all eight hooks wired in `claude/settings.json` (`compat-canary.sh`,
+It drives all eight hooks this repo ships (`compat-canary.sh`,
 `dispatch-counter.sh`, `failure-diagnose.sh`, `format.sh`, `guard-destructive.sh`,
 `inject-session-context.sh`, `skill-mandate.sh`, `verify-gate.sh`) with each hook's own real stdin
-JSON shape, n=30 each, offline, no model calls, well under a minute even under heavy concurrent
-load.
+JSON shape. Seven of them are wired by `claude/settings.json`; `compat-canary.sh` appears in no
+event there and reaches the machine only through the jq merge at `install.sh:730`, so a reader who
+audits the shipped settings file will not find it. Runs are n=30 each, offline, no model calls,
+well under a minute even under heavy concurrent load.
 
 Two claims, two controls, not one standing in for the other. A positive control times `sleep 0.2`
 through the exact same jq-`now`/`awk` function every hook and every baseline sample is timed with,
