@@ -74,6 +74,68 @@ Row width grew 223->313 B minimal and 251->394 B realistic, putting post-rotatio
 MB against a documented 1-1.5 MB. The comment stating the old figure is corrected in the same diff
 that invalidated it. Rotation stays bounded at 2 MB; the slack it runs on is smaller.
 
+### The tag this version first tried to ship on
+
+`v1.57.0` reached origin, `container-matrix` failed in all three container lanes, `publish` was
+skipped, and `cleanup-on-failed-gate` deleted the tag. That is the designed behaviour: the tag is a
+candidate, and a failed required job cannot produce a published tag. This section describes the
+re-cut.
+
+The fixture that failed asserted that breadth plus ONE dispatch leaves the mandate hook silent,
+which is precisely what this version's two new mandates block. Two fixture sets cover this hook,
+check 27 in `.claude/verify.sh` and `tests/container-matrix.sh`. Only check 27's was updated when
+the hook changed, so the maintained copy went green and the stale copy was the one that runs in no
+workflow except `release.yml`. The first signal available was a cancelled release.
+
+Case 9 now calls `swarm` and dispatches two Agent blocks in one assistant record, the only shape
+`fanout_batches` counts. `9b` and `9c` add the blocking direction for each rule. Both were watched
+failing under a mutation before being trusted.
+
+**Still open, stated rather than fixed.** `container-matrix` runs only in `release.yml`. This
+release was verified by running it by hand against `main`, which the harness supports because it
+clones from published GitHub at `$VSTACK_REF` rather than from a working tree. Nothing yet stops
+the next hook change from repeating this.
+
+### The log did not record the variable the hook decides on
+
+Moving the breadth mandate onto `fanout_batches` left the delegation log writing only `task_count`.
+`tests/delegation-drift.py` reads that log, so its primary metric scored a session as delegated on
+`task_count>=1` while the live hook blocked that same session for having no batch. The study and
+the hook it studies could not be reconciled, and no gate said so.
+
+`fanout_batches` now travels on both log rows, passed as an existing shell variable into the
+existing `jq` call, no new fork. The latched row carries `null`, matching its siblings. Missing,
+`null` and `0` are three different facts and the source says so.
+
+The study is amended, not rewritten. The pre-registered sentence stays, marked stale and dated;
+`delegated()` becomes `any_dispatch()` so the published series keeps one name for one computation;
+the metric keyed to the real suppression condition is added over only the rows carrying the field,
+printing its own N. Rows without it are excluded, never scored zero, because every row written
+before the field existed lacks it and counting those as "no batch" would print a collapse that is
+an artifact of when the field was added. The live run reports n=0 with 94 windows excluded.
+
+The invalidation list covered changes to dir/ext counting but not to the suppression condition
+itself, which is how this went unnoticed. It covers that now.
+
+### The sweep harness orphaned its own children
+
+`tests/falsify-parallel.sh` backgrounded N shards and never killed them. A dead parent left them
+running the gate with nobody collecting results; one orphan was measured alive 3h22m against a
+comparable 20 minute run. The old trap made it worse by deleting the workdir the shards were still
+running inside.
+
+`kill_tree` walks the `ps` pid/ppid table and kills leaves first, escalating to KILL after a one
+second grace only when a TERM was actually delivered, so the normal path does not pay a second per
+shard. `INT` and `TERM` get handlers that call `exit`: a single `trap ... EXIT INT TERM` runs its
+body on a signal and then resumes the interrupted statement, so Ctrl-C reaped the shards and then
+left the script polling inside a directory it had just deleted.
+
+`FALSIFY_TIMEOUT_S` bounds the run, 3600 by default, and reports `NOT RUN` with exit 2 rather than
+any verdict. A sweep whose parent has died is otherwise indistinguishable from one still working,
+and that, not the wasted CPU, is what makes it dangerous. `tests/falsify-parallel-reap.sh` proves
+it in about half a minute without running the real sweep.
+
+
 ## 1.56.0 — 2026-08-31
 
 ### The release gate waited two hours for a job that now takes eighteen minutes
