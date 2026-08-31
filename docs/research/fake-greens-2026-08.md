@@ -36,10 +36,13 @@ compared. The question it was asked was whether the tree had drifted. Reading th
 the first question. Reading the count answers the second, and only the count moved, by staying
 still.
 
-`docs/checks-that-inherit-their-answer.md` catalogues thirteen of these. Six were found on
-2026-08-22 and six more across 2026-08-26 and 2026-08-27. Six plus six is twelve, and the
-catalogue's heading says thirteen. The document does not reconcile its own arithmetic, which is
-recorded here rather than rounded away. The document predicted roughly one a
+`docs/checks-that-inherit-their-answer.md` catalogued thirteen of these when this document was
+written. Six were found on 2026-08-22 and six more across 2026-08-26 and 2026-08-27. Six plus six
+is twelve, and the catalogue's heading said thirteen. The document did not reconcile its own
+arithmetic, which is recorded here rather than rounded away; on 2026-09-01 the catalogue moved its
+uncounted coverage-gap note under a separate heading, so the instances are now derivable and stand
+at seventeen. The numbers below are the ones this run measured and are not restated to match. The
+document predicted roughly one a
 month. Its own dates falsify that prediction by about an order of magnitude, which is the honest
 reading of a catalogue that keeps growing under a fixed search.
 

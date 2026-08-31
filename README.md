@@ -14,7 +14,9 @@ and need to know afterwards which parts actually held.
 
 The distinguishing property is not the count of anything. It is that **every check in this
 repository has a mutation proving it can fail**, and the project has a written record of the
-eighteen times a check here passed while measuring nothing.
+seventeen times a check here reported a verdict it had not measured. <!-- catalogue-count --> Sixteen of those printed
+`ok`. The seventeenth printed an accurate `FAIL` that a release workflow then acted on by deleting
+the evidence.
 
 ## Repository layout
 
@@ -23,7 +25,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 59 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 60 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -93,8 +95,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.58.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.58.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.59.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.59.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -195,7 +197,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 59 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 60 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -204,7 +206,7 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 59 checks
+./.claude/verify.sh                  # 60 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```

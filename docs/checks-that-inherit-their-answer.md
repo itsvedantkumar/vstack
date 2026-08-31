@@ -159,16 +159,6 @@ name, and the remote's default branch. Fixed by subtracting all three and publis
 count, which is 3990 B in every checkout tested. Row 18d splices `$base` a fourth time so the
 correction can never again fall behind what the hook adds.
 
-**Not covered, named rather than skipped.** `tests/install-matrix.sh` has no falsifiability
-control. Check 52 gives `tests/bin-scripts.sh` one -- break the argument guard its `bg-args` case
-is about, and the suite must notice -- but the same treatment does not fit the install matrix. Its
-cheapest single case measured 2m10s, which does not belong in an offline gate, and it is red at
-time of writing for an unrelated reason (a declared-but-untagged release), so a "must fail when
-broken" control against it would pass without measuring anything. A vacuous control is worse than
-an absent one, because the absent one is visible in this paragraph and the vacuous one reads as
-coverage. Anyone closing this gap should give install-matrix a scoped mode that can run in seconds
-against a deliberately broken payload, and should confirm the matrix is green first.
-
 **The tag that existed on one machine.** Check 24 asks whether the version the README pins is
 a real tag, and answers with `git tag -l` -- this checkout's tags. `.claude/verify.sh` is hermetic
 by design and makes no network call, so a tag created locally and never pushed counts as evidence
@@ -219,6 +209,21 @@ that door. All that stops is the deletion. Check 54 exists because the fix has t
 two-halves problem -- `tests/require-checks-green.sh` proves the gate honours the variable by
 setting it itself, and would go on passing forever if `release.yml` never set it in production, so
 the check derives the gate's inputs and requires each one to be wired by its caller.
+
+## Named, not counted
+
+Not an instance. The catalogue names this coverage gap so the count above cannot quietly absorb
+it: the instances are everything between `## The seventeen` and this heading, and nothing else.
+
+**Not covered, named rather than skipped.** `tests/install-matrix.sh` has no falsifiability
+control. Check 52 gives `tests/bin-scripts.sh` one -- break the argument guard its `bg-args` case
+is about, and the suite must notice -- but the same treatment does not fit the install matrix. Its
+cheapest single case measured 2m10s, which does not belong in an offline gate, and it is red at
+time of writing for an unrelated reason (a declared-but-untagged release), so a "must fail when
+broken" control against it would pass without measuring anything. A vacuous control is worse than
+an absent one, because the absent one is visible in this paragraph and the vacuous one reads as
+coverage. Anyone closing this gap should give install-matrix a scoped mode that can run in seconds
+against a deliberately broken payload, and should confirm the matrix is green first.
 
 ## The test
 

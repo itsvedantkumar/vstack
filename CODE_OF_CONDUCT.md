@@ -17,7 +17,7 @@ Sexualised language or imagery. Dismissing a contributor rather than their argum
 
 Reporting a defect in this project is never harassment, however blunt. Finding a check here that
 measures nothing is the most useful thing you can do, and the project keeps a public record of the
-eighteen found so far.
+seventeen found so far. <!-- catalogue-count -->
 
 ## Scope
 

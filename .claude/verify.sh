@@ -4304,6 +4304,71 @@ else
   skip "the goal gate blocks on an open goal and only on an open goal" "jq is not installed"
 fi
 
+# --- 60. the catalogue's count is derived, and every site that publishes it agrees -------------
+# Three files published three different figures for the same catalogue at once -- README.md said
+# eighteen, docs/what-this-actually-does.md said thirteen, and the catalogue's own heading said
+# seventeen -- and nothing here noticed. Check 12 compares published counts against the tree, but
+# its extractor only matches digit+noun, so a spelled-out number is invisible to it, and this
+# figure has no tree to count anyway: its subject is a prose catalogue.
+#
+# The number is now DERIVED rather than asserted in a list kept here. Instances are the bolded
+# leads between the catalogue's first `## ` heading and its next one. The coverage-gap note that
+# used to sit among them, and was the reason the heading and the entries disagreed by one, now
+# lives under `## Named, not counted`, so the boundary is a property of the document's structure
+# rather than of an exclusion someone has to remember to update.
+#
+# Stated hole: a NEW doc that publishes the figure without the `<!-- catalogue-count -->` marker
+# escapes lane 2. Lane 3 requires the marker in README.md specifically, because that is the public
+# claim, so the one that matters cannot lose its guard silently.
+c60_doc="docs/checks-that-inherit-their-answer.md"
+if [ -f "$c60_doc" ]; then
+  c60_errs=""
+  c60_word=$(awk '/^## /{print $3; exit}' "$c60_doc")
+  c60_n=$(awk '
+    /^## / { if (seen) exit; seen = 1; next }
+    seen && /^\*\*/ { n++ }
+    END { print n + 0 }
+  ' "$c60_doc")
+  c60_num=$(awk -v w="$c60_word" 'BEGIN {
+    split("one two three four five six seven eight nine ten eleven twelve thirteen fourteen \
+fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three \
+twenty-four twenty-five", a, " ")
+    for (i in a) if (a[i] == w) { print i; exit }
+    print -1
+  }')
+
+  # Lane 1 -- the heading is the count. A word this table does not know is a failure, not a skip:
+  # the catalogue outgrowing the table is exactly when the number stops being checked.
+  if [ "$c60_num" -lt 0 ] 2>/dev/null; then
+    c60_errs="$c60_errs\n$c60_doc: heading names \"$c60_word\", which is not a number this check can read"
+  elif [ "$c60_num" -ne "$c60_n" ]; then
+    c60_errs="$c60_errs\n$c60_doc: heading says $c60_word ($c60_num) but the section holds $c60_n entries"
+  fi
+  [ "$c60_n" -gt 0 ] || c60_errs="$c60_errs\n$c60_doc: no entries found; the extractor matched nothing"
+
+  # Lane 2 -- every marked publication site names the same word.
+  c60_sites=$(git grep -lF -- '<!-- catalogue-count -->' -- '*.md' 2>/dev/null)
+  if [ -z "$c60_sites" ]; then
+    c60_errs="$c60_errs\nno file carries the <!-- catalogue-count --> marker; lane 2 would pass on an empty set"
+  else
+    c60_off=$(git grep -nF -- '<!-- catalogue-count -->' -- '*.md' 2>/dev/null \
+      | grep -vE "(^|[^a-z])$c60_word([^a-z]|\$)")
+    [ -z "$c60_off" ] && : || c60_errs="$c60_errs\nmarked line(s) not saying \"$c60_word\":\n$c60_off"
+  fi
+
+  # Lane 3 -- the public claim keeps its guard.
+  printf '%s\n' "$c60_sites" | grep -qx 'README.md' \
+    || c60_errs="$c60_errs\nREADME.md publishes this figure and must carry the marker"
+
+  if [ -z "$c60_errs" ]; then
+    ok "catalogue count derived and agreed ($c60_word = $c60_n entries, $(printf '%s\n' "$c60_sites" | grep -c . ) marked file(s))"
+  else
+    bad "catalogue count derived and agreed" "$(printf '%b' "$c60_errs")"
+  fi
+else
+  bad "catalogue count derived and agreed" "$c60_doc is missing; every published figure for it is now unbacked"
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

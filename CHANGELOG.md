@@ -4,6 +4,32 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.59.0 — 2026-09-01
+
+### Three files published three different counts for the same catalogue
+
+`README.md` said eighteen, `docs/what-this-actually-does.md` said thirteen, and
+`docs/checks-that-inherit-their-answer.md` headed its own list "The seventeen". All three were
+live claims about one document, and the gate was green through all of it. Check 12 compares
+published counts against the tree, but its extractor matches digit+noun only, so a spelled-out
+number is invisible to it, and this figure has no tree to count anyway: its subject is prose.
+
+The real count is seventeen. Sixteen of those entries printed `ok`; the seventeenth printed an
+accurate `FAIL` that the release workflow then acted on by deleting the tag whose absence was the
+finding. The catalogue disagreed with itself by one because a coverage-gap note about
+`tests/install-matrix.sh` sat among the instances and was counted as one. That note now lives
+under its own `## Named, not counted` heading, so the instance boundary is a property of the
+document's structure rather than an exclusion someone has to remember.
+
+New check 60 derives the number from the catalogue and requires every marked publication site to
+agree. Publication sites carry an HTML-comment marker, and the check states its own hole: a new
+doc that publishes the figure without the marker escapes lane 2. Lane 3 closes that for the file
+that matters by requiring the marker in `README.md`. Row 60 plants an extra entry in the counted
+section, anchored on the section boundary rather than on the spelled number, since the number is
+the thing that moves.
+
+Also corrected: `CODE_OF_CONDUCT.md` said eighteen, which no reviewer had spotted.
+
 ## 1.58.0 — 2026-09-01
 
 ### The goal command shipped without its reader
