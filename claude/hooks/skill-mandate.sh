@@ -245,13 +245,19 @@ deleg_eval=1
 # window AND was not just looked at within $DELEGATE_SCAN_COOLDOWN_SECS -- both conditions
 # bounded, so this can never accumulate into "every Stop forever". The delegation-drift log
 # still gets a row for this Stop when both are exhausted -- it just cannot carry
-# dir_count/ext_count/task_count/named, same reasoning as before.
+# dir_count/ext_count/task_count/fanout_batches/named, same reasoning as before.
+#
+# fanout_batches null here, same as its five siblings: a missing FIELD (older schema, before this
+# key existed) means "predates the field"; a null VALUE here means "this checkpoint was latched,
+# never evaluated"; a 0 (only ever written below, on an evaluated checkpoint) means "evaluated,
+# and no 2+-in-one-message batch was found". A reader that treats null and 0 as the same fact
+# would report a fake decline in fan-out at exactly the sessions that were never measured.
 if [ "$skill_eval" = 0 ] && { [ "$deleg_eval" = 0 ] || [ "$dscan_recent" = 1 ]; }; then
   if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
     (
       ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
       row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --arg ts "$ts" \
-        '{session_id:$sid, checkpoint_index:$ckpt, dir_count:null, ext_count:null, task_count:null, task_fail_count:null, named:null, latched:true, ts:$ts}')
+        '{session_id:$sid, checkpoint_index:$ckpt, dir_count:null, ext_count:null, task_count:null, task_fail_count:null, fanout_batches:null, named:null, latched:true, ts:$ts}')
       _delegation_log_row "$row"
     ) 2>/dev/null
   fi
@@ -759,11 +765,19 @@ fi
 # subshell with stderr discarded, nothing in it writes to this script's own stdout, and no
 # command's exit status here is checked or allowed to change the exit path below.
 #
-# No file contents, no paths: session id, six integer/boolean fields, and a timestamp -- matching
-# the same discipline the mandates above already apply to $paths before it ever reaches a message.
-# task_fail_count carries a count, same as task_count, never which agent or what it was asked --
-# that stays out of this log for the same reason prompts stay out of the replay log
+# No file contents, no paths: session id, seven integer/boolean fields, and a timestamp --
+# matching the same discipline the mandates above already apply to $paths before it ever reaches
+# a message. task_fail_count carries a count, same as task_count, never which agent or what it
+# was asked -- that stays out of this log for the same reason prompts stay out of the replay log
 # (dispatch-counter.sh's own header makes the same call for the same reason).
+#
+# fanout_batches: already computed above at $fanout_batches, next to task_count -- passed straight
+# into the same jq invocation below, no second process. This is the field the breadth mandate
+# itself now decides on ($fanout_batches, not $task_count -- see the "Satisfied by $fanout_batches"
+# comment above); logging it is what lets the drift analyser's primary metric ever be reconciled
+# against what the live hook actually gates on again. See the latched-row comment above (the
+# other place this same field is written) for what missing vs. null vs. 0 each mean here -- a
+# row this evaluated branch writes always carries a real integer, never null.
 #
 # Opt-out: VSTACK_NO_DELEGATION_LOG=1, same shape as VSTACK_NO_MANDATE.
 # Destination override: VSTACK_DELEGATION_LOG, for tests/delegation-drift.sh's own fixtures and
@@ -780,8 +794,8 @@ if [ "${VSTACK_NO_DELEGATION_LOG:-0}" != "1" ]; then
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
     row=$("$JQ" -cn --arg sid "$sid" --argjson ckpt "${ckpt:-0}" --argjson dc "$dir_count" \
       --argjson ec "$ext_count" --argjson tc "$task_count" --argjson tfc "$task_fail_count" \
-      --argjson named "$named" --arg ts "$ts" \
-      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, task_fail_count:$tfc, named:$named, latched:false, ts:$ts}')
+      --argjson fb "$fanout_batches" --argjson named "$named" --arg ts "$ts" \
+      '{session_id:$sid, checkpoint_index:$ckpt, dir_count:$dc, ext_count:$ec, task_count:$tc, task_fail_count:$tfc, fanout_batches:$fb, named:$named, latched:false, ts:$ts}')
     _delegation_log_row "$row"
   ) 2>/dev/null
 fi
