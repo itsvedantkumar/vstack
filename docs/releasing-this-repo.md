@@ -14,6 +14,7 @@ releases, each time by running something and reading why it was red.
 |---|---|---|
 | `.claude/verify.sh` check 24 | **skip**, with the reason named | there is no tagged payload to compare the declared version against, so the check says so rather than inventing a verdict |
 | `tests/gate-falsifiability.sh` | **refuses to start** on a red gate; its own row 24 skips when the clone has no tags | a suite that mutates the tree cannot tell its own damage from damage that was already there |
+| `tests/falsify-parallel.sh` | **refuses to start** on a dirty tree | it clones, so it would test HEAD; a verdict about a different tree than the one you are looking at is not evidence |
 | `tests/install-matrix.sh`, `doctor-stranger` lane | **hard fail** | `bin/doctor` asks origin whether the declared tag is fetchable. Pre-tag it is not, and an install URL built from it really does 404. That is true, so it fails |
 
 The install matrix being red here is not a bug to route around. It is the same measurement that

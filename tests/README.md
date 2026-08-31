@@ -2,8 +2,11 @@
 
 Two suites, with opposite constraints.
 
-`gate-falsifiability.sh` runs offline in about 30 seconds and CI runs it on every push. It
-proves `.claude/verify.sh` can actually fail.
+`gate-falsifiability.sh` runs offline and CI runs it on every push. It proves
+`.claude/verify.sh` can actually fail. It is also the slowest thing in this repository: every row
+breaks one file, runs the WHOLE gate to see which check goes red, and restores, so the cost is
+O(rows x checks). At 94 rows and a ~84s gate that is over two hours serially. Run
+`falsify-parallel.sh` instead, which is the same sweep across isolated clones in about 20 minutes.
 
 `auto-trigger.sh` needs an authenticated CLI and spends real tokens, so it runs by hand. It
 proves skills still fire on the situation.
@@ -29,6 +32,24 @@ Make the mutation surgical. One that trips four checks proves far less than one 
 intended check, and a mutation that lands somewhere unreachable proves nothing at all while
 looking like it passed — appending `exit 3` to the end of `install.sh` did exactly that, because
 the dry-run path exits before reaching it.
+
+## falsify-parallel.sh
+
+`gate-falsifiability.sh` scoped to a subset of rows via `VSTACK_FALSIFY_ROWS`, run across N
+isolated clones at once. CI has sharded the sweep this way since v1.55.0, where it cut `verify`
+from 82-98 minutes to 17m49s; this is the same round-robin split on your machine.
+
+The clones are not an optimisation. Every row mutates a tracked file in place and restores it, so
+two sweeps sharing one tree would each read the other's mutation as a concurrent edit, and the
+suite's restore-integrity guard would refuse to restore. It is right to refuse: it cannot tell
+whose bytes it is about to overwrite.
+
+Two refusals of its own, both of which exist because a green that measured nothing is worse than
+a red. It refuses to run against a dirty tree, because a clone carries HEAD and the verdict would
+silently be about a different tree than the one you are looking at. And it reconciles: the row ids
+the shards themselves printed are diffed against the derived list, so N shards each reporting
+green over a partial list fails instead of passing. That reconciliation reads the shards' output,
+not the plan that produced it, because a plan compared against itself agrees forever.
 
 ## inventory-fixture.sh
 
