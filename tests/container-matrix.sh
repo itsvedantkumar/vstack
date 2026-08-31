@@ -539,7 +539,12 @@ if [ -x "$MSH" ] && command -v jq >/dev/null 2>&1; then
     #
     # So: every key must be declared here, and adding one is a deliberate edit. That half is
     # unchanged in spirit.
-    DLOG_ALLOWED_KEYS='checkpoint_index dir_count ext_count latched named session_id task_count task_fail_count ts'
+    # fanout_batches added in 1.57.0, deliberately and not by pasting in the observed key set:
+    # it is an integer count of same-message dispatch batches (null on a latched row), which puts
+    # it in the same privacy class as task_count -- a number, never a path, an argument or a
+    # prompt. The value-level check below governs it independently of this line, as it does every
+    # other declared key.
+    DLOG_ALLOWED_KEYS='checkpoint_index dir_count ext_count fanout_batches latched named session_id task_count task_fail_count ts'
     undeclared=$(printf '%s' "$line" \
       | jq -r --arg a "$DLOG_ALLOWED_KEYS" '($a|split(" ")) as $ok | [keys[] | . as $k | select(($ok|index($k))==null)] | join(",")' 2>/dev/null)
     # The property this test actually exists for, asserted on VALUES rather than on three literal
