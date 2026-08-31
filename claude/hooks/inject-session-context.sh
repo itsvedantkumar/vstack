@@ -202,8 +202,10 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
   .claude/verify.sh the Stop hook runs). That gate stale -> maintain-verification-skill.
 - work runs unattended/overnight, or you are told someone reviews it later -> start
   show-me-your-work BEFORE doing the work, not after.
-- any feature or change request -> run the chain: brainstorming, then writing-plans, then
-  test-driven-development, then executing-plans.
+- feature/change request, shape undecided -> brainstorming.
+- shape agreed, nothing written down -> writing-plans.
+- plan written, no test yet -> test-driven-development.
+- failing test exists against plan -> executing-plans.
 - you were corrected, or found a workflow worth keeping -> reflect.
 - PRINCIPLES (load the one that matches, then apply it): before claiming done ->
   principle-prove-it-works. Debugging or adding a try/except guard ->
@@ -218,19 +220,14 @@ EOF
 
 # Skills profile: keep only the SKILLS block. Everything above it is operating policy.
 #
-# One line inside the block was operating policy too, and it survived the cut. "any feature or
-# change request -> run the chain" mandates four skills and a written plan for every change,
-# including a one-line fix. That is a considered choice on the machine this was written for. It
-# is not a choice a stranger made by installing a skill pack, and the README's promise that this
-# lane imposes no policy was untrue while that line shipped.
-#
-# The chain is still described, because it is genuinely good for work that warrants it. It is
-# described as a judgement rather than an instruction.
+# The chain used to be one mandate line ("run the chain: brainstorming, then writing-plans,
+# then...") that this branch rewrote into softer, non-mandate prose so a bare skill-pack
+# install carried no policy. It is now four situational lines in the source block itself --
+# each fires on its own precondition, not a forced sequence -- so no profile-specific rewrite
+# is needed; the skills-only pack gets the same judgement-not-instruction framing as everyone
+# else for free.
 if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
   MSG=$(printf '%s\n' "$MSG" | sed -n '/^SKILLS/,$p')
-  MSG=$(printf '%s\n' "$MSG" | sed \
-    -e 's|^- any feature or change request -> run the chain: brainstorming, then writing-plans, then$|- a feature worth planning (multi-step, unclear shape, hard to undo) -> brainstorming, then|' \
-    -e 's|^  test-driven-development, then executing-plans\.$|  writing-plans, then test-driven-development, then executing-plans. Skip it for small,\n  obvious changes — the chain is for work where getting the shape wrong is expensive.|')
   emit "$event" "$MSG"
   exit 0
 fi
