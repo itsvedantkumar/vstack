@@ -161,7 +161,21 @@ elif ! git cat-file -e "$stated_head^{commit}" 2>/dev/null; then
   # would be the tagless-checkout defect check 24 already learned once.
   skipc "derived_at.head" "$stated_head is not present in this checkout (shallow clone?), so its ancestry cannot be checked"
 elif git merge-base --is-ancestor "$stated_head" HEAD 2>/dev/null; then
-  pass "derived_at.head is an ancestor of HEAD ($(printf '%.12s' "$stated_head"), $(git rev-list --count "$stated_head..HEAD" 2>/dev/null) commit(s) ago)"
+  # Ancestry is necessary and not sufficient. head claims the digest above was computed FROM that
+  # commit, so if any payload file changed between it and HEAD, the claim is false however
+  # ancestral the commit is: recomputing the digest at head would give a different answer. That
+  # shipped here on 2026-08-31 -- head named a commit taken BEFORE the payload edit whose bytes
+  # the recorded digest describes, and the ancestry test passed it without complaint.
+  #
+  # This does not recompute the digest at that commit, and cannot: the recipe hashes
+  # untracked-but-not-ignored files too, which do not exist in a commit. It asserts the weaker
+  # thing that is actually checkable, and which is false in exactly the case above.
+  _hd_moved=$(git diff --name-only "$stated_head" HEAD -- $PAYLOAD_PATHS 2>/dev/null)
+  if [ -n "$_hd_moved" ]; then
+    fail "derived_at.head" "derived_at.head is $(printf '%.12s' "$stated_head") and is an ancestor of HEAD, but payload has changed since it: $(printf '%s' "$_hd_moved" | tr '\n' ' ') -- so payload_digest was not computed from that commit, whatever this field says. Re-point head at the commit whose payload the digest describes"
+  else
+    pass "derived_at.head is an ancestor of HEAD with no payload change since ($(printf '%.12s' "$stated_head"), $(git rev-list --count "$stated_head..HEAD" 2>/dev/null) commit(s) ago)"
+  fi
 else
   fail "derived_at.head" "derived_at.head is $stated_head, which exists but is NOT an ancestor of HEAD -- the snapshot was taken on a commit this branch does not descend from"
 fi
