@@ -112,11 +112,31 @@
 #    its own lock from verify-gate.sh: two copies of the same fix are two chances for them to
 #    drift. Same cap: append, then one `stat` byte-size check; only once >2MB does it pay to
 #    rewrite, keeping the last 5000 lines. This schema is wider than the delegation log's five
-#    scalar fields (nine fields, two of them free-text up to a few hundred bytes each for
-#    description), so 5000 rows costs more here -- measured against this file's own real output
-#    below, budget roughly 1-1.5MB post-rotation, sawtooth-bounded at 2MB same as the delegation
-#    log. A busy session dispatching 50 subagents in an hour adds on the order of 10-15KB to this
-#    file; the 2MB cap is reached by volume across many sessions over weeks, not by one session.
+#    scalar fields (thirteen fields now, after decision 6 added cwd/isolation/run_in_background/
+#    derived_prev_dispatch_gap_s -- two of the original nine, description and prompt, are still
+#    free-text up to a few hundred bytes each as byte counts, not verbatim), so 5000 rows costs
+#    more here. Measured directly against this hook's own real output (not estimated): a minimal
+#    row (short cwd, isolation/run_in_background unset by the caller) went from 223B to 313B; a
+#    realistic row (worktree-length cwd, isolation set) went from 251B to 394B -- both roughly
+#    +90 to +143B (+40-57%) over the pre-decision-6 schema. At those per-row sizes, 5000 rows lands
+#    around 1.5-1.9MB post-rotation, not the 1-1.5MB this line stated before decision 6 measured
+#    it -- that older number was prose describing a schema this file no longer writes, left
+#    uncorrected in the same diff that changed the schema, which is the exact defect shape this
+#    repo's own gates exist to catch elsewhere; corrected here once measured, not before. Still
+#    sawtooth-bounded at 2MB same as the delegation log -- the trigger check and the trim both run
+#    unconditionally on the current row width, so the file cannot grow past 2MB regardless of
+#    schema -- but the SLACK between a just-rotated file and the next retrigger shrank from
+#    roughly 0.5-1MB to roughly 0.1-0.5MB, meaning rotation now fires on a shorter dispatch-count
+#    interval than before, not less-bounded, just more frequent. That slack is not free headroom
+#    for the next field: the sampled size check only runs every 20th dispatch (see below), and 19
+#    unchecked dispatches at this schema's ~313-394B/row already add ~6-7.5KB between checks: if a
+#    future addition ever left post-rotation size within that ~7.5KB of 2MB, rotation would fire on
+#    essentially every sampled check instead of being the rare event this comment still describes
+#    today -- worth re-measuring before adding another wide field, not worth pre-emptively
+#    tightening the sampling for a case that has not happened yet. A busy session dispatching 50
+#    subagents in an hour adds on the order of 15-20KB to this file at the current schema (was
+#    10-15KB before decision 6); the 2MB cap is still reached by volume across many sessions over
+#    weeks, not by one session.
 #
 # 5. ESCAPE HATCH. VSTACK_NO_REPLAY_LOG=1 disables the replay row alone -- the statusline counter
 #    above keeps working, matching the existing split between VSTACK_NO_MANDATE (disables
@@ -131,6 +151,76 @@
 #    this hook sets VSTACK_REPLAY_LOG explicitly and exports it, per this repo's own dogfooded
 #    lesson that `VAR=x printf ... | bash hook` scopes the var to printf alone and leaks fixture
 #    rows into the real file.
+#
+# 6. PARALLELISM/ISOLATION FIELDS -- what this log could NOT answer before this addition: "fan
+#    work out in parallel" and "isolate each agent's workspace" are policy claims this repo makes
+#    elsewhere, and nothing in the schema above could confirm or refute either one after the fact.
+#    Checked against this CLI build's own source (2.1.251, same `strings`-on-the-installed-binary
+#    method decision 2 above already uses, not assumed):
+#      - cwd IS a field on every hook payload (confirmed in the shared base hook-input zod schema,
+#        object `Ee`: `session_id, transcript_path, cwd, prompt_id?, permission_mode?, agent_id?,
+#        agent_type?, effort?`, which every hook event -- including PostToolUse -- intersects).
+#        It is the CALLING context's own working directory at the moment the Task/Agent tool call
+#        resolved, not the new subagent's isolated worktree path (that worktree is scoped to the
+#        subagent's own run and this hook never runs inside it) -- so a value here answers "was
+#        the DISPATCHER itself already inside an isolated worktree", not "was the callee isolated".
+#      - tool_input.isolation and tool_input.run_in_background ARE real parameters on the
+#        Task/Agent tool schema (confirmed via the same binary: the tool's own usage-note strings
+#        document `isolation: "worktree"` / `isolation: "remote"` and `run_in_background: true`
+#        literally, e.g. "With `isolation: "worktree"`, the worktree is automatically cleaned up
+#        if the agent makes no changes" and "Subagents run in the background by default"). Both
+#        are OPTIONAL call arguments: present in tool_input only when the calling model's turn
+#        included them explicitly, absent (not "false"/"none") when it did not, regardless of
+#        whatever runtime default then applies. run_in_background is a real boolean that can
+#        legitimately be `false`, so it is read with the same `has()` guard decision 2's `named`
+#        precedent established for this exact reason -- `// null` would silently relabel a real
+#        `false` as unset.
+#      - NOTHING on the PostToolUse payload identifies which assistant MESSAGE a dispatch's tool
+#        call belonged to -- confirmed absent from the PostToolUse zod schema itself (only
+#        hook_event_name/tool_name/tool_input/tool_response/tool_use_id/duration_ms beyond the
+#        shared base fields above). The one thing in this build that DOES carry batch membership
+#        is a *different*, separate hook event, PostToolBatch (`tool_calls: [...]`, one row per
+#        resolved batch, documented in the same schema block as "PostToolUse fires per-tool and
+#        may run concurrently for parallel tool calls; PostToolBatch fires exactly once with the
+#        full batch") -- but this hook's own matcher is PostToolUse only, and rewiring which event
+#        fires it is hooks.json's call, not this file's (same boundary decision 2 already draws
+#        for PostToolUseFailure). prompt_id (base schema, optional) was considered and rejected as
+#        a stand-in: its own doc string says it correlates "a user prompt with all subsequent
+#        events until the NEXT prompt" -- coarser than one assistant message by construction, so
+#        two dispatches sharing a prompt_id can just as easily be two turns of a serial loop
+#        inside one long agentic response as two calls in one parallel batch. Logging it anyway
+#        would invite exactly the "derived signal mistaken for observed" failure this decision
+#        exists to avoid, for a field that would look authoritative and is not; left out.
+#      - message_id (the assistant message's own id -- `.message.id` on a transcript's
+#        `type:"assistant"` entries, e.g. "msg_011..."; the field that WOULD group tool_use
+#        blocks into the batch they actually streamed in as one message) is real and present, but
+#        only in the TRANSCRIPT, confirmed directly against a live transcript file, not the hook
+#        payload -- and independently re-confirmed absent from the hook payload by reading the
+#        exact PostToolUse object-literal construction in the installed binary a second time
+#        (`{...Ea(session,cwd,mode,ctx),hook_event_name:"PostToolUse",tool_name,tool_input,
+#        tool_response,tool_use_id,duration_ms}` -- no message field, no id derived from one,
+#        anywhere in that literal or in Ea()'s own return). Reading transcript_path to recover it
+#        was considered and rejected: this hook's own header opens on "never touches the
+#        transcript" as its O(1) cost design, and a transcript can run to tens of thousands of
+#        lines -- paying that cost on every single dispatch to recover one field is a materially
+#        different hook than the one being extended here, not a schema tweak. This log cannot
+#        answer "was this dispatch part of a parallel batch" today, and derived_prev_dispatch_gap_s
+#        below is a real but limited proxy, not a fix for that gap.
+#    derived_prev_dispatch_gap_s fills the resulting gap the only honest way available: the whole
+#    integer seconds between this dispatch's own jq-computed `now` and the previous dispatch's,
+#    for the SAME session_id, tracked in a sidecar file next to $cnt_file ($cnt_file.last_ts,
+#    read-then-overwrite, no separate lock -- a torn read here costs one dispatch a null/stale
+#    gap, never a wrong dispatch_index, so it rides on the $cnt_file lock's coverage rather than
+#    earning its own). Name says "derived" on purpose. What it CAN suggest: a very small gap
+#    between two consecutive dispatches in one session is consistent with both having been issued
+#    in the same parallel tool-call batch (their PostToolUse hooks tend to land close together).
+#    What it CANNOT do: prove concurrency (a tight serial loop with no model "thinking" gap
+#    produces the same small number), identify which batch either dispatch was in, or even
+#    guarantee a LARGE gap rules batching out (PostToolUse fires on RESOLUTION, so two truly
+#    parallel dispatches where one subagent runs for minutes longer than its sibling will show a
+#    large gap despite having launched together). It is a temporal correlate, read the same
+#    causal-limit way tests/delegation-drift.sh's own header insists on for its correlational
+#    metric -- never treated as a batch identifier because it structurally cannot be one.
 set -uo pipefail
 
 [ "${VSTACK_NO_DISPATCH_COUNT:-0}" = "1" ] && exit 0
@@ -178,14 +268,15 @@ input=$(cat 2>/dev/null || true)
 # commas, colons and quotes that would otherwise collide with a naive `read` split; jq's @tsv
 # escapes only tab/newline/CR/backslash, none of which JSON's own tojson output produces, so the
 # round trip through `read` below is exact.
-jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' '
-  (.tool_name // "") as $tn
+jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' --arg gph '@@VSTACK_PREV_GAP@@' '
+  (now) as $nowval
+  | (.tool_name // "") as $tn
   | (.session_id // "") as $sid
   | (
       if ($tn == "Agent" or $tn == "Task") then
         ((.tool_input // {}) as $ti
          | {
-             ts: (now | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
+             ts: ($nowval | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
              session_id: (if $sid == "" then null else $sid end),
              dispatch_index: $ph,
              tool_name: $tn,
@@ -194,14 +285,19 @@ jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' '
              prompt_bytes: (if ($ti | has("prompt")) then ($ti.prompt // "" | length) else null end),
              result_bytes: (if has("tool_response") then (.tool_response | tostring | length) else null end),
              duration_ms: (.duration_ms // null),
-             tool_use_id: (.tool_use_id // null)
+             tool_use_id: (.tool_use_id // null),
+             cwd: (.cwd // null),
+             isolation: ($ti.isolation // null),
+             run_in_background: (if ($ti | has("run_in_background")) then $ti.run_in_background else null end),
+             derived_prev_dispatch_gap_s: $gph
            }
          | tojson)
       else "" end
     ) as $row
-  | [$tn, $sid, $row] | @tsv
+  | [$tn, $sid, $row, ($nowval | floor | tostring)] | @tsv
 ' 2>/dev/null)
-IFS=$'\t' read -r tool_name sid encoded_row <<< "$jq_out"
+IFS=$'\t' read -r tool_name sid encoded_row now_epoch <<< "$jq_out"
+case "$now_epoch" in ''|*[!0-9]*) now_epoch=0 ;; esac
 
 # Defense in depth: the settings.json matcher is what actually restricts which PostToolUse
 # events reach this script, but a hook that trusts its own wiring to be the only thing standing
@@ -264,6 +360,22 @@ printf '%s' "$cnt" > "$cnt_file" 2>/dev/null
 if [ "${VSTACK_NO_REPLAY_LOG:-0}" != "1" ] && [ -n "$encoded_row" ]; then
 (
   row="${encoded_row/\"@@VSTACK_DISPATCH_IDX@@\"/$cnt}"
+  # derived_prev_dispatch_gap_s (see header decision 6 for exactly what this can and cannot show):
+  # read this session's own last-dispatch epoch second from a sidecar next to $cnt_file, diff
+  # against $now_epoch (already computed above, in the same jq call that built the row -- no new
+  # fork), then overwrite the sidecar for the next dispatch to read. `read` against a redirection
+  # is a bash builtin, not a fork; only the eventual append/rotation below pays process cost.
+  ts_file="$cnt_file.last_ts"
+  prev_epoch=""
+  [ -r "$ts_file" ] && IFS= read -r prev_epoch < "$ts_file" 2>/dev/null
+  case "$prev_epoch" in ''|*[!0-9]*) prev_epoch="" ;; esac
+  if [ -n "$prev_epoch" ]; then
+    gap_val=$((now_epoch - prev_epoch))
+  else
+    gap_val="null"
+  fi
+  printf '%s' "$now_epoch" > "$ts_file" 2>/dev/null
+  row="${row/\"@@VSTACK_PREV_GAP@@\"/$gap_val}"
   log_file="${VSTACK_REPLAY_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl}"
   log_dir_="${log_file%/*}"
   [ "$log_dir_" = "$log_file" ] && log_dir_="."

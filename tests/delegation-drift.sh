@@ -124,6 +124,13 @@ sweep_ddstate_(){
   # check on the wrong dispatch, a false FAIL against unchanged code.
   rm -f "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc13 2>/dev/null
   rm -rf "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc13.lock 2>/dev/null
+  # PROOF 14/15's own dispatch-counter state, same reason and same shape as PROOF 13's sweep
+  # above -- including the derived_prev_dispatch_gap_s sidecar ($cnt_file.last_ts), which is new
+  # state this file's counter did not used to write; an unswept sidecar from a prior manual run
+  # would hand PROOF 15 a stale prev_epoch and either a bogus gap or a false negative.
+  rm -f "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc1[45] 2>/dev/null
+  rm -f "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc1[45].last_ts 2>/dev/null
+  rm -rf "${TMPDIR:-/tmp}"/vstack-dispatch-count-ddproofdc1[45].lock 2>/dev/null
 }
 sweep_ddstate_
 trap 'sweep_ddstate_; rm -rf "$WORK"' EXIT
@@ -386,6 +393,66 @@ if [ -n "$sz_before13" ] && [ "$sz_before13" -gt 2097152 ] && [ -n "$lines_after
 else
   bad "PROOF 13: dispatch-counter.sh's own replay-log rotation engages past its own ~2MB cap (sampled every 20th dispatch), drops the oldest rows, and keeps the newest write" \
       "size_before=$sz_before13 lines_after=$lines_after13 first_pad_seq=[$first_pad13] last_tool_use_id=[$last_tid13]"
+fi
+
+# --- PROOF 14: dispatch-counter.sh writes real cwd/isolation/run_in_background, not synthesized --
+# Drives $DC_HOOK directly (real hook, real jq program), not a hand-written fixture row -- same
+# discipline PROOF 13 already applies to this file. Two payloads, same session, distinct cwd:
+#   dispatch A sets isolation:"worktree" and run_in_background:true explicitly.
+#   dispatch B omits isolation (must land as JSON null, not the string "worktree" left over from
+#     A) and sets run_in_background:false explicitly -- the boolean `false` case decision 6 in
+#     dispatch-counter.sh's own header calls out by name, because jq's `//` operator would
+#     silently relabel a real `false` as absent the same way PROOF 1's `named` field guards
+#     against upstream; this proof is what catches a regression back to that operator.
+sid14="ddproofdc14"
+replay14="$WORK/replay14.jsonl"
+cnt_file14="${TMPDIR:-/tmp}/vstack-dispatch-count-$sid14"
+rm -rf "$cnt_file14" "$cnt_file14.lock" "$cnt_file14.last_ts" "$replay14" 2>/dev/null
+printf '{"hook_event_name":"PostToolUse","tool_name":"Task","session_id":"%s","cwd":"/tmp/dd-proof14-cwd-a","tool_input":{"subagent_type":"tester","description":"p14a","prompt":"x","isolation":"worktree","run_in_background":true},"tool_response":{"success":true},"duration_ms":5,"tool_use_id":"proof14-a"}' "$sid14" \
+  | VSTACK_REPLAY_LOG="$replay14" bash "$DC_HOOK" >/dev/null 2>&1
+printf '{"hook_event_name":"PostToolUse","tool_name":"Task","session_id":"%s","cwd":"/tmp/dd-proof14-cwd-b","tool_input":{"subagent_type":"tester","description":"p14b","prompt":"y","run_in_background":false},"tool_response":{"success":true},"duration_ms":5,"tool_use_id":"proof14-b"}' "$sid14" \
+  | VSTACK_REPLAY_LOG="$replay14" bash "$DC_HOOK" >/dev/null 2>&1
+rowA14=$(sed -n '1p' "$replay14" 2>/dev/null)
+rowB14=$(sed -n '2p' "$replay14" 2>/dev/null)
+cwdA14=$(printf '%s' "$rowA14" | jq -r '.cwd // empty' 2>/dev/null)
+isoA14=$(printf '%s' "$rowA14" | jq -r '.isolation // empty' 2>/dev/null)
+ribA14=$(printf '%s' "$rowA14" | jq -r '.run_in_background' 2>/dev/null)
+cwdB14=$(printf '%s' "$rowB14" | jq -r '.cwd // empty' 2>/dev/null)
+isoB14=$(printf '%s' "$rowB14" | jq -r '.isolation' 2>/dev/null)
+ribB14=$(printf '%s' "$rowB14" | jq -r '.run_in_background' 2>/dev/null)
+rm -rf "$cnt_file14" "$cnt_file14.lock" "$cnt_file14.last_ts" 2>/dev/null
+if [ "$cwdA14" = "/tmp/dd-proof14-cwd-a" ] && [ "$isoA14" = "worktree" ] && [ "$ribA14" = "true" ] \
+   && [ "$cwdB14" = "/tmp/dd-proof14-cwd-b" ] && [ "$isoB14" = "null" ] && [ "$ribB14" = "false" ]; then
+  ok "PROOF 14: dispatch-counter.sh writes real cwd/isolation/run_in_background per dispatch, and a real false stays false (not null)"
+else
+  bad "PROOF 14: dispatch-counter.sh writes real cwd/isolation/run_in_background per dispatch, and a real false stays false (not null)" \
+      "A: cwd=[$cwdA14] isolation=[$isoA14] run_in_background=[$ribA14]; B: cwd=[$cwdB14] isolation=[$isoB14] run_in_background=[$ribB14]"
+fi
+
+# --- PROOF 15: derived_prev_dispatch_gap_s is null on a session's first dispatch, and on its ------
+# second dispatch reflects the real wall-clock gap this hook's own jq call measured -- not a
+# hand-picked constant. A controlled 2s sleep between two real dispatches to the same session
+# must land as a small positive integer near 2, generously bounded [1,5] against scheduler jitter
+# on a loaded CI box (this repo's own tests/hook-latency.sh documents load swings up to ~5x on
+# this exact machine) rather than an exact-equality assertion that would be flaky by construction.
+sid15="ddproofdc15"
+replay15="$WORK/replay15.jsonl"
+cnt_file15="${TMPDIR:-/tmp}/vstack-dispatch-count-$sid15"
+rm -rf "$cnt_file15" "$cnt_file15.lock" "$cnt_file15.last_ts" "$replay15" 2>/dev/null
+printf '{"hook_event_name":"PostToolUse","tool_name":"Task","session_id":"%s","tool_input":{"subagent_type":"tester","description":"p15a","prompt":"x"},"tool_response":{"success":true},"duration_ms":5,"tool_use_id":"proof15-a"}' "$sid15" \
+  | VSTACK_REPLAY_LOG="$replay15" bash "$DC_HOOK" >/dev/null 2>&1
+sleep 2
+printf '{"hook_event_name":"PostToolUse","tool_name":"Task","session_id":"%s","tool_input":{"subagent_type":"tester","description":"p15b","prompt":"y"},"tool_response":{"success":true},"duration_ms":5,"tool_use_id":"proof15-b"}' "$sid15" \
+  | VSTACK_REPLAY_LOG="$replay15" bash "$DC_HOOK" >/dev/null 2>&1
+gapA15=$(sed -n '1p' "$replay15" 2>/dev/null | jq -r '.derived_prev_dispatch_gap_s' 2>/dev/null)
+gapB15=$(sed -n '2p' "$replay15" 2>/dev/null | jq -r '.derived_prev_dispatch_gap_s' 2>/dev/null)
+rm -rf "$cnt_file15" "$cnt_file15.lock" "$cnt_file15.last_ts" 2>/dev/null
+case "$gapB15" in ''|*[!0-9]*) gapB15_numeric=0 ;; *) gapB15_numeric=$gapB15 ;; esac
+if [ "$gapA15" = "null" ] && [ "$gapB15_numeric" -ge 1 ] && [ "$gapB15_numeric" -le 5 ]; then
+  ok "PROOF 15: derived_prev_dispatch_gap_s is null on a session's first dispatch and a real ~2s gap on its second"
+else
+  bad "PROOF 15: derived_prev_dispatch_gap_s is null on a session's first dispatch and a real ~2s gap on its second" \
+      "first-dispatch gap=[$gapA15] (want null), second-dispatch gap=[$gapB15] (want integer in [1,5])"
 fi
 
 printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
