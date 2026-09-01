@@ -4218,7 +4218,7 @@ fi
 # the first draft of this check said so, and both were right.
 #
 # Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
-# function of the gate's own size: adding a check makes all 103 rows slower. So the recorded
+# function of the gate's own size: adding a check makes all 105 rows slower. So the recorded
 # measurement carries the check count it was taken at, and the model scales it by the gate size
 # it finds right here. Adding checks to this file raises the floor it derives, automatically.
 #
@@ -4485,6 +4485,59 @@ if [ -z "$c61_errs" ]; then
   ok "install trust covers what the gate executes ($c61_tot entries here; scan proven in both directions)"
 else
   bad "install trust covers what the gate executes" "$(printf '%b' "$c61_errs")"
+fi
+
+# --- 62. the pre-tag carve-out names one finding and does not leak into the tool ---------------
+# On 2026-09-01 the v1.61.0 tag was created and destroyed twice in under an hour. bin/doctor's
+# "declared release is fetchable" does a live ls-remote against origin -- the right question of
+# the right machine, and itself the fix for a catalogued defect. But verify.yml triggers on the
+# COMMIT that declares the version, and the tag is a separate ref pushed seconds later, so
+# install-matrix and container-matrix run inside a window where the manifests say v1.N.0 and
+# origin does not yet carry it. Their red was true about that instant and said nothing about the
+# candidate; resolve read it as a decision and cleanup-on-failed-gate deleted the tag whose
+# absence was the finding. require-checks-green.sh's staleness carve-out did not fire and was
+# right not to: it excuses a run that STARTED before the candidate, and this one started after.
+#
+# tests/pretag-findings.sh makes that one finding a note in those two harnesses. An exemption is
+# only as good as what holds it to account, so this asserts four things: the list is exactly one
+# entry, both harnesses actually read it, and -- the load-bearing one -- bin/doctor still reports
+# the same label as a hard failure. A carve-out scoped to two test lanes that quietly became a
+# carve-out in the tool would remove the finding for every user, which is the opposite of the fix.
+c62_f="tests/pretag-findings.sh"
+if [ -f "$c62_f" ]; then
+  c62_errs=""
+  c62_n=$(grep -c '^PRETAG_ALLOWED_FINDING=' "$c62_f" || true)
+  [ "$c62_n" = 1 ] \
+    || c62_errs="$c62_errs\n$c62_f defines $c62_n PRETAG_ALLOWED_FINDING assignment(s); the list is one entry by design"
+  c62_lbl=$(sed -n "s/^PRETAG_ALLOWED_FINDING='\(.*\)'$/\1/p" "$c62_f")
+  [ -n "$c62_lbl" ] \
+    || c62_errs="$c62_errs\n$c62_f: could not read the finding label; an empty carve-out silently excludes nothing and every lane fails for a reason nobody wrote down"
+
+  # Both harnesses read the shared file rather than spelling the label themselves. Two copies is
+  # how tests/mandate-cases.sh's predecessor drifted, in this repository, already once.
+  grep -q 'pretag-findings\.sh' tests/install-matrix.sh \
+    || c62_errs="$c62_errs\ntests/install-matrix.sh does not read $c62_f"
+  grep -q 'PRETAG_ALLOWED_FINDING' tests/install-matrix.sh \
+    || c62_errs="$c62_errs\ntests/install-matrix.sh reads $c62_f but never uses the label"
+  grep -q 'pretag-findings\.sh' tests/container-matrix.sh \
+    || c62_errs="$c62_errs\ntests/container-matrix.sh does not read $c62_f"
+  grep -q 'PRETAG_ALLOWED_FINDING' tests/container-matrix.sh \
+    || c62_errs="$c62_errs\ntests/container-matrix.sh reads $c62_f but never uses the label"
+
+  # The tool keeps the finding. Derived from the file's own value, so a typo in either place is a
+  # failure rather than two literals agreeing with nothing.
+  if [ -n "$c62_lbl" ]; then
+    grep -Fq "bad \"$c62_lbl\"" bin/doctor \
+      || c62_errs="$c62_errs\nbin/doctor no longer reports \"$c62_lbl\" as a hard failure; the carve-out is scoped to two test lanes and must not reach a user's doctor"
+  fi
+
+  if [ -z "$c62_errs" ]; then
+    ok "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor (\"$c62_lbl\")"
+  else
+    bad "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" "$(printf '%b' "$c62_errs")"
+  fi
+else
+  bad "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" "$c62_f is missing, so two harnesses are carving out a finding with nothing naming which one"
 fi
 
 # Accounting. Every declared check must have reported either a result or a skip. A check

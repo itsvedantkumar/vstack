@@ -187,8 +187,19 @@ DOCTOR="$HOME/.config/agents/bin/doctor"
 if [ -x "$DOCTOR" ]; then
   "$DOCTOR" > /tmp/doctor.out 2>&1
   rc=$?
+  # The pre-tag window. This harness runs on the commit that declares the version, before the
+  # tag exists, so doctor's live origin query for it is red about this instant and silent about
+  # the candidate. Shared with tests/install-matrix.sh through tests/pretag-findings.sh; check 62
+  # of .claude/verify.sh fails if either stops reading it or if the list grows.
+  _pt_file="/work/repo/tests/pretag-findings.sh"
+  if [ -f "$_pt_file" ]; then . "$_pt_file"; else PRETAG_ALLOWED_FINDING=""; fi
+  _dr_x=$(grep '✖' /tmp/doctor.out | grep -vF "$PRETAG_ALLOWED_FINDING")
   if [ "$rc" -eq 0 ]; then res PASS "2-doctor-exit0" "doctor exit=$rc"
-  else res FAIL "2-doctor-exit0" "doctor exit=$rc; $(grep '✖' /tmp/doctor.out | tr '\n' ';')"; fi
+  elif [ -z "$_pt_file" ] || [ ! -f "$_pt_file" ]; then
+    res FAIL "2-doctor-exit0" "doctor exit=$rc and $_pt_file is missing, so the pre-tag carve-out cannot be applied; $(grep '✖' /tmp/doctor.out | tr '\n' ';')"
+  elif [ -z "$_dr_x" ]; then
+    res PASS "2-doctor-exit0" "doctor exit=$rc, only finding is '$PRETAG_ALLOWED_FINDING', a note in a commit-triggered lane"
+  else res FAIL "2-doctor-exit0" "doctor exit=$rc; $(printf '%s' "$_dr_x" | tr '\n' ';')"; fi
 else
   res FAIL "2-doctor-exit0" "install did not place an executable $DOCTOR"
 fi

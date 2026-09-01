@@ -27,6 +27,31 @@ one entry, and this repository must record `install.sh` and `overlay.sh` by name
 lane is the load-bearing one: without it, lane 2 passes on a writer that records every `.sh` it
 can find, which is a different boundary wearing the same output.
 
+### The tag this release destroyed, twice
+
+`bin/doctor`'s "declared release is fetchable" does a live `git ls-remote` for the version the
+manifests declare. `verify.yml` triggers on the commit that declares it, and the tag is a separate
+ref pushed seconds later, so `install-matrix` and `container-matrix` run inside a window where the
+manifests already say v1.61.0 and origin does not yet carry the tag. On 2026-09-01 `install-alpine`
+started three seconds after the tag push, re-queried origin later still, and went red. `resolve`
+read `conclusion=failure`, called the gate decided, and `cleanup-on-failed-gate` deleted the tag
+whose absence was the entire finding. Re-pushing the same tag object destroyed it a second time,
+because the old conclusions still stood.
+
+`require-checks-green.sh`'s staleness carve-out did not fire and was right not to: it excuses a run
+that STARTED before the candidate existed, and this one started after. The margin is not the
+defect. Asking a commit-triggered lane about a tag is.
+
+`tests/pretag-findings.sh` names that one finding, and the two harnesses read it from there rather
+than each spelling it. Fetchability is still gated in the lane that can answer without a race:
+`release.yml`'s `resolve` exists because the tag was pushed, and `container-matrix` clones at the
+tag. New check 62 requires the list to stay at one entry, both harnesses to keep reading it, and
+`bin/doctor` to go on reporting the same label as a hard failure -- row 62b downgrades it inside
+doctor and leaves the list alone, which is the mutation a check on the list by itself would miss.
+
+Also corrected here: README said the parallel sweep takes "about 20 minutes". That is CI's figure
+on seven runners. Locally it is 48 minutes, measured over 103 rows on 2026-09-01.
+
 ### The one path install.sh edits rather than creates
 
 Check 20 models installed paths as copies of repo files or as runtime state. `~/.zshrc` and

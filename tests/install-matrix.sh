@@ -37,6 +37,10 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 SRC=$(pwd)
+# The one doctor finding this harness cannot be asked about, defined once and shared with
+# tests/container-matrix.sh so the two cannot drift. See that file for why.
+# shellcheck source=tests/pretag-findings.sh
+. "$SRC/tests/pretag-findings.sh"
 
 # Canonicalised: macOS $TMPDIR ends in a slash, so the raw path can carry a double slash that
 # cd+pwd elsewhere normalises away, and comparisons between the two spellings silently fail.
@@ -1268,6 +1272,13 @@ count_dr_findings(){ # <doctor --json output>
     ([.checks[]? | select(.status != "ok")] | length)
     + (if (.drift.status? // "ok") != "ok" then 1 else 0 end)' 2>/dev/null
 }
+# Same count, minus one named finding. See tests/pretag-findings.sh for why exactly one exists
+# and why widening this is a check failure rather than a judgement call.
+count_dr_findings_excluding(){ # <doctor --json output> <label to treat as a note>
+  printf '%s' "$1" | jq -r --arg skip "$2" '
+    ([.checks[]? | select(.status != "ok") | select(.label != $skip)] | length)
+    + (if (.drift.status? // "ok") != "ok" then 1 else 0 end)' 2>/dev/null
+}
 list_dr_findings(){ # <doctor --json output>
   printf '%s' "$1" | jq -r '
     ([.checks[]? | select(.status != "ok") | "\(.label) ✖ \(.detail)"]
@@ -1322,6 +1333,7 @@ if want doctor-stranger; then
     HOME="$H" "$H/.config/agents/bin/doctor" >/dev/null 2>&1; rc=$?
     js=$(dr_json "$H" "$H/.config/agents/bin/doctor")
     reds=$(count_dr_findings "$js")
+    reds_x=$(count_dr_findings_excluding "$js" "$PRETAG_ALLOWED_FINDING")
     # An absent or unparseable --json is not a pass. It means this lane cannot answer its own
     # question, and the honest report says so rather than falling back to a looser one.
     if [ -z "$js" ] || [ -z "$reds" ]; then
@@ -1329,6 +1341,13 @@ if want doctor-stranger; then
           "doctor exited $rc but produced no parseable --json, so the finding count is unknown (jq present? $(command -v jq >/dev/null 2>&1 && echo yes || echo NO))"
     elif [ "$rc" -eq 0 ] && [ "$reds" -eq 0 ]; then
       ok "doctor is green on a clean install ($(printf '%s' "$js" | jq -r '[.checks[]?|select(.status=="note")]|length' 2>/dev/null) note(s), 0 failures)"
+    elif [ "$reds_x" = 0 ] && [ "$reds" != "$reds_x" ]; then
+      # The pre-tag window, and only it. This lane is triggered by the commit that declares the
+      # version, so it runs before the tag it would be asserting about exists. Passing here does
+      # not weaken the claim: release.yml's resolve job cannot run until the tag is pushed, and
+      # container-matrix clones at the tag. Any OTHER finding still fails, and rc alone is not
+      # enough to pass -- reds must be nonzero for exactly this reason, or the branch below fires.
+      ok "doctor is green on a clean install (0 failures; '$PRETAG_ALLOWED_FINDING' is a note in a commit-triggered lane, see tests/pretag-findings.sh)"
     else
       bad "doctor is green on a clean install" \
           "exit $rc with $reds failure(s): $(list_dr_findings "$js")"
