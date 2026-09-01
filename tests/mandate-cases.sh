@@ -57,7 +57,7 @@
 #   invoke the hook at all, but this file does not).
 
 # shellcheck disable=SC2034  # read by callers that source this file (verify.sh check 27, tests/container-matrix.sh), not used within it
-MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 10 11 12"
+MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12"
 
 # --- fixture records (shared building blocks, same literal shapes check 27 already proved) -------
 _MC_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
@@ -82,6 +82,14 @@ _MC_9B_B='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"W
 _MC_9B_C='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"brs/c/z.yaml","content":""}}]}}'
 _MC_9B_TASK='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}}]}}'
 _MC_9B_TXT='{"type":"assistant","message":{"content":[{"type":"text","text":"RICK: dispatched MEESEEKS to verify, then moved on."}]}}'
+# 9c/9d/9e: the serial-tail mandate. Three-plus Task/Agent dispatches with no parallel batch
+# after the last one is a serial loop, whatever fanout_batches says about earlier history.
+# 9c: three singleton dispatches, swarm called, RICK named, zero writes -- no other mandate
+# can fire, tail=3 -> block. 9d: two singletons -> tail=2, below threshold, silent. 9e: a
+# real 2-in-one-message batch FIRST, then three singletons -- fanout_batches=1 so the breadth
+# rule can never complain again, but the tail since that batch is 3 -> block. 9e is the
+# whole-transcript amnesty measured in real sessions (3ce9f899: 3 early batches, then 25
+# serial dispatches, never blocked) that this mandate exists to close.
 # 10: purely conversational, zero tool_use anywhere in the transcript.
 _MC_10='{"type":"assistant","message":{"content":[{"type":"text","text":"Explaining how the retry loop computes exponential backoff."}]}}'
 # 11/12: prove-it-works, unverified vs verified.
@@ -110,6 +118,9 @@ mandate_case_lines() {
     p) printf '%s\n' "$_MC_F2" "$_MC_SW" "$_MC_ON1" "$_MC_ON2" ;;
     q) printf '%s\n' "$_MC_TB" ;;
     9b) printf '%s\n' "$_MC_SW" "$_MC_9B_A" "$_MC_9B_B" "$_MC_9B_C" "$_MC_9B_TASK" "$_MC_9B_TXT" ;;
+    9c) printf '%s\n' "$_MC_SW" "$_MC_9B_TASK" "$_MC_9B_TASK" "$_MC_9B_TASK" "$_MC_9B_TXT" ;;
+    9d) printf '%s\n' "$_MC_SW" "$_MC_ON1" "$_MC_ON2" ;;
+    9e) printf '%s\n' "$_MC_SW" "$_MC_TWO" "$_MC_9B_TASK" "$_MC_9B_TASK" "$_MC_9B_TASK" ;;
     10) printf '%s\n' "$_MC_10" ;;
     11) printf '%s\n' "$_MC_11_W" "$_MC_DONE" ;;
     12) printf '%s\n' "$_MC_12_W" "$_MC_12_BASH" "$_MC_DONE" ;;
@@ -127,7 +138,7 @@ mandate_case_expect() {
     f) printf '%s\n' 'SILENT' ;;
     g) printf '%s\n' 'SILENT' ;;
     h) printf '%s\n' 'SILENT' ;;
-    i) printf '%s\n' 'BLOCK:multi-directory work' ;;
+    i) printf '%s\n' 'BLOCK:multi-directory work -- dispatch 3 agents in ONE message' ;;
     j) printf '%s\n' 'SILENT' ;;
     k) printf '%s\n' 'BLOCK:agent naming' ;;
     l) printf '%s\n' 'SILENT' ;;
@@ -137,6 +148,9 @@ mandate_case_expect() {
     p) printf '%s\n' 'BLOCK:2 subagent call(s), but never 2+ in the same message' ;;
     q) printf '%s\n' 'BLOCK:the swarm skill' ;;
     9b) printf '%s\n' 'BLOCK:1 subagent call(s), but never 2+ in the same message' ;;
+    9c) printf '%s\n' 'BLOCK:serial dispatch tail' ;;
+    9d) printf '%s\n' 'SILENT' ;;
+    9e) printf '%s\n' 'BLOCK:serial dispatch tail' ;;
     10) printf '%s\n' 'SILENT' ;;
     11) printf '%s\n' 'BLOCK:prove-it-works' ;;
     12) printf '%s\n' 'SILENT' ;;
@@ -173,6 +187,9 @@ mandate_case_desc() {
     p) printf '%s\n' 'two dispatches in SEPARATE messages satisfied breadth anyway -- a serial loop cleared the fan-out mandate' ;;
     q) printf '%s\n' 'dispatched without calling the swarm skill and it did not block' ;;
     9b) printf '%s\n' 'breadth-eligible + swarm called + ONE serial dispatch cleared the fan-out mandate anyway' ;;
+    9c) printf '%s\n' 'three serial dispatches with no batch did not trip the serial-tail mandate' ;;
+    9d) printf '%s\n' 'two serial dispatches (below the tail-3 threshold) tripped the serial-tail mandate' ;;
+    9e) printf '%s\n' 'an early parallel batch amnestied three later serial dispatches' ;;
     10) printf '%s\n' 'a purely conversational turn (no tool_use) blocked' ;;
     11) printf '%s\n' 'edit + completion claim with no verification did not block prove-it-works' ;;
     12) printf '%s\n' 'edit + completion claim WITH a Bash call in the turn blocked anyway' ;;
