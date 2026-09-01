@@ -207,7 +207,25 @@ assert_install(){ # <label> <config-dir> <home> [atleast] [from]
   [ -x "$cdir/hooks/verify-gate.sh" ] || errs="$errs; verify-gate.sh not executable"
   [ -f "$h/.config/agents/secrets.env" ] || errs="$errs; no secrets.env"
   # The installer must never leave a trace of the machine that built it.
-  if grep -rqI "$SRC" "$cdir/settings.json" 2>/dev/null; then errs="$errs; repo path leaked into settings"; fi
+  #
+  # Anchored on a path boundary, and -F so a checkout path containing a regex metacharacter is
+  # matched as itself. A bare substring search for "$SRC" also matches every path that merely
+  # STARTS with it, which is not a leak: running this suite from /tmp/rel61 with TMPDIR=/tmp/rel61tmp
+  # reported "repo path leaked into settings" on five lanes, because the fake HOME lived under
+  # /tmp/rel61tmp and every hook path inside settings.json therefore contained /tmp/rel61 as a
+  # prefix. The installer was clean. The finding was the harness recognising its own scratch
+  # directory -- five red lanes, a version held back, and nothing wrong with the thing measured.
+  #
+  # A leak reaches settings.json as JSON, so it is "$SRC/..." or exactly "$SRC": requiring the
+  # next character to be / or " keeps every real shape and drops only the prefix collision.
+  if grep -qIF -e "$SRC/" -e "$SRC\"" "$cdir/settings.json" 2>/dev/null; then errs="$errs; repo path leaked into settings"; fi
+  # Positive control, in place because the line above was just narrowed: a narrowing that stops
+  # detecting anything looks identical, from the output, to an installer that stopped leaking.
+  _lk="$cdir/.leak-control.json"
+  printf '{"hook":"%s/claude/hooks/format.sh"}\n' "$SRC" > "$_lk"
+  grep -qIF -e "$SRC/" -e "$SRC\"" "$_lk" 2>/dev/null \
+    || errs="$errs; leak detector did not fire on a planted $SRC path -- the check above proves nothing"
+  rm -f "$_lk"
   printf '%s' "$errs"
 }
 

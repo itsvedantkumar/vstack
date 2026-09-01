@@ -14,9 +14,10 @@ and need to know afterwards which parts actually held.
 
 The distinguishing property is not the count of anything. It is that **every check in this
 repository has a mutation proving it can fail**, and the project has a written record of the
-seventeen times a check here reported a verdict it had not measured. <!-- catalogue-count --> Sixteen of those printed
+eighteen times a check here reported a verdict it had not measured. <!-- catalogue-count --> Sixteen of those printed
 `ok`. The seventeenth printed an accurate `FAIL` that a release workflow then acted on by deleting
-the evidence.
+the evidence. The eighteenth printed a `FAIL` about the harness's own scratch directory and held a
+release back over an installer that was never broken.
 
 ## Repository layout
 
@@ -232,7 +233,7 @@ tree, and editing that tree while it runs will be reported as an unrestored file
 
 Run the falsifiability suite in a throwaway clone. It mutates real files.
 
-This exists because checks lie. Seventeen <!-- catalogue-count --> in this repository have been
+This exists because checks lie. Eighteen <!-- catalogue-count --> in this repository have been
 caught reporting a verdict they had not measured, sixteen of them by printing `ok`. A
 comparison that ran before the commit it was judging. A linter whose silence was read as success.
 An anchor a prose edit moved. A rule that reported OK with every one of its own rules skipped. Each is in [CHANGELOG.md](CHANGELOG.md) with the command that

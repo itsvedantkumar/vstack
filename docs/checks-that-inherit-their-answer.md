@@ -9,7 +9,7 @@ Every one printed `ok`. None of them was measuring the thing its label named. Th
 missing check, because a missing check is visible in the census and a green one is an active claim
 that something was verified.
 
-## The seventeen
+## The eighteen
 
 **The anchor a prose edit moved.** Check 18 compares the README's published context cost against a
 live probe of the session hook, guarded by `grep -qE '~[0-9.]+ KB full / ~[0-9.]+ KB plugin'` with
@@ -210,10 +210,31 @@ two-halves problem -- `tests/require-checks-green.sh` proves the gate honours th
 setting it itself, and would go on passing forever if `release.yml` never set it in production, so
 the check derives the gate's inputs and requires each one to be wired by its caller.
 
+**The prefix that was not a leak.** `tests/install-matrix.sh` asserts the installer leaves no
+trace of the machine that built it: `grep -rqI "$SRC" "$cdir/settings.json"`. A substring search
+for a path also matches every path that merely starts with it. Running the suite from a worktree
+at `/tmp/rel61` with `TMPDIR=/tmp/rel61tmp` turned five lanes red -- default HOME, external config
+dir, space in `$HOME`, install-over-existing, curl bootstrap -- all reporting `repo path leaked
+into settings`. The installer had leaked nothing. Every hook path inside the fake HOME's
+settings.json began `/tmp/rel61tmp/...`, and `/tmp/rel61` is a prefix of that, so the check was
+recognising its own scratch directory and calling it the machine that built the payload.
+
+This is the first one in the catalogue that inherited a **red**. The other seventeen were quieter
+and, individually, worse. But a red inherited from the harness's own environment costs the same
+thing a green does: it decides something the check did not measure, and the operator acts on it. I
+held a release back and started diagnosing an installer that was never broken.
+
+The fix is a path boundary -- the next character must be `/` or `"`, which is every shape a leak
+takes in JSON and not the shape a sibling directory takes -- plus `-F`, so a checkout path
+containing a regex metacharacter is matched as itself rather than as a pattern. A narrowing that
+stops detecting anything is indistinguishable in the output from an installer that stopped
+leaking, so the same function now plants a `$SRC` path in a scratch file and requires the detector
+to fire on it before the negative result is allowed to mean anything.
+
 ## Named, not counted
 
 Not an instance. The catalogue names this coverage gap so the count above cannot quietly absorb
-it: the instances are everything between `## The seventeen` and this heading, and nothing else.
+it: the instances are everything between `## The eighteen` and this heading, and nothing else.
 
 **Not covered, named rather than skipped.** `tests/install-matrix.sh` has no falsifiability
 control. Check 52 gives `tests/bin-scripts.sh` one -- break the argument guard its `bg-args` case

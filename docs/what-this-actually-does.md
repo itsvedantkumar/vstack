@@ -11,7 +11,7 @@ leaves no headroom for a config layer to show up in.
 `docs/research/fake-greens-2026-08.md` reports the whole evidence base as one document: what
 was measured, what the numbers do not support, and the checks that passed while measuring
 nothing, thirteen as of that document's date. The live catalogue is
-`docs/checks-that-inherit-their-answer.md`, and it stands at seventeen. <!-- catalogue-count -->
+`docs/checks-that-inherit-their-answer.md`, and it stands at eighteen. <!-- catalogue-count -->
 
 What this repository can show is narrower and checkable. Specific mechanisms do specific things,
 each with the evidence that proves it and the date it was measured. That is what follows, in
@@ -79,7 +79,7 @@ Three `principle-*` skills fire at or near 0/10 and are named here rather than o
   was reverted rather than shipped, and the failure is recorded rather than retried silently.
 
 **Six checks were found in one day printing `ok` while measuring nothing they controlled.** On
-2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents seventeen now; <!-- catalogue-count -->
+2026-08-22, `docs/checks-that-inherit-their-answer.md` documented all six. It documents eighteen now; <!-- catalogue-count -->
 the eleven added since are not restated here, because this section is dated and the catalogue is the
 place that stays current:
 
@@ -96,7 +96,7 @@ place that stays current:
 
 This is the closest thing this repository has to a stress test of the "all checks falsifiable"
 claim in category 1. It found the claim true only after finding six ways it had quietly stopped
-being true. The catalogue has since reached seventeen, <!-- catalogue-count --> and by its own dating six of those were found across
+being true. The catalogue has since reached eighteen, <!-- catalogue-count --> and by its own dating six of those were found across
 2026-08-26 and 2026-08-27, so the rate that document predicted at roughly one a month is
 understated by about an order of magnitude. The twelfth is the one worth reading: no check was
 wrong, no mutation would have caught it, and the suite was green throughout. What failed was a

@@ -6,6 +6,26 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.61.0 — 2026-09-01
 
+### The eighteenth entry in the catalogue, and the first that inherited a red
+
+`tests/install-matrix.sh` asserts the installer leaves no trace of the machine that built it, with
+`grep -rqI "$SRC"` over the installed `settings.json`. A substring search for a path matches every
+path that merely starts with it. Running the suite from a worktree at `/tmp/rel61` with
+`TMPDIR=/tmp/rel61tmp` turned five lanes red, all reporting `repo path leaked into settings`. The
+installer had leaked nothing: the fake HOME lived under `/tmp/rel61tmp`, so every hook path in
+`settings.json` carried `/tmp/rel61` as a prefix, and the check was recognising its own scratch
+directory.
+
+Seventeen entries in `docs/checks-that-inherit-their-answer.md` inherited a green. This one
+inherited a red, and it cost the same thing: a verdict the check had not measured, acted on. A
+release was held and an installer that was never broken was diagnosed for twenty minutes.
+
+The match is now anchored on a path boundary -- the next character must be `/` or `"`, every shape
+a leak takes in JSON and not the shape a sibling directory takes -- and `-F`, so a checkout path
+containing a regex metacharacter is matched as itself. `assert_install` now also plants a `$SRC`
+path in a scratch file and requires the detector to fire on it, because a narrowing that stops
+detecting anything looks exactly like an installer that stopped leaking.
+
 ### install.sh armed the gate over code it had not trusted
 
 `vstack trust` records `.claude/verify.sh` plus every literal `.sh` path that file executes, its
