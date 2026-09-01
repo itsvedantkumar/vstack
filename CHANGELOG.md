@@ -4,6 +4,28 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.63.0 — 2026-09-01
+
+Three branches merged in queue order: auto-enforcement, skill-autofire, register-mandate.
+
+- **Delegation pressure is automatic.** The Stop hook gains a serial-tail mandate, the
+  session-context hook a live escalation line, and the per-prompt digest re-pins fan-out.
+  (`claude/hooks/skill-mandate.sh`, `claude/hooks/inject-session-context.sh`)
+- **Skill descriptions re-keyed on measured fire rates.** 100 published model calls, Fisher
+  tests, no early stop: executing-plans keyed on a-written-plan-exists (1/10 → 6/10,
+  p=0.0573, moved but not significant), test-driven-development on about-to-write-code,
+  writing-plans on nothing-written-down, swarm's quoted trigger strings dropped.
+  Description-collision score 23 → 13, zero hard-fail pairs. Harness and run logs in
+  `tests/evals/autofire/`; `tests/description-collision.sh` and
+  `tests/dispatch-static.sh` gate the corpus offline.
+- **REGISTER rule enforced.** New banned-opener mandate in the Stop hook: a reply opening
+  with an acknowledgement token ("Let me", "Great", "You're right", …) draws a strike on
+  the skill family's 2-strike latch, current turn only, both apostrophe forms. Fixtures
+  in `tests/mandate-cases.sh` (cases 13–15), PROOFs 25–26.
+- **Routing table matches the shipped descriptions.** `inject-session-context.sh` lines
+  220–221 now key TDD and executing-plans the way the descriptions do; this closes the
+  standing disagreement with the `executing-plans-checkpoints` fixture.
+
 ## 1.62.0 — 2026-09-01
 
 ### Coverage that reads the overlay, not the toml
