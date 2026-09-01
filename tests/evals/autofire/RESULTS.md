@@ -1,7 +1,7 @@
 # Autofire arm: do the four chain skills route from the situation alone?
 
-**Status: baseline complete. After-arm pending. Do not cite the before/after comparison until the
-after table is filled in.**
+**Status: complete. Read the significance caveat under the after table before quoting any number
+from it.**
 
 | | |
 |---|---|
@@ -10,7 +10,7 @@ after table is filled in.**
 | Model | `sonnet` (CLI alias), OAuth session, `ANTHROPIC_API_KEY` stripped by the harness |
 | Tool fence | `Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,Workflow,Explore,Task` |
 | Seed / temperature | Neither. The CLI exposes no such knob, which is why n>1 exists. |
-| Installed descriptions | digest `d4251fb4eda7` on all 60 baseline rows, one value, no pooling |
+| Installed descriptions | `d4251fb4eda7` on all 60 baseline rows, `5cf618030b60` on all 40 after rows. One value per arm, no pooling. |
 | Sampling | N=10 independent invocations per arm, no early stop. `ATTEMPTS` is unused. |
 
 Raw k/N only. At n=10 a percentage or an interval would imply precision this sample does not
@@ -116,10 +116,53 @@ This is design discipline, not a dispatch law. The claim that colliding triggers
 skills was withdrawn in 1.47.0, and the pre-registered replacement found the hypothesis
 unsupported (`tests/evals/collision/RESULTS.md`).
 
+## After the rewrite
+
+All four rewritten descriptions were installed together for this arm, by
+`tests/stage-skill-descriptions.sh`, and restored afterwards. Digest `5cf618030b60` on all 40
+rows. Each arm is budget-matched to its own baseline. 40 calls, $7.41.
+
+Runlogs: `tests/evals/autofire/runlog-after-writing-plans-spec-to-steps.jsonl`,
+`runlog-after-swarm-audit.jsonl`, `runlog-after-tdd-known-bugfix.jsonl`,
+`runlog-after-executing-plans-checkpoints.jsonl`.
+
+| skill | budget | before | after | Fisher p, two-sided | reading |
+|---|---|---|---|---|---|
+| `executing-plans` | 12 | 1/10 | 6/10 | 0.0573 | moved, not significant |
+| `test-driven-development` | 12 | 3/10 | 3/10 | 1.0 | unchanged |
+| `writing-plans` | 3 | 9/10 | 10/10 | 1.0 | no regression, no headroom |
+| `swarm` | 3 | 10/10 | 10/10 | 1.0 | no regression, no headroom |
+
+### The threshold passed and the statistic did not
+
+Before the arm I registered: an arm counts as fixed when baseline is at most 1/10 and after is at
+least 6/10. `executing-plans` came in at exactly 1/10 and 6/10, so the threshold is met.
+
+It should not have been written that way. I derived "6/10" against an assumed 0/10 baseline,
+where it gives p=0.0108 and clears the Bonferroni alpha of 0.0125 that four tests want. The
+measured baseline was 1/10, and I never went back and re-derived the bound. Against 1/10, 6/10 is
+p=0.0573. It clears neither 0.0125 nor 0.05.
+
+So the check passed while the thing the check stood for did not. That is the failure
+`docs/checks-that-inherit-their-answer.md` catalogues, and this is an instance of it in my own
+pre-registration rather than in someone else's. The honest statement of this result is that
+`executing-plans` moved from 1/10 to 6/10 and that n=10 cannot establish the move. Separating
+those two rates at Bonferroni alpha needs roughly n=20 to 25 per arm, about $12 more at this
+budget.
+
+`test-driven-development` did not move at all. The rewrite bought it a description that asserts a
+checkable property instead of an invisible chain position, and bought no dispatch. Both are in
+the runlog.
+
+The `executing-plans` misroute did not close. Two of ten samples still fire
+`test-driven-development` on a prompt with no test in it, the same 2 as at baseline. The rewrite
+narrows what makes those two compete without removing it.
+
 ## Cost
 
 The harness records this per arm. Nobody estimated it. Baseline at turns=3 cost $3.17 across 40
-calls, $0.079 each. The turns=12 re-run cost $5.61 across 20 calls, $0.281 each.
+calls, $0.079 each. The turns=12 re-run cost $5.61 across 20 calls, $0.281 each. The after arm
+cost $7.41 across 40 calls. Total for the published arms: $16.19 across 100 calls.
 
 ## Instrument changes after the baseline, and why they do not invalidate it
 

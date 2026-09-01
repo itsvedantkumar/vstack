@@ -345,6 +345,10 @@ The raw samples, one JSON object per line, written by `auto-trigger.sh` in SAMPL
 - `tests/evals/autofire/runlog-baseline-turns3-tdd-known-bugfix.jsonl`
 - `tests/evals/autofire/runlog-baseline-turns12-executing-plans-checkpoints.jsonl`
 - `tests/evals/autofire/runlog-baseline-turns12-tdd-known-bugfix.jsonl`
+- `tests/evals/autofire/runlog-after-writing-plans-spec-to-steps.jsonl`
+- `tests/evals/autofire/runlog-after-swarm-audit.jsonl`
+- `tests/evals/autofire/runlog-after-tdd-known-bugfix.jsonl`
+- `tests/evals/autofire/runlog-after-executing-plans-checkpoints.jsonl`
 
 Read the turns=3 and turns=12 tables together or not at all. Every turns=3 sample terminated
 `error_max_turns`, including the arms that fired, so being cut off separates nothing there. That
