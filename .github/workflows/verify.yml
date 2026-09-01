@@ -18,8 +18,8 @@ env:
   # log agree on the same number. Picked from measured cost, not assumed: tests/gate-
   # falsifiability.sh declared 91 rows when 7 was chosen, which divided evenly (13 rows/shard,
   # no remainder bucket), and release.yml records "~60s on a runner" per row (one full
-  # ./.claude/verify.sh invocation). It declares 101 rows now, so the split is 15 rows for three
-  # shards and 14 for the other four; falsify-plan derives that from the CHECKS= line rather
+  # ./.claude/verify.sh invocation). It declares 103 rows now, so the split is 15 rows for five
+  # shards and 14 for the other two; falsify-plan derives that from the CHECKS= line rather
   # than from any number written here, so an uneven count buckets itself and this comment going
   # stale cannot mis-shard anything. 7 concurrent runners stays well inside every GitHub-hosted
   # concurrency tier this repo could plausibly be on, unlike e.g. 13 shards which pushes
@@ -163,7 +163,7 @@ jobs:
         run: ./.claude/verify.sh
 
       # "Prove every check is falsifiable" (tests/gate-falsifiability.sh) used to run here. It is
-      # O(rows x checks), 101 rows each re-running the whole 60-check gate, and it dominated
+      # O(rows x checks), 103 rows each re-running the whole 61-check gate, and it dominated
       # this job's wall clock (measured 63-93 minutes total). It now runs sharded, in parallel
       # with the rest of this job, as falsify-plan / falsify / falsify-reconcile below, and its
       # result is fanned back into the `verify` join job at the bottom of this file. See that

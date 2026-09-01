@@ -1421,6 +1421,23 @@ install_generated(){
   esac
   return 1
 }
+# A third shape neither category above can express. install.sh neither copies nor creates
+# ~/.zshrc and ~/.zshenv: they already exist and belong to the user, and the installer appends a
+# fenced block to each. Modelling them as copies would be false and modelling them as foreign
+# would be worse, so until now they were modelled as nothing -- and a path this check cannot
+# express is a path README's "What lands where" table was never asked about. The table listed
+# every rule install.sh has and was still missing the one edit a stranger would most want warned
+# about. Floored like INSTALL_GENERATED_PATHS: each entry must appear in install.sh as a literal
+# append, so deleting the append turns this red instead of silently retiring the disclosure.
+# shellcheck disable=SC2088  # a literal "~/..." spelling to match against, like runtime_path above
+INSTALL_APPENDED_PATHS='~/.zshrc ~/.zshenv'
+# shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
+install_appended(){
+  case " $INSTALL_APPENDED_PATHS " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
 # shellcheck disable=SC2088  # match patterns, not paths -- see runtime_path above
 src_for(){ # installed path -> the repo file install.sh copies there, or empty if unmapped
   case "$1" in
@@ -1442,12 +1459,20 @@ for _ig in $INSTALL_GENERATED_PATHS; do
   grep -Fq "$_igh" install.sh \
     || errs="$errs\ninstall_generated names $_ig but install.sh does not contain the literal path $_igh -- the exemption may be stale"
 done
+ia_n=0
+for _ia in $INSTALL_APPENDED_PATHS; do
+  ia_n=$((ia_n + 1))
+  _iah=">> \"\$HOME${_ia#'~'}\""
+  grep -Fq "$_iah" install.sh \
+    || errs="$errs\ninstall_appended names $_ia but install.sh contains no literal append $_iah -- the exemption may be stale"
+done
 # shellcheck disable=SC2088  # the heredoc below greps for the literal "~/..." spelling in docs
 while IFS= read -r ref; do
   [ -n "$ref" ] || continue
   runtime_path "$ref" && continue
   external_path "$ref" && continue
   install_generated "$ref" && continue
+  install_appended "$ref" && continue
   src=$(src_for "$ref")
   if [ -z "$src" ]; then
     errs="$errs\n$ref: no install.sh rule puts anything there, and it is not declared foreign"
@@ -1459,7 +1484,7 @@ $(grep -rhoE '~/[A-Za-z0-9._/-]+' \
     README.md claude/commands claude/agents claude/skills 2>/dev/null \
   | sed 's#[.,:;)`"]*$##; s#/$##' | sort -u)
 EOF
-[ -z "$errs" ] && ok "referenced install paths exist ($ig_n install_generated entr$([ "$ig_n" = 1 ] && printf y || printf ies) floored)" \
+[ -z "$errs" ] && ok "referenced install paths exist ($ig_n install_generated + $ia_n install_appended entries floored)" \
   || bad "referenced install paths exist" "$(printf '%b' "$errs")"
 
 # --- 21. install.sh only deletes keys this repo actually retired -------------------------------
@@ -4193,7 +4218,7 @@ fi
 # the first draft of this check said so, and both were right.
 #
 # Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
-# function of the gate's own size: adding a check makes all 101 rows slower. So the recorded
+# function of the gate's own size: adding a check makes all 103 rows slower. So the recorded
 # measurement carries the check count it was taken at, and the model scales it by the gate size
 # it finds right here. Adding checks to this file raises the floor it derives, automatically.
 #
@@ -4383,6 +4408,83 @@ twenty-four twenty-five", a, " ")
   fi
 else
   bad "catalogue count derived and agreed" "$c60_doc is missing; every published figure for it is now unbacked"
+fi
+
+# --- 61. install.sh's trust step covers the scripts verify.sh executes -------------------------
+# install.sh used to hash exactly one file into the trust store, its own .claude/verify.sh, while
+# `vstack trust` recorded that file plus every literal .sh path verify.sh executes, its source/.
+# refs, and package manifests -- 34 entries against 1. verify.sh runs ./install.sh --dry-run and
+# ./overlay.sh, so the install lane armed the Stop-hook gate over code the store did not cover.
+#
+# The failure is quiet by construction: verify-gate.sh iterates the entries the store HAS and
+# compares each one's hash. A file that was never recorded has no line to mismatch, so it is not
+# refused, it is invisible. Only "trusted once, edited since" produces a refusal, so the narrower
+# writer could not report its own narrowness.
+#
+# Two writers for one boundary is the defect; one of them knowing what verify.sh runs and the
+# other not is how they drifted. Lane 1 asserts the delegation exists. Lanes 2-4 assert the thing
+# it delegates to actually scans, in both directions, because a check that only greps for a call
+# proves a call and not a boundary.
+c61_errs=""
+
+# Lane 1 -- install.sh delegates rather than hashing on its own.
+grep -Fq 'bin/vstack" trust' install.sh \
+  || c61_errs="$c61_errs\ninstall.sh does not call bin/vstack trust; if it hashes verify.sh itself, the two writers can disagree again"
+grep -Fq 'verify-trust' install.sh \
+  && c61_errs="$c61_errs\ninstall.sh names the trust store directly; the store has one writer, bin/vstack"
+
+c61_d=$(mktemp -d)
+c61_mkrepo(){ # <dir> <extra line for verify.sh>
+  mkdir -p "$1/.claude" "$1/home"
+  printf '#!/bin/sh\necho gate\n%s\n' "$2" > "$1/.claude/verify.sh"
+  chmod +x "$1/.claude/verify.sh"
+}
+c61_store(){ printf '%s' "$1/home/.config/agents/verify-trust"; }
+c61_trust(){ HOME="$1/home" ./bin/vstack trust "$1" --yes >/dev/null 2>&1; }
+
+# Lane 2 -- positive control. A repo whose gate runs ./scripts/ci.sh must get ci.sh recorded, and
+# that path is in no hardcoded list anywhere: it can only come from reading verify.sh.
+c61_a="$c61_d/a"; c61_mkrepo "$c61_a" './scripts/ci.sh'
+mkdir -p "$c61_a/scripts"; printf '#!/bin/sh\ntrue\n' > "$c61_a/scripts/ci.sh"
+if c61_trust "$c61_a"; then
+  grep -q '/scripts/ci\.sh$' "$(c61_store "$c61_a")" \
+    || c61_errs="$c61_errs\nvstack trust did not record scripts/ci.sh, a path only verify.sh names -- the scan is not reading the gate"
+else
+  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming ./scripts/ci.sh"
+fi
+
+# Lane 3 -- negative control. A gate that runs nothing else gets one entry. Without this, lane 2
+# passes on a writer that records every .sh it can find, which would be a different boundary
+# wearing the same output.
+c61_b="$c61_d/b"; c61_mkrepo "$c61_b" 'true'
+mkdir -p "$c61_b/scripts"; printf '#!/bin/sh\ntrue\n' > "$c61_b/scripts/unnamed.sh"
+if c61_trust "$c61_b"; then
+  c61_n=$(grep -c . "$(c61_store "$c61_b")" || true)
+  [ "$c61_n" = 1 ] \
+    || c61_errs="$c61_errs\nvstack trust recorded $c61_n entries for a gate that names no other script; it should record 1"
+else
+  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming nothing"
+fi
+
+# Lane 4 -- this repository. The two files the narrow writer missed, named because they are the
+# ones verify.sh actually executes, not because they are a general category.
+c61_c="$c61_d/c"; mkdir -p "$c61_c/home"
+if HOME="$c61_c/home" ./bin/vstack trust "$PWD" --yes >/dev/null 2>&1; then
+  for c61_f in install.sh overlay.sh; do
+    grep -q "/$c61_f\$" "$(c61_store "$c61_c")" \
+      || c61_errs="$c61_errs\nthe trust store for this repo does not record $c61_f, which .claude/verify.sh executes"
+  done
+  c61_tot=$(grep -c . "$(c61_store "$c61_c")" || true)
+else
+  c61_tot=0
+  c61_errs="$c61_errs\nvstack trust failed on this repository"
+fi
+rm -rf "$c61_d"
+
+if [ -z "$c61_errs" ]; then
+  ok "install trust covers what the gate executes ($c61_tot entries here; scan proven in both directions)"
+else
+  bad "install trust covers what the gate executes" "$(printf '%b' "$c61_errs")"
 fi
 
 # Accounting. Every declared check must have reported either a result or a skip. A check

@@ -4,6 +4,46 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.61.0 — 2026-09-01
+
+### install.sh armed the gate over code it had not trusted
+
+`vstack trust` records `.claude/verify.sh` plus every literal `.sh` path that file executes, its
+`source`/`.` refs and package manifests: 34 entries in this repository. `install.sh` recorded one.
+`.claude/verify.sh` runs `./install.sh --dry-run` and `./overlay.sh`, so anyone who installed the
+normal way armed a Stop-hook gate whose entry point was pinned and whose code was not.
+
+The failure could not report itself. `verify-gate.sh` iterates the entries the store *has* and
+compares each hash, so a file that was never recorded has no line to mismatch. It is not refused,
+it is invisible. Only "trusted once, edited since" produces a refusal, which is the one case the
+narrow writer could still handle. Editing `install.sh` or `overlay.sh` after installing ran
+unattended on the next Stop with nothing raised.
+
+Two writers for one boundary was the defect. `install.sh` now calls `vstack trust` and fails
+closed with a named warning if it cannot. New check 61 asserts the delegation exists and then
+exercises what it delegates to in both directions: a synthetic repo whose gate runs
+`./scripts/ci.sh` must get `ci.sh` recorded, a repo whose gate runs nothing else must get exactly
+one entry, and this repository must record `install.sh` and `overlay.sh` by name. The negative
+lane is the load-bearing one: without it, lane 2 passes on a writer that records every `.sh` it
+can find, which is a different boundary wearing the same output.
+
+### The one path install.sh edits rather than creates
+
+Check 20 models installed paths as copies of repo files or as runtime state. `~/.zshrc` and
+`~/.zshenv` are neither: they already exist, belong to the user, and `install.sh` appends a fenced
+block to each. A path the check could not express is a path README's "What lands where" table was
+never asked about, so the table listed every rule the installer has and still omitted the one edit
+a stranger would most want warned about. `install_appended` is now a third category, floored the
+same way the second is: each entry must appear in `install.sh` as a literal append, and row 20d
+deletes the append to prove the floor fires.
+
+### Also
+
+`README.md:51` described the plugin lane as shipping "two routing hooks". It ships three, and
+`goal-gate.sh` gates rather than routes. The Credits link pointed at `pstack-dev/pstack`, which
+404s; pstack is `cursor/plugins/tree/main/pstack`, © Lauren Tan, and the vendored
+`claude/skills/LICENSE.pstack` is byte-identical to upstream's.
+
 ## 1.60.0 — 2026-09-01
 
 ### The lane that was added to close a rot was itself unproven

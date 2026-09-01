@@ -25,7 +25,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 60 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 61 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -48,8 +48,10 @@ claude plugin marketplace add itsvedantkumar/vstack
 claude plugin install vstack@vstack
 ```
 
-That is the plugin lane: skills, subagents, commands, and the two routing hooks that make skills
-fire — one on SessionStart, one on Stop. Nothing else on the machine is touched: no CLI wrappers,
+That is the plugin lane: skills, subagents, commands, and three hooks. Two of them route:
+`inject-session-context.sh` on SessionStart and `skill-mandate.sh` on Stop are what make skills
+fire. The third, `goal-gate.sh`, gates rather than routes, refusing to finish while a recorded
+goal still has unchecked rubric items. Nothing else on the machine is touched: no CLI wrappers,
 no shell lane, no MCP servers, no settings merged into `~/.claude`. Remove it with
 `claude plugin uninstall vstack@vstack` — there is no `uninstall.sh` to run, because there is no
 checkout.
@@ -95,8 +97,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.60.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.60.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.61.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.61.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -157,10 +159,17 @@ checks the right one; see [Day to day](#day-to-day)).
 | Hooks | 9 | `~/.claude/hooks/` |
 | CLI wrappers | 6 | `~/.config/agents/bin/` |
 | MCP servers | 2 | merged into `~/.claude.json` |
+| Shell config | 2 files appended to | `~/.zshrc` and `~/.zshenv` |
 
 `install.sh` merges rather than overwrites. It backs up every file it touches into
 `~/.config/agents/backups/`, adds only the hook entries it owns, and leaves keys it does not
 recognise alone. Check 21 fails if it deletes a key this repository never shipped.
+
+The shell-config row is the one that edits a file you did not create. `install.sh` appends a
+fenced `>>> claude-parity >>>` block to `~/.zshrc` that sources
+`~/.config/agents/shell/claude-parity.zsh`, and a fenced block to `~/.zshenv`. Both are backed up
+first and both are guarded on their own fence, so re-running the installer appends nothing a
+second time. `./uninstall.sh` removes them. The plugin lane touches neither file.
 
 **Plugin-marketplace install** (`claude plugin marketplace add` + `claude plugin install`):
 
@@ -169,7 +178,7 @@ recognise alone. Check 21 fails if it deletes a key this repository never shippe
 | Skills | 28 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
 | Subagents | 14 | `~/.claude/plugins/cache/vstack/vstack/<version>/agents/` |
 | Commands | 15 | `~/.claude/plugins/cache/vstack/vstack/<version>/commands/` |
-| Hooks | 3 (routing only) | `claude/hooks/hooks.json`, run from the plugin cache |
+| Hooks | 3 (2 routing, 1 gating) | `claude/hooks/hooks.json`, run from the plugin cache |
 | CLI wrappers | 0 (not this lane) | full install only |
 | MCP servers | 0 — `claude/.claude-plugin/plugin.json` declares none | full install only |
 
@@ -197,7 +206,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 60 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 61 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -206,13 +215,13 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 60 checks
+./.claude/verify.sh                  # 61 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 101 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 103 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones in about 20
 minutes, the split CI uses. Neither gives partial credit: a run that is interrupted has proven
@@ -353,7 +362,7 @@ true.
 
 ## Credits
 
-Skills ported and adapted from [pstack](https://github.com/pstack-dev/pstack) and
+Skills ported and adapted from [pstack](https://github.com/cursor/plugins/tree/main/pstack) and
 [Superpowers](https://github.com/obra/superpowers), with attribution per skill in
 [claude/skills/ATTRIBUTION.md](claude/skills/ATTRIBUTION.md). Licences for vendored work are in
 [NOTICE](NOTICE) and alongside it.

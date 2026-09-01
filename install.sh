@@ -438,14 +438,22 @@ back(){ [ "$DRY" = 1 ] && return 0
 # Trust this repo's own verify.sh for the Stop-hook gate: running install.sh IS the explicit
 # consent. Other repos' gates stay off until the user runs `vstack trust` there — the gate
 # executes repo-controlled code, so a bare clone must never arm it by itself.
+#
+# Delegate to `vstack trust`; do not hash verify.sh here. This block used to record exactly one
+# file. verify.sh executes ./install.sh --dry-run and ./overlay.sh, so an install-lane user got
+# the entry point pinned and the code it runs floating free. verify-gate.sh iterates the entries
+# the store HAS, so an unrecorded file has no line to mismatch: editing install.sh or overlay.sh
+# after install ran unattended on the next Stop with nothing raised. The gap was not that the
+# hashing was wrong, it was that there were two trust writers and only one of them knew what
+# verify.sh runs. There is now one.
 if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
-  tv="$(cd "$SRC/.claude" && pwd)/verify.sh"
-  if command -v shasum >/dev/null 2>&1; then th=$(shasum -a 256 "$tv" | cut -d' ' -f1)
-  else th=$(sha256sum "$tv" | cut -d' ' -f1); fi
-  tf="$HOME/.config/agents/verify-trust"
-  ttmp=$(mktemp); grep -vF "  $tv" "$tf" 2>/dev/null > "$ttmp" || true
-  printf '%s  %s\n' "$th" "$tv" >> "$ttmp"; mv "$ttmp" "$tf"
-  say "trusted    $SRC/.claude/verify.sh (verify gate)"
+  if [ -x "$SRC/bin/vstack" ] && "$SRC/bin/vstack" trust "$SRC" --yes >/dev/null 2>&1; then
+    say "trusted    $SRC/.claude/verify.sh and the scripts it executes (verify gate)"
+  else
+    # Fail closed and say so. A gate that is off is recoverable with one command; a gate armed
+    # over an incomplete trust store is the thing this delegation exists to prevent.
+    say "WARNING    could not trust $SRC/.claude/verify.sh; the verify gate stays off (run: vstack trust)"
+  fi
 fi
 
 # --- hooks / agents / commands ------------------------------------------------------------
