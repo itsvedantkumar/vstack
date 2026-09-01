@@ -332,6 +332,25 @@ hand, the same status `bin-scripts.sh` and `container-matrix.sh` started from.
 tests/hook-latency.sh
 ```
 
+## evals/autofire/
+
+Whether the four planning-chain skills route from a situation with no user instruction naming
+them. `tests/evals/autofire/RESULTS.md` carries the arm, its reporting rules and its cost.
+
+The raw samples, one JSON object per line, written by `auto-trigger.sh` in SAMPLES mode:
+
+- `tests/evals/autofire/runlog-baseline-turns3-writing-plans-spec-to-steps.jsonl`
+- `tests/evals/autofire/runlog-baseline-turns3-swarm-audit.jsonl`
+- `tests/evals/autofire/runlog-baseline-turns3-executing-plans-checkpoints.jsonl`
+- `tests/evals/autofire/runlog-baseline-turns3-tdd-known-bugfix.jsonl`
+- `tests/evals/autofire/runlog-baseline-turns12-executing-plans-checkpoints.jsonl`
+- `tests/evals/autofire/runlog-baseline-turns12-tdd-known-bugfix.jsonl`
+
+Read the turns=3 and turns=12 tables together or not at all. Every turns=3 sample terminated
+`error_max_turns`, including the arms that fired, so being cut off separates nothing there. That
+is why two of those four numbers were re-taken at a budget nothing exhausted rather than
+published as results.
+
 ## evals/
 
 `evals/run-pathways.sh` and `evals/swebench/run.sh` score this bundle against
@@ -567,6 +586,59 @@ fails on that.
 Known gap: `hooks.json` names two of the eight scripts under `claude/hooks/` directly, because the
 plugin lane carries routing only. The rest are invoked from inside those or wired through
 `claude/settings.json` in the full install, so renaming one of them is not caught here.
+
+## description-collision.sh
+
+Scores every shipped skill description for shared trigger n-grams and names the overlapping
+pairs. No model calls, no network. Splits each description at its first colon, period or em dash
+into the discriminator clause and the rest, then weights shared 2- and 3-grams by where they
+land: 3 for both first clauses, 2 for one, 1 for neither.
+
+The only failing condition is a 3-gram opening two descriptions. That is the defect `aebeebb`
+fixed by hand, where `grill-me` and `interrogate` both led with "tear this apart". Everything
+else prints and passes, and the threshold is echoed on every run so nobody reads a green as "no
+overlap".
+
+Read the header before citing it. This is design discipline, not a dispatch law. The claim that
+colliding triggers suppress both skills was withdrawn in 1.47.0 for having no surviving runlog,
+and the pre-registered replacement at `evals/collision/` found the hypothesis unsupported.
+
+```
+tests/description-collision.sh              # score claude/skills
+tests/description-collision.sh --self-test  # prove it can fail, then that it passes
+```
+
+`--self-test` plants a collision that survives stopword normalisation, asserts the check fails
+and names the pair, then scores a clean corpus and asserts it passes. It found three defects in
+its own scorer before the live corpus did: a wrapped stoplist that made BSD awk exit without
+scoring anything, a `score()` that returned awk's status without telling a parse error apart from
+"no collisions", and an em dash that aborts BSD awk under a UTF-8 locale. `LC_ALL=C` is pinned
+for the third.
+
+## stage-skill-descriptions.sh
+
+Installs the repo's description line for named skills into `~/.claude/skills`, and puts it back.
+
+`auto-trigger.sh` runs the CLI in a scratch workdir, so the descriptions that reach the matcher
+are the installed ones. Measured 2026-09-01: a project-local `.claude/skills/<name>/SKILL.md` is
+loaded and listed, but a user-level skill of the same name wins. Asked to quote its own listing
+for `swarm`, the model returned the installed text and reported no duplicate. So an after-arm
+measured without installing would measure the before-arm's bytes and publish it as a result.
+Running `install.sh` instead installs the whole tree, including whatever another session has in
+flight.
+
+```
+tests/stage-skill-descriptions.sh --stage swarm writing-plans
+tests/stage-skill-descriptions.sh --status
+tests/stage-skill-descriptions.sh --restore
+```
+
+Both directions refuse rather than guess. `--stage` aborts if any installed copy already differs
+from repo HEAD, and pre-flights every named skill before touching any, so a half-applied stage
+cannot happen. `--restore` compares each file against the checksum it wrote and refuses that file
+if it changed, keeping the original instead of overwriting a foreign edit. Every `cp` is checked:
+without that, a failed copy would record a manifest checksum of the unchanged destination, and
+the restore path would delete the only backup after failing to use it.
 
 ## dispatch-fleet.sh
 

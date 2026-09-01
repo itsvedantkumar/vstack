@@ -77,8 +77,16 @@ do_stage() {
   : > "$STATE_DIR/manifest"
   for name in "$@"; do
     src="$SKILLS_SRC/$name/SKILL.md"; dst="$SKILLS_DST/$name/SKILL.md"
-    cp "$dst" "$STATE_DIR/$name.orig"
-    cp "$src" "$dst"
+    # Every cp is checked. There is no `set -e` here, so an unchecked failure would record a
+    # manifest entry whose checksum is of the UNCHANGED destination -- the arm would then run on
+    # stale bytes and the runlog would swear they were the new ones.
+    if ! cp "$dst" "$STATE_DIR/$name.orig"; then
+      echo "REFUSING: could not back up $dst -- nothing further staged." >&2; exit 2
+    fi
+    if ! cp "$src" "$dst"; then
+      echo "REFUSING: could not install $src -> $dst. Run --restore to undo what did land." >&2
+      exit 2
+    fi
     printf '%s\t%s\t%s\n' "$name" "$dst" "$(sumof "$dst")" >> "$STATE_DIR/manifest"
     staged=$((staged + 1))
     printf 'staged %-28s %s\n' "$name" "$(desc_of "$dst" | cut -c1-72)..."
@@ -104,7 +112,13 @@ do_restore() {
       rc=1
       continue
     fi
-    cp "$STATE_DIR/$name.orig" "$dst"
+    # Checked for the same reason, and harder: if this cp fails and rc stays 0, the rm -rf below
+    # deletes the only surviving copy of the original.
+    if ! cp "$STATE_DIR/$name.orig" "$dst"; then
+      echo "REFUSING $name: restore cp failed. Original kept at $STATE_DIR/$name.orig" >&2
+      rc=1
+      continue
+    fi
     n=$((n + 1))
     printf 'restored %-28s\n' "$name"
   done < "$STATE_DIR/manifest"

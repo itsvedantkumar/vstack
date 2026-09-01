@@ -578,9 +578,21 @@ sample_case() {
 
     violations="$(fence_violations "$workdir" "$baseline" "$baseline_hashes" "$out_jsonl" "$err_log")"
     if [[ -n "$SAMPLE_LOG" ]]; then
-      printf '{"case":"%s","sample":%d,"polarity":"%s","fired":"%s","subtype":"%s","named_in_prose":%s,"cost_usd":%s,"model":"%s","max_turns":%s,"instrument":"%s","descs":"%s"}\n' \
-        "$name" "$i" "$polarity" "$(tr '\n' ' ' <<<"$fired" | sed 's/ *$//')" "$term" \
-        "$prose_hit" "${cost:-0}" "$MODEL" "$case_turns" "$SAMPLE_HEAD" "$SAMPLE_DESCS" \
+      # jq builds the row, not printf. `fired` comes from .input.skill, a model-controlled
+      # tool-call argument: nothing constrains it to be quote-free, and a bare %s interpolation
+      # of a value containing a double quote emits a line that fails `jq .`. That would corrupt
+      # the runlog silently -- the same runlog the provenance block above calls the thing that
+      # makes a published k/N checkable. A measurement log that can be broken by its own subject
+      # is not a record.
+      jq -cn \
+        --arg case "$name" --argjson sample "$i" --arg polarity "$polarity" \
+        --arg fired "$(tr '\n' ' ' <<<"$fired" | sed 's/ *$//')" --arg subtype "$term" \
+        --argjson named_in_prose "${prose_hit:-0}" --argjson cost_usd "${cost:-0}" \
+        --arg model "$MODEL" --argjson max_turns "$case_turns" \
+        --arg instrument "$SAMPLE_HEAD" --arg descs "$SAMPLE_DESCS" \
+        '{case:$case,sample:$sample,polarity:$polarity,fired:$fired,subtype:$subtype,
+          named_in_prose:$named_in_prose,cost_usd:$cost_usd,model:$model,
+          max_turns:$max_turns,instrument:$instrument,descs:$descs}' \
         >> "$SAMPLE_LOG"
     fi
     rm -rf "$workdir"
