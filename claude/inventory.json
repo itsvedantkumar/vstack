@@ -11,7 +11,7 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "180e1bd75ae27d11219939ec7d49bc4eba97fd3e",
+    "head": "c22db9d0d930154c7efeb13878b379522cdf1ba5",
     "payload_digest": "03b320f49d7e321103af76b3fada510b1dc39d3268e135c3f08fb611fe47609f",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
