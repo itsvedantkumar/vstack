@@ -6,6 +6,44 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.61.0 — 2026-09-01
 
+### Three defects this release shipped, found by the first CI run that could see them
+
+The pre-tag red masked them. Every lane was already failing on "declared release is fetchable"
+before it got far enough to fail on anything else, and the release workflow read that as a verdict
+and deleted the candidate tag three times. Pushing the branch and the tag atomically closed the
+window, and what was underneath was three real faults.
+
+**The carve-out could never fire.** `bin/doctor` closes with `DRIFT ✖` whenever its fail count is
+non-zero -- a generic summary that name-collides with a real drift banner and carries no
+diagnostic content. `tests/container-matrix.sh` stripped the allowed finding's own line and left
+that one, so with `declared release is fetchable` as the SOLE failure the residual was still
+non-empty and every image reported `doctor exit=1; DRIFT ✖`. Row 62b proved the list and the
+`bin/doctor` branch. Nothing proved the filter against real doctor output, which is the third time
+here that both halves were tested and the join was not. Dropping the banner softens nothing, since
+each finding prints its own `✖`, but the banner had been acting as an accidental guard, so the
+guard is now explicit: the allowed finding must actually appear, or a doctor that fails while
+printing nothing would pass.
+
+**Check 63 could only ever skip in a container.** `tests/container-matrix.sh` installs bash, git,
+jq, curl, ca-certificates and shellcheck, and never python3. The skip classifier accepts a reason
+only if it matches `plugin manifest|authenticat|claude CLI`, so all three images failed on the
+classification -- debian's gate printed VERIFIED and the lane still failed, which is the classifier
+working correctly. Adding "python3 not on PATH" to that keyword list would have been a false label
+on a skip that has nothing to do with credentials, and laundering a skip that way is the
+regression `tests/container-skip-classify.sh` PROOF 4 exists to stop. The tool is provisioned
+instead.
+
+**Check 61 hid its own error.** It went red on Alpine and nowhere else, reporting only
+`vstack trust failed` because the call ran with `>/dev/null 2>&1`. Two reproduction attempts
+against a byte-identical image could not make it fail, and `shasum` was ruled out, all against
+evidence discarded at the source. With stderr kept, Alpine said it in one line: `no vstack repo
+found (checked $VSTACK_DIR, ~/.vstack, and this script's git root)`. The check redirects HOME so
+each lane writes its own trust store, which also hides `~/.vstack` and the gitconfig holding
+`actions/checkout`'s safe.directory exemption, so git refuses the checkout and `bin/vstack` exits
+before `trust` runs. Naming `$VSTACK_DIR` settles it. The check's own environment, not a defect in
+what it measures -- but a check that knows something is wrong and throws away the sentence saying
+what belongs in the catalogue's subject matter, not beside it.
+
 ### The eighteenth entry in the catalogue, and the first that inherited a red
 
 `tests/install-matrix.sh` asserts the installer leaves no trace of the machine that built it, with
