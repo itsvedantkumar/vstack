@@ -162,10 +162,28 @@ JSONL record, so counting Agent blocks per record scores a four-agent batch as f
 and returns 0.0 fan-out on every input ever. Measured both ways over the same 1008 dispatches: 0.0
 per record, 53.0% per run.
 
+> **AMENDMENT, 2026-09-01 (v1.61.0), left in place rather than edited.** `tests/transcript-census.sh`
+> now exists and recomputes these figures. The 0.0-per-record half reproduces exactly and is
+> structural, as claimed. **The 53.0% per-run half does not reproduce under any denominator.**
+> Over the corpus today: 4.8% of dispatching turns were batches, 12.3% of dispatches went out in
+> a batch, 8.6% of dispatching sessions contained one, 5.4% per turn when subagent leaves are
+> folded back in. The dispatch count reproduces only with those leaves included (1040 today
+> against 1008 then, consistent with corpus growth), so the published denominator was
+> leaf-inclusive and this paragraph does not say so.
+>
+> No denominator was searched for until one flattered the figure; all four are printed by the
+> instrument on every run, which is why the disagreement is visible at all. What 53.0% measured is
+> unrecoverable -- the number was published with no instrument, so there is nothing to re-run.
+> That is the whole argument for `docs/checks-that-inherit-their-answer.md`, turned on this
+> repository's own changelog: a figure nobody can recompute cannot be wrong in public, and this
+> one was wrong for two weeks.
+
 ### Every dispatch now routes through the swarm skill, and the mandates stopped sharing a fuse
 
 Measured across 2536 transcripts and 20508 assistant tool-using messages: 516 Skill invocations,
-2.52 per 100. Three skills shipped by this repository have never fired once -- `writing-plans`,
+2.52 per 100. (Reproduced 2026-09-01 by `tests/transcript-census.sh`: 2536
+transcript files, 21114 tool-using messages, 520 Skill invocations, 2.46 per 100, `brainstorming`
+still exactly 23, the three named skills still exactly 0.) Three skills shipped by this repository have never fired once -- `writing-plans`,
 `test-driven-development`, `executing-plans` -- and they are links 2, 3 and 4 of a single chain the
 session digest stated in one line. Link 1, `brainstorming`, fired 23 times. Routing took the first
 step and stopped, so the line is now four lines with mutually exclusive preconditions: nothing

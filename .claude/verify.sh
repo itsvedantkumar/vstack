@@ -4218,7 +4218,7 @@ fi
 # the first draft of this check said so, and both were right.
 #
 # Every falsifiability row runs the WHOLE gate to see which check goes red, so per-row cost is a
-# function of the gate's own size: adding a check makes all 105 rows slower. So the recorded
+# function of the gate's own size: adding a check makes all 107 rows slower. So the recorded
 # measurement carries the check count it was taken at, and the model scales it by the gate size
 # it finds right here. Adding checks to this file raises the floor it derives, automatically.
 #
@@ -4548,6 +4548,46 @@ if [ -f "$c62_f" ]; then
   fi
 else
   bad "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" "$c62_f is missing, so two harnesses are carving out a finding with nothing naming which one"
+fi
+
+# --- 63. published corpus figures have an instrument, and its arithmetic is proven
+# CHANGELOG 1.57.0 published six numbers about this machine's transcript corpus and `git grep`
+# for any of them returned CHANGELOG.md alone. Prose is not a measurement. tests/transcript-census.sh
+# now recomputes them, and running it against the corpus already found that one of the six --
+# "53.0% per run" -- reproduces under no denominator the instrument computes.
+#
+# The census itself cannot run here: CI has no transcripts, and neither does a stranger's clone.
+# So this checks the half that is checkable everywhere, and checks it in BOTH directions. Lane 1
+# runs the self-test and requires its PROVEN verdict. Lane 2 does not trust that verdict: it
+# re-runs the engine against an empty corpus directly and requires a non-zero exit, because a
+# self-test that reports PROVEN having asserted nothing is precisely the shape this gate exists
+# to catch, and a script grading its own homework is not a control.
+c63_sh="tests/transcript-census.sh"
+c63_py="tests/transcript-census.py"
+if [ ! -f "$c63_sh" ] || [ ! -f "$c63_py" ]; then
+  bad "corpus census arithmetic is proven" "$c63_sh / $c63_py missing, so CHANGELOG's corpus figures have no instrument again"
+elif ! command -v python3 >/dev/null 2>&1; then
+  skip "corpus census arithmetic is proven" "python3 not on PATH"
+else
+  c63_errs=""
+  c63_out=$(bash "$c63_sh" --self-test 2>&1)
+  printf '%s' "$c63_out" | grep -q '^CENSUS ARITHMETIC PROVEN$' \
+    || c63_errs="$c63_errs\n$c63_sh --self-test did not report PROVEN: $(printf '%s' "$c63_out" | tail -3 | tr '\n' ';')"
+  c63_n=$(printf '%s' "$c63_out" | grep -c '^ok    ' || true)
+  [ "${c63_n:-0}" -ge 15 ] \
+    || c63_errs="$c63_errs\n$c63_sh --self-test reported PROVEN on only ${c63_n:-0} assertion(s); it declares 7 proofs and a verdict over an empty proof set is the defect this check is for"
+  # Independent control: the engine must refuse an empty corpus rather than report 0.0%.
+  c63_tmp=$(mktemp -d "${TMPDIR:-/tmp}/vstack-c63.XXXXXX")
+  mkdir -p "$c63_tmp/proj"
+  c63_e=$(python3 "$c63_py" "$c63_tmp" 2>&1); c63_rc=$?
+  rm -rf "$c63_tmp"
+  { [ "$c63_rc" -ne 0 ] && printf '%s' "$c63_e" | grep -q 'INCONCLUSIVE'; } \
+    || c63_errs="$c63_errs\n$c63_py reported rc=$c63_rc on an empty corpus; an empty census is not a rate of zero and must not exit 0"
+  if [ -z "$c63_errs" ]; then
+    ok "corpus census arithmetic is proven ($c63_n assertions, empty corpus refused)"
+  else
+    bad "corpus census arithmetic is proven" "$(printf '%b' "$c63_errs")"
+  fi
 fi
 
 # Accounting. Every declared check must have reported either a result or a skip. A check

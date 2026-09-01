@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b 20d 61 62 62b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b 20d 61 62 62b 63 63b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -301,6 +301,8 @@ files_for(){ case "$1" in
   61)  printf 'install.sh' ;;
   62)  printf 'tests/pretag-findings.sh' ;;
   62b) printf 'bin/doctor' ;;
+  63) printf 'tests/transcript-census.py' ;;
+  63b) printf 'tests/transcript-census.sh' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -404,6 +406,8 @@ label_for(){ case "$1" in
   61)  printf "install trust covers what the gate executes" ;;
   62)  printf "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" ;;
   62b) printf "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" ;;
+  63) printf "corpus census arithmetic is proven" ;;
+  63b) printf "corpus census arithmetic is proven" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -726,6 +730,20 @@ exit 7
       # 404ing install URL. Anchored on the reporter, not on the message.
       sed -i.t 's/^      bad "declared release is fetchable"/      note "declared release is fetchable"/' bin/doctor \
         && rm -f bin/doctor.t ;;
+
+  63) # Lane 1: break the run-grouping the census exists to get right. Consecutive same-id
+      # records stop merging, so PROOF 1's batch of three reads as three solo dispatches -- the
+      # exact wrong answer the per-record metric gives, reproduced inside the engine.
+      sed -i.t 's/if mid is not None and mid == run_id:/if False:/' tests/transcript-census.py \
+        && rm -f tests/transcript-census.py.t ;;
+
+  63b) # Lane 2, the half a check that only reads the self-test's verdict would miss: leave the
+      # engine correct and gut the self-test instead. Commenting out PROOF 1's five assertions
+      # drops the assertion count from 18 to 13 while the script still prints CENSUS ARITHMETIC
+      # PROVEN, because every assertion that ran passed. A verdict over a shrinking proof set is
+      # the founding defect of this repository, and check 63's assertion floor is what catches it.
+      sed -i.t 's/^expect "P1 /#expect "P1 /' tests/transcript-census.sh \
+        && rm -f tests/transcript-census.sh.t ;;
   58c) # Remove the check count the measurement was taken at. Without it the recorded cost cannot
       # be scaled to this gate's size, so it would silently stay frozen at the size it was
       # measured on, which is how the constant it replaced went stale in the first place. A
