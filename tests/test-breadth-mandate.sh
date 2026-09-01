@@ -65,6 +65,8 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 22: three singleton dispatches, no batch -> serial-tail mandate blocks" "jq not installed"
   skip "PROOF 23: two singleton dispatches -> serial-tail mandate silent (below threshold)" "jq not installed"
   skip "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" "jq not installed"
+  skip "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" "jq not installed"
+  skip "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -127,6 +129,7 @@ names_swarm_(){ printf '%s' "$HOOK_REASON" | grep -qF 'swarm --'; }
 names_unslop_(){ printf '%s' "$HOOK_REASON" | grep -qF 'unslop --'; }
 names_ts_(){ printf '%s' "$HOOK_REASON" | grep -qF 'typescript-best-practices --'; }
 names_serial_(){ printf '%s' "$HOOK_REASON" | grep -qF 'serial dispatch tail --'; }
+names_register_(){ printf '%s' "$HOOK_REASON" | grep -qF 'register -- banned opener'; }
 
 # --- PROOF 1: 5 fixture writes, 1 directory, 1 extension, 0 Task calls ------------------------
 # Negative direction. Mechanical repetition (fixtures/case1.json .. case5.json) must not read
@@ -525,6 +528,34 @@ if [ "$HOOK_DECISION" = "block" ] && names_serial_; then
 else
   bad "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" \
       "expected decision=block naming 'serial dispatch tail --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 25: turn text opening with a banned register phrase -> register blocks ---------------
+# Positive direction for the register mandate: an assistant text block whose line starts with a
+# banned CLAUDE.md REGISTER opener ("Let me ..."). Zero writes, zero dispatches, so no other
+# mandate can confound; the block must name the phrase it matched so the reader knows what to
+# delete, not just that something tripped.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me look at the failing lane before touching anything."}]}}'
+run_hook_ proof25
+if [ "$HOOK_DECISION" = "block" ] && names_register_; then
+  ok "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks"
+else
+  bad "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" \
+      "expected decision=block naming 'register -- banned opener', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 26: banned words mid-line or without a boundary char -> register stays silent --------
+# Negative direction, both anchors in one fixture: "Right-sizing" starts a line but "-" is not in
+# the [,! .] boundary class (vocabulary, not an acknowledgement token), and "Great," appears only
+# mid-line, which the ^ anchor must ignore. Nothing else in the fixture can block, so the bar is
+# strict empty stdout.
+say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Right-sizing the buffer comes later.\\nThe run passed twice. Great, both agree."}]}}'
+run_hook_ proof26
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent"
+else
+  bad "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 echo
