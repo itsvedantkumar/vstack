@@ -252,7 +252,7 @@ A project that has never found one of these has not looked.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent per session | 0 B | ~3.9 KB full / ~2.3 KB plugin |
+| Context spent per session | 0 B | ~4.1 KB full / ~2.5 KB plugin |
 
 The last row is the price, paid every session. Check 18 reads those figures back from this table
 and fails if they drift from what the hook actually emits.
