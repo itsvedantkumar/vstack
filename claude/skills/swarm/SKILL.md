@@ -1,6 +1,6 @@
 ---
 name: swarm
-description: "Use when work splits into independent parts or approaches should be raced — 'in parallel', 'at once', 'all of these', 'try N ways'. Fans out N agents in ONE batched message, returns one table."
+description: "Three or more independent units of work exist (files, packages, endpoints, rival approaches) and none needs another's result. Fans out N agents in ONE batched message, returns one table."
 ---
 
 # Swarm
