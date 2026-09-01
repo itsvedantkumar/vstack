@@ -942,7 +942,15 @@ else
   # any 40-hex pin passes and the two load-bearing hooks stand in for the full set.
   covrepo=$(resolve_vstack_repo 2>/dev/null) || covrepo=""
   covhead=""
-  [ -n "$covrepo" ] && covhead=$(git -C "$covrepo" rev-parse HEAD 2>/dev/null)
+  # -c safe.directory: the checkout may be foreign-owned while HOME is overridden (CI
+  # containers), which hides any safe.directory the operator's real gitconfig carries; without
+  # it rev-parse fails, covhead comes back empty, and the pin comparison below silently
+  # degrades. That exact shape shipped a fake cov-ready in the v1.62.0 alpine/ubuntu jobs.
+  [ -n "$covrepo" ] && covhead=$(git -c "safe.directory=$covrepo" -C "$covrepo" rev-parse HEAD 2>/dev/null)
+  # A repo we FOUND but cannot read the HEAD of is not a stranger's machine: pins are
+  # unverifiable, and unverifiable must classify as stale, never as fresh.
+  covhead_unreadable=0
+  [ -n "$covrepo" ] && [ -z "$covhead" ] && covhead_unreadable=1
   hookmembers=""
   if [ -n "$covrepo" ] && command -v jq >/dev/null 2>&1; then
     hookmembers=$(jq -r '.components.hooks.members[]?' "$covrepo/claude/inventory.json" 2>/dev/null | tr '\n' ' ')
@@ -999,6 +1007,7 @@ else
       covpin=$(grep -oE '/vstack/[0-9a-f]{40}/bootstrap\.sh' "$covtoml" 2>/dev/null | head -1)
       covpin=${covpin#/vstack/}; covpin=${covpin%/bootstrap.sh}
       covfresh=1
+      [ "$covhead_unreadable" = 1 ] && covfresh=0
       [ -n "$covpin" ] || covfresh=0
       [ -n "$covhead" ] && [ -n "$covpin" ] && [ "$covpin" != "$covhead" ] && covfresh=0
       grep -q 'trust --yes' "$covtoml" 2>/dev/null || covfresh=0

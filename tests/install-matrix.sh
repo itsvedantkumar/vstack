@@ -1432,6 +1432,18 @@ if want doctor-coverage; then
     case "$row" in *cov-source*) e="$e; a vstack checkout was classified as a coverage target" ;; esac
     src_note=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-source"))] | length' 2>/dev/null)
     [ "${src_note:-0}" -eq 0 ] || e="$e; a vstack checkout leaked into the local-only note"
+    # A found vstack repo whose HEAD cannot be read (CI containers: foreign-owned checkout +
+    # overridden HOME hiding safe.directory) must make every pin UNVERIFIABLE, not fresh.
+    # v1.62.0's first tag died on this: covhead came back empty in the alpine/ubuntu jobs, the
+    # pin comparison silently degraded to any-pin-passes, and cov-stale classified as ready.
+    # VSTACK_DIR here passes resolve_vstack_repo's predicate (claude/settings.json exists) but
+    # is not a git repo, so rev-parse fails the same way -- both cov-ready and cov-stale must
+    # then be named, because neither pin can be checked against a HEAD that cannot be read.
+    mkdir -p "$C/fakesrc/claude"; printf '{}\n' > "$C/fakesrc/claude/settings.json"
+    js2=$(HOME="$CH" VSTACK_DIR="$C/fakesrc" "$SRC/bin/doctor" --json 2>/dev/null)
+    row2=$(printf '%s' "$js2" | jq -r '.checks[] | select(.label | startswith("active repos overlaid")) | "\(.status) \(.detail)"' 2>/dev/null)
+    case "$row2" in *cov-ready*) ;; *) e="$e; head-unreadable vstack repo: cov-ready still classified fresh (pin was never verified)" ;; esac
+    case "$row2" in *cov-stale*) ;; *) e="$e; head-unreadable vstack repo: cov-stale not named" ;; esac
     [ -z "$e" ] && ok "doctor coverage classes (half, ready, bare, stale, hooks-disabled)" \
       || bad "doctor coverage classes" "${e#; }"
   fi
