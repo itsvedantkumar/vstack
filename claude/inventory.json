@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.61.0",
+    "version": "1.62.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -11,8 +11,8 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "32d94e0e6c436427457e651d1c718bd7442979b8",
-    "payload_digest": "03b320f49d7e321103af76b3fada510b1dc39d3268e135c3f08fb611fe47609f",
+    "head": "a14de63e39252c884275fdd105793603745b23c4",
+    "payload_digest": "95a6aafd03e604edda868f884ea5ff9fcc2d777347279def6b5fcc1d3d54e8b6",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
@@ -519,7 +519,7 @@
     },
     "files": {
       "rule": "Ownership by receipt first, byte-identity second.",
-      "receipt": "$HOME/.config/agents/vstack-installed — install.sh appends every path it writes; survives a version change, where content comparison cannot.",
+      "receipt": "$HOME/.config/agents/vstack-installed \u2014 install.sh appends every path it writes; survives a version change, where content comparison cannot.",
       "byte_identity_fallback": "For a machine with no receipt yet, a target byte-identical to the repo file about to overwrite it is treated as vstack's.",
       "stated_trade": "A user file whose bytes exactly equal vstack's is indistinguishable from vstack's and is treated as vstack's, so uninstall deletes it. The alternative loses the ability to uninstall at all.",
       "uninstall_rules": [
@@ -618,10 +618,10 @@
         "57",
         "58",
         "59",
-          "60",
-          "61",
-          "62",
-          "63"
+        "60",
+        "61",
+        "62",
+        "63"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
