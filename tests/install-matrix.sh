@@ -1426,6 +1426,40 @@ if want doctor-coverage; then
   fi
 fi
 
+# --- overlay bumps a stale conductor pin, and only the pin ------------------------------------
+# The generated .conductor/settings.toml pins a vstack SHA into its setup line, but the file is
+# written only when absent, so an existing pin drifted behind HEAD forever -- five real repos
+# carried four different SHAs. A re-run must rewrite exactly the /vstack/<sha>/bootstrap.sh
+# substring and nothing else; a setup line the operator replaced wholesale is theirs to keep.
+if want overlay-pin-bump; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "overlay pin bump" "git or jq not installed"
+  else
+    P="$ROOT/pinbump"; mkdir -p "$P"
+    git -C "$P" init -q; git -C "$P" config user.email t@example.com; git -C "$P" config user.name t
+    printf 'x\n' > "$P/f"; git -C "$P" add -A; git -C "$P" commit -qm init
+    "$SRC/overlay.sh" "$P" >/dev/null 2>&1
+    PT="$P/.conductor/settings.toml"
+    Z=0000000000000000000000000000000000000000
+    printf '\n# operator-added line that must survive\nMY_MARKER = "keep-me"\n' >> "$PT"
+    sed "s|/vstack/[0-9a-f]\{40\}/bootstrap\.sh|/vstack/$Z/bootstrap.sh|" "$PT" > "$P/t" \
+      && cat "$P/t" > "$PT" && rm -f "$P/t"
+    out=$("$SRC/overlay.sh" "$P" 2>&1)
+    e=""
+    pbhead=$(git -C "$SRC" rev-parse HEAD)
+    grep -q "/vstack/$pbhead/bootstrap.sh" "$PT" || e="$e; the stale pin was not bumped to this checkout's HEAD"
+    grep -q "/vstack/$Z/bootstrap.sh" "$PT" && e="$e; the zero pin survived"
+    grep -q 'MY_MARKER = "keep-me"' "$PT" || e="$e; an operator-added line did not survive the bump"
+    case "$out" in *bumped*) ;; *) e="$e; overlay never said it bumped the pin" ;; esac
+    sed 's|^setup = .*|setup = "make my-own-bootstrap"|' "$PT" > "$P/t" && cat "$P/t" > "$PT" && rm -f "$P/t"
+    cp "$PT" "$P/before"
+    "$SRC/overlay.sh" "$P" >/dev/null 2>&1
+    cmp -s "$PT" "$P/before" || e="$e; a settings.toml with no vstack pin was rewritten"
+    [ -z "$e" ] && ok "overlay bumps a stale conductor pin (and leaves foreign setup lines alone)" \
+      || bad "overlay bumps a stale conductor pin" "${e#; }"
+  fi
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
