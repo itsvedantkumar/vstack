@@ -13,7 +13,12 @@ set -uo pipefail
 
 PER_CASE_TIMEOUT=120   # seconds; enforced by the polling loop in run_case (macOS has no timeout(1))
 MODEL="sonnet"
-MAX_TURNS=3
+# Env-overridable as of 2026-09-01, for probing turn starvation without editing the file.
+# The 2026-08-23 note above case_max_turns records the last such probe being run through a
+# throwaway script precisely because this was a literal -- and an uncommitted instrument is why
+# that arm's numbers were withdrawn. The value lands in every SAMPLES runlog row, so an arm run
+# at a different budget cannot be silently mixed with one run at the default.
+MAX_TURNS="${MAX_TURNS:-3}"
 # Per-case turn budget, measured not guessed (2026-08-23), enforced by case_max_turns() below.
 # MAX_TURNS above is still the global default -- a case with no row here is not in the case
 # statement below either, and inherits MAX_TURNS unchanged, same as before this table existed.
