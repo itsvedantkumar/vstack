@@ -3056,14 +3056,20 @@ if command -v jq >/dev/null; then
     c44_payload(){ printf '{"session_id":"%s","model":{"display_name":"Claude"}}' "$c44_sid"; }
     c44_dispatch(){ printf '{"session_id":"%s","tool_name":"%s"}' "$c44_sid" "$1" | "./$dc" >/dev/null 2>&1; }
 
-    # Direction 2 (absence is not zero): a session with no dispatches must render no RICK
-    # segment at all. "·0▸" would claim zero delegation happened when the truth is nobody has
-    # asked yet -- a fresh session and a session that delegated zero times on purpose are not
-    # the same state, and only the absent-file case is this one.
+    # Direction 2 (zero renders, and renders as zero): a session with no dispatches must still
+    # render the RICK segment, carrying the ·0▸ marker. This direction used to assert the
+    # opposite -- no segment at all before the first dispatch, on the reasoning that an absent
+    # counter file means "nobody asked yet" rather than "zero on purpose". That precision cost
+    # total invisibility: the team indicator disappeared exactly in the sessions where
+    # delegation never happened, which are the sessions the indicator exists to expose. The
+    # counter file is only ever created by a dispatch, so for display purposes absent IS zero
+    # dispatches so far, and zero is bad news that must be on screen, not blank.
     [ -e "$c44_cnt" ] && c44_errs="$c44_errs\ncounter file already existed before any dispatch: $c44_cnt"
     c44_out0=$(c44_payload | "./$sl" 2>/dev/null)
     case "$c44_out0" in
-      *RICK*) c44_errs="$c44_errs\na session with zero dispatches rendered a RICK segment: $c44_out0" ;;
+      *RICK*"·0▸"*) ;;
+      *RICK*) c44_errs="$c44_errs\nzero dispatches rendered RICK without the ·0▸ marker -- a blank or positive count over a session that never delegated: $c44_out0" ;;
+      *) c44_errs="$c44_errs\na session with zero dispatches rendered no RICK segment at all -- absence hides the team exactly when enforcement is failing: $c44_out0" ;;
     esac
 
     # Replay-log fixtures for Direction 3, wired up BEFORE the drive below so the same dispatches
