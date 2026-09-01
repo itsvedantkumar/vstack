@@ -4445,9 +4445,25 @@ c61_store(){ printf '%s' "$1/home/.config/agents/verify-trust"; }
 # was run with `>/dev/null 2>&1` -- a check that knows something is wrong and has thrown away the
 # only sentence saying what. Two reproduction attempts against a byte-identical image failed to
 # make it fail, which is exactly the case where the swallowed stderr is the whole investigation.
+# VSTACK_DIR is set for the same reason HOME is overridden, and the two interact. HOME is
+# redirected so each lane gets its own trust store instead of writing the operator's. That also
+# hides ~/.vstack and the global gitconfig, and bin/vstack resolves its repo from $VSTACK_DIR,
+# then ~/.vstack, then `git rev-parse --show-toplevel`. Under a foreign HOME the first two are
+# gone, and inside the Alpine CI container the third fails too -- actions/checkout writes its
+# safe.directory exemption into the runner HOME's gitconfig, which the override hides, so git
+# refuses the checkout as dubiously owned. bin/vstack then exits 1 before `trust` runs at all.
+#
+# PROVEN: the three lanes reported `no vstack repo found (checked $VSTACK_DIR, ~/.vstack, and
+# this script's git root)`, rc=1, on Alpine only. INFERRED: that the git-root lane failed
+# specifically on dubious ownership; the message does not say which of the three lost. Naming
+# $VSTACK_DIR settles it either way, and it is what the error text itself tells you to do.
+#
+# This is the check's own environment, not a defect in what it measures: a user does not run
+# vstack under a substituted HOME. It cost a red on one platform and three destroyed tags'
+# worth of noise because the invocation discarded stderr.
 c61_last=""
 c61_trust(){
-  c61_last=$(HOME="$1/home" ./bin/vstack trust "$1" --yes 2>&1 >/dev/null)
+  c61_last=$(HOME="$1/home" VSTACK_DIR="$PWD" ./bin/vstack trust "$1" --yes 2>&1 >/dev/null)
   c61_rc=$?
   [ -n "$c61_last" ] || c61_last="(command printed nothing on stderr)"
   c61_last="rc=$c61_rc, stderr: $(printf '%s' "$c61_last" | tr '\n' ' ')"
@@ -4481,7 +4497,7 @@ fi
 # Lane 4 -- this repository. The two files the narrow writer missed, named because they are the
 # ones verify.sh actually executes, not because they are a general category.
 c61_c="$c61_d/c"; mkdir -p "$c61_c/home"
-if c61_last=$(HOME="$c61_c/home" ./bin/vstack trust "$PWD" --yes 2>&1 >/dev/null); c61_rc=$?; \
+if c61_last=$(HOME="$c61_c/home" VSTACK_DIR="$PWD" ./bin/vstack trust "$PWD" --yes 2>&1 >/dev/null); c61_rc=$?; \
    c61_last="rc=$c61_rc, stderr: $(printf '%s' "${c61_last:-(nothing on stderr)}" | tr '\n' ' ')"; \
    [ "$c61_rc" -eq 0 ]; then
   for c61_f in install.sh overlay.sh; do
