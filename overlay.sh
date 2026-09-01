@@ -150,20 +150,38 @@ fi
 # into the sandbox. Never overwrite an existing file — a repo's own setup script matters more
 # than this one, so print the lines to merge by hand instead.
 mkdir -p "$DEST/.conductor"
+# The pin was a hardcoded SHA that nobody bumped, so it drifted behind main and every new
+# sandbox bootstrapped an old vstack. Resolving HEAD keeps the security property — a sandbox
+# runs a specific reviewed commit, not whatever main happens to be — while pinning to the
+# commit actually being overlaid.
+PIN=$(git -C "$SRC" rev-parse HEAD)
+if ! git -C "$SRC" branch -r --contains "$PIN" 2>/dev/null | grep -q .; then
+  echo "warning: $PIN is not on any remote branch yet — the sandbox setup will 404 until you push" >&2
+fi
 if [ -f "$DEST/.conductor/settings.toml" ]; then
-  echo "kept    .conductor/settings.toml (already exists)"
-  echo "        to run the verify gate from Conductor, add:"
-  echo "          [scripts.run.verify]"
-  echo "          command = \"./.claude/verify.sh\""
-else
-  # The pin was a hardcoded SHA that nobody bumped, so it drifted behind main and every new
-  # sandbox bootstrapped an old vstack. Resolving HEAD keeps the security property — a sandbox
-  # runs a specific reviewed commit, not whatever main happens to be — while pinning to the
-  # commit actually being overlaid.
-  PIN=$(git -C "$SRC" rev-parse HEAD)
-  if ! git -C "$SRC" branch -r --contains "$PIN" 2>/dev/null | grep -q .; then
-    echo "warning: $PIN is not on any remote branch yet — the sandbox setup will 404 until you push" >&2
+  # "Written only when absent" made every existing pin permanent: five real repos carried four
+  # different vstack SHAs, all behind HEAD. Rewrite exactly the /vstack/<sha>/bootstrap.sh
+  # substring and nothing else. A file with no such substring has an operator-owned setup line;
+  # leave it byte-identical and say what is missing instead.
+  curpin=$(grep -oE '/vstack/[0-9a-f]{40}/bootstrap\.sh' "$DEST/.conductor/settings.toml" 2>/dev/null | head -1)
+  curpin=${curpin#/vstack/}; curpin=${curpin%/bootstrap.sh}
+  if [ -n "$curpin" ] && [ "$curpin" != "$PIN" ]; then
+    tomltmp=$(mktemp)
+    sed "s|/vstack/$curpin/bootstrap\.sh|/vstack/$PIN/bootstrap.sh|g" \
+      "$DEST/.conductor/settings.toml" > "$tomltmp" && cat "$tomltmp" > "$DEST/.conductor/settings.toml"
+    rm -f "$tomltmp"
+    echo "bumped  .conductor/settings.toml pin $curpin -> $PIN (commit it)"
+  else
+    echo "kept    .conductor/settings.toml (already exists)"
   fi
+  grep -q 'trust --yes' "$DEST/.conductor/settings.toml" 2>/dev/null \
+    || echo "        note: setup line has no \"vstack trust --yes\" — the Stop-hook gate stays unarmed in cloud sandboxes"
+  grep -q '\[scripts.run.verify\]' "$DEST/.conductor/settings.toml" 2>/dev/null || {
+    echo "        to run the verify gate from Conductor, add:"
+    echo "          [scripts.run.verify]"
+    echo "          command = \"./.claude/verify.sh\""
+  }
+else
   sed "s/__PIN__/$PIN/" > "$DEST/.conductor/settings.toml" <<'TOML'
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 

@@ -4,6 +4,34 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.62.0 — 2026-09-01
+
+### Coverage that reads the overlay, not the toml
+
+**doctor's coverage verdict measured the wrong artifact.** The "active repos overlaid" predicate
+was one line: `.conductor/settings.toml` exists. A repo with that file and no committed `.claude`
+at all scored as covered, and a repo fully served by the global `~/.claude` lane scored as a
+failure. Measured live before the change: `ok (8 scanned)` over eight repos of which zero were
+cloud-ready. The check now classifies every active repo into the classes defined in
+`docs/config-precedence.md` -- cloud-ready, half-covered, stale, hooks-disabled, local-only --
+and the same live run reports every one of the eight for what it is. A vstack checkout itself
+(claude/settings.json plus overlay.sh at the root) is the source, not a target, and is excluded.
+
+**A repo-local `disableAllHooks` silences the whole global stack.** Established by experiment,
+not docs: one committed line in `.claude/settings.json` stopped every user-scope hook in the
+session, verify gate included. doctor now flags it as its own failure class. The experiment also
+settled two standing questions: memory files load additively (global, root, and `.claude/`
+CLAUDE.md all reach the session), and hook arrays merge across scopes rather than shadow, so an
+overlaid repo with fewer per-event commands loses nothing. The protocol and raw artifacts are in
+`docs/config-precedence.md`.
+
+**overlay.sh bumps a stale conductor pin.** `.conductor/settings.toml` was written only when
+absent, so its pinned vstack SHA never moved: five real repos carried four different pins, all
+behind HEAD, and every new cloud sandbox bootstrapped an old vstack. A re-run now rewrites
+exactly the `/vstack/<sha>/bootstrap.sh` substring to the overlaying checkout's HEAD. A setup
+line the operator replaced wholesale has no such substring and stays byte-identical; a missing
+`trust --yes` prints as a hint, never a rewrite.
+
 ## 1.61.0 — 2026-09-01
 
 ### Three defects this release shipped, found by the first CI run that could see them

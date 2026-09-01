@@ -1373,6 +1373,104 @@ if want doctor-stranger; then
   fi
 fi
 
+# --- doctor's coverage verdict reads the overlay, not just the conductor toml -------------------
+# The old predicate called a repo covered because .conductor/settings.toml existed. A repo with
+# that file and no committed .claude at all -- the exact shape the toml exists to serve -- scored
+# as overlaid, and a repo fully served by the global ~/.claude lane scored as a failure. Five
+# planted repos, one per coverage class from docs/config-precedence.md, and the verdict must name
+# each for what it is.
+if want doctor-coverage; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "doctor coverage classes" "git or jq not installed"
+  else
+    C="$ROOT/cov"; CH="$C/home"
+    mkdir -p "$CH/.claude/hooks" "$CH/Projects"
+    # A live global lane: settings plus every hook inventory.json declares.
+    cp "$SRC/claude/settings.json" "$CH/.claude/settings.json"
+    cp "$SRC"/claude/hooks/*.sh "$CH/.claude/hooks/"
+    cov_mkrepo(){ mkdir -p "$1"; git -C "$1" init -q; git -C "$1" config user.email t@example.com; git -C "$1" config user.name t; printf 'x\n' > "$1/f"; git -C "$1" add -A; git -C "$1" commit -qm init; }
+    # cov-half: the old lie -- conductor toml, no overlay artifacts.
+    cov_mkrepo "$CH/Projects/cov-half"
+    mkdir -p "$CH/Projects/cov-half/.conductor"
+    printf 'setup = "curl x"\n' > "$CH/Projects/cov-half/.conductor/settings.toml"
+    # cov-ready: freshly overlaid, pin == this checkout's HEAD, trust --yes present.
+    cov_mkrepo "$CH/Projects/cov-ready"
+    "$SRC/overlay.sh" "$CH/Projects/cov-ready" >/dev/null 2>&1
+    # cov-bare: nothing -- served by the global lane, must be a note, never a failure.
+    cov_mkrepo "$CH/Projects/cov-bare"
+    # cov-stale: overlaid, then the pin rewound to a commit that is not HEAD.
+    cov_mkrepo "$CH/Projects/cov-stale"
+    "$SRC/overlay.sh" "$CH/Projects/cov-stale" >/dev/null 2>&1
+    Z=0000000000000000000000000000000000000000
+    sed "s|/vstack/[0-9a-f]\{40\}/bootstrap\.sh|/vstack/$Z/bootstrap.sh|" \
+      "$CH/Projects/cov-stale/.conductor/settings.toml" > "$C/t" \
+      && cat "$C/t" > "$CH/Projects/cov-stale/.conductor/settings.toml" && rm -f "$C/t"
+    # cov-nohooks: one committed line that silences the whole global stack (measured in
+    # docs/config-precedence.md Q3) -- always a failure, whatever else the repo carries.
+    cov_mkrepo "$CH/Projects/cov-nohooks"
+    mkdir -p "$CH/Projects/cov-nohooks/.claude"
+    printf '{"disableAllHooks": true}\n' > "$CH/Projects/cov-nohooks/.claude/settings.json"
+    # cov-source: a vstack checkout itself (claude/settings.json + overlay.sh at the root).
+    # It ships FROM claude/ and never carries its own overlay, so classifying it half-covered
+    # turns every checkout of this repo into a permanent red. It must not be classified at all.
+    cov_mkrepo "$CH/Projects/cov-source"
+    mkdir -p "$CH/Projects/cov-source/claude" "$CH/Projects/cov-source/.conductor"
+    printf '{}\n' > "$CH/Projects/cov-source/claude/settings.json"
+    printf '#!/bin/sh\n' > "$CH/Projects/cov-source/overlay.sh"
+    printf 'setup = "curl x"\n' > "$CH/Projects/cov-source/.conductor/settings.toml"
+    js=$(HOME="$CH" VSTACK_DIR="$SRC" "$SRC/bin/doctor" --json 2>/dev/null)
+    row=$(printf '%s' "$js" | jq -r '.checks[] | select(.label | startswith("active repos overlaid")) | "\(.status) \(.detail)"' 2>/dev/null)
+    e=""
+    case "$row" in bad*) ;; *) e="$e; verdict is '${row:-missing}', want bad naming the half-covered/stale/disabled repos" ;; esac
+    case "$row" in *cov-half*) ;; *) e="$e; cov-half (toml without overlay) not named" ;; esac
+    case "$row" in *cov-stale*) ;; *) e="$e; cov-stale (old pin) not named" ;; esac
+    case "$row" in *cov-nohooks*) ;; *) e="$e; cov-nohooks (disableAllHooks) not named" ;; esac
+    case "$row" in *cov-ready*) e="$e; cov-ready was reported as a failure" ;; esac
+    case "$row" in *cov-bare*) e="$e; cov-bare (global-lane repo) was reported as a failure" ;; esac
+    lo=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-bare"))] | length' 2>/dev/null)
+    [ "${lo:-0}" -ge 1 ] || e="$e; cov-bare never appeared in a local-only note"
+    case "$row" in *cov-source*) e="$e; a vstack checkout was classified as a coverage target" ;; esac
+    src_note=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-source"))] | length' 2>/dev/null)
+    [ "${src_note:-0}" -eq 0 ] || e="$e; a vstack checkout leaked into the local-only note"
+    [ -z "$e" ] && ok "doctor coverage classes (half, ready, bare, stale, hooks-disabled)" \
+      || bad "doctor coverage classes" "${e#; }"
+  fi
+fi
+
+# --- overlay bumps a stale conductor pin, and only the pin ------------------------------------
+# The generated .conductor/settings.toml pins a vstack SHA into its setup line, but the file is
+# written only when absent, so an existing pin drifted behind HEAD forever -- five real repos
+# carried four different SHAs. A re-run must rewrite exactly the /vstack/<sha>/bootstrap.sh
+# substring and nothing else; a setup line the operator replaced wholesale is theirs to keep.
+if want overlay-pin-bump; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "overlay pin bump" "git or jq not installed"
+  else
+    P="$ROOT/pinbump"; mkdir -p "$P"
+    git -C "$P" init -q; git -C "$P" config user.email t@example.com; git -C "$P" config user.name t
+    printf 'x\n' > "$P/f"; git -C "$P" add -A; git -C "$P" commit -qm init
+    "$SRC/overlay.sh" "$P" >/dev/null 2>&1
+    PT="$P/.conductor/settings.toml"
+    Z=0000000000000000000000000000000000000000
+    printf '\n# operator-added line that must survive\nMY_MARKER = "keep-me"\n' >> "$PT"
+    sed "s|/vstack/[0-9a-f]\{40\}/bootstrap\.sh|/vstack/$Z/bootstrap.sh|" "$PT" > "$P/t" \
+      && cat "$P/t" > "$PT" && rm -f "$P/t"
+    out=$("$SRC/overlay.sh" "$P" 2>&1)
+    e=""
+    pbhead=$(git -C "$SRC" rev-parse HEAD)
+    grep -q "/vstack/$pbhead/bootstrap.sh" "$PT" || e="$e; the stale pin was not bumped to this checkout's HEAD"
+    grep -q "/vstack/$Z/bootstrap.sh" "$PT" && e="$e; the zero pin survived"
+    grep -q 'MY_MARKER = "keep-me"' "$PT" || e="$e; an operator-added line did not survive the bump"
+    case "$out" in *bumped*) ;; *) e="$e; overlay never said it bumped the pin" ;; esac
+    sed 's|^setup = .*|setup = "make my-own-bootstrap"|' "$PT" > "$P/t" && cat "$P/t" > "$PT" && rm -f "$P/t"
+    cp "$PT" "$P/before"
+    "$SRC/overlay.sh" "$P" >/dev/null 2>&1
+    cmp -s "$PT" "$P/before" || e="$e; a settings.toml with no vstack pin was rewritten"
+    [ -z "$e" ] && ok "overlay bumps a stale conductor pin (and leaves foreign setup lines alone)" \
+      || bad "overlay bumps a stale conductor pin" "${e#; }"
+  fi
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"

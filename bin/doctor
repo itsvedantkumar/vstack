@@ -891,9 +891,12 @@ fi
 # regardless of how vstack itself got installed.
 [ ! -f "$HOME/CLAUDE.md" ] && ok "single global CLAUDE.md" || bad "stray ~/CLAUDE.md" "merge into vstack claude/CLAUDE.md, then delete"
 section "project coverage"
-# Every ACTIVE repo should carry the overlay lanes (.conductor run scripts + committed
-# .claude) so Conductor previews and cloud sandboxes work there, not just locally. A repo
-# with a commit in the last 45 days and no .conductor/settings.toml is an uncovered project.
+# Every ACTIVE repo (a commit in the last 45 days) is classified into the coverage classes of
+# docs/config-precedence.md: cloud-ready (committed overlay + fresh conductor pin + trust),
+# half-covered (one lane without the other -- the old predicate called this covered),
+# stale (overlay present, pin/trust behind), hooks-disabled (a repo-local disableAllHooks
+# silences the whole global stack), or local-only (served by ~/.claude, fine for local work,
+# named so it gets overlaid before any cloud dispatch).
 dupescanned=0; stale=""; probe=""; hseen=""
 # Second question, same enumeration: does the injector sitting in this directory know to stand
 # down? Deduped on the hook file rather than on the repo, and asked twice per iteration — once at
@@ -934,7 +937,22 @@ if [ -z "$cutoff" ]; then
   # empty, which printed a tick. Total failure of the check reported as a pass.
   bad "active repos overlaid" "could not compute a cutoff date — nothing was scanned"
 else
-  uncovered=""; scanned=0
+  # What "covered" is judged against. When this checkout is findable, the pin must match its
+  # HEAD and the hook set comes from inventory.json; when it is not (a stranger's machine),
+  # any 40-hex pin passes and the two load-bearing hooks stand in for the full set.
+  covrepo=$(resolve_vstack_repo 2>/dev/null) || covrepo=""
+  covhead=""
+  [ -n "$covrepo" ] && covhead=$(git -C "$covrepo" rev-parse HEAD 2>/dev/null)
+  hookmembers=""
+  if [ -n "$covrepo" ] && command -v jq >/dev/null 2>&1; then
+    hookmembers=$(jq -r '.components.hooks.members[]?' "$covrepo/claude/inventory.json" 2>/dev/null | tr '\n' ' ')
+  fi
+  [ -n "$hookmembers" ] || hookmembers="inject-session-context.sh verify-gate.sh"
+  # The global lane serves every local session; if it is dead, local-only repos have nothing.
+  glive=1
+  [ -f "$CDIR/settings.json" ] || glive=0
+  for hm in $hookmembers; do [ -f "$CDIR/hooks/$hm" ] || glive=0; done
+  halfcov=""; stalecov=""; disabledcov=""; localonly=""; covready=0; scanned=0
   # Two fixes here. `.git` is a file rather than a directory inside a git worktree, so the old
   # -d test made every Conductor workspace invisible to a check whose entire job is finding
   # uncovered working repos. And Conductor nests them as workspaces/<project>/<workspace>, so
@@ -955,20 +973,74 @@ else
     seen="$seen $main"
     last=$(git -C "$main" log -1 --format=%cs 2>/dev/null) || continue
     [ -n "$last" ] && [ "$last" \> "$cutoff" ] || continue
+    # A vstack checkout is the source, not a target: it ships from claude/ and never carries
+    # its own overlay, so classifying it would make every checkout of this repo a permanent
+    # red. Same structural predicate resolve_vstack_repo uses.
+    if [ -f "$main/claude/settings.json" ] && [ -f "$main/overlay.sh" ]; then
+      continue
+    fi
     scanned=$((scanned+1))
-    [ -f "$main/.conductor/settings.toml" ] || uncovered="$uncovered $(basename "$main")"
+    covb=$(basename "$main")
+    # disableAllHooks in either repo-local settings file kills every hook in the session,
+    # global ones included (measured: docs/config-precedence.md, Q3). Always a failure.
+    covhd=0
+    for covsf in "$main/.claude/settings.json" "$main/.claude/settings.local.json"; do
+      [ -f "$covsf" ] && grep -q '"disableAllHooks"[[:space:]]*:[[:space:]]*true' "$covsf" && covhd=1
+    done
+    # The committed overlay: policy.md plus the full hook set.
+    covarts=1
+    [ -f "$main/.claude/hooks/policy.md" ] || covarts=0
+    for hm in $hookmembers; do [ -f "$main/.claude/hooks/$hm" ] || covarts=0; done
+    covtoml=""
+    [ -f "$main/.conductor/settings.toml" ] && covtoml="$main/.conductor/settings.toml"
+    if [ "$covhd" = 1 ]; then
+      disabledcov="$disabledcov $covb"
+    elif [ "$covarts" = 1 ] && [ -n "$covtoml" ]; then
+      covpin=$(grep -oE '/vstack/[0-9a-f]{40}/bootstrap\.sh' "$covtoml" 2>/dev/null | head -1)
+      covpin=${covpin#/vstack/}; covpin=${covpin%/bootstrap.sh}
+      covfresh=1
+      [ -n "$covpin" ] || covfresh=0
+      [ -n "$covhead" ] && [ -n "$covpin" ] && [ "$covpin" != "$covhead" ] && covfresh=0
+      grep -q 'trust --yes' "$covtoml" 2>/dev/null || covfresh=0
+      # A Finder duplicate ("settings 2.toml") beside the real file is drift Conductor
+      # never reads but a human will edit by mistake.
+      for covdup in "$main/.conductor/settings "*.toml; do
+        [ -e "$covdup" ] && covfresh=0
+      done
+      if [ "$covfresh" = 1 ]; then covready=$((covready+1)); else stalecov="$stalecov $covb"; fi
+    elif [ "$covarts" = 1 ] || [ -n "$covtoml" ]; then
+      halfcov="$halfcov $covb"
+    else
+      localonly="$localonly $covb"
+    fi
   done
-  uncovered=$(printf '%s' "$uncovered" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+  halfcov=$(printf '%s' "$halfcov" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+  stalecov=$(printf '%s' "$stalecov" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+  disabledcov=$(printf '%s' "$disabledcov" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+  localonly=$(printf '%s' "$localonly" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
   # Scanning zero repos is not a pass. On any machine that does not use this layout the loop
-  # matched nothing, uncovered stayed empty, and the tick appeared over a check that compared
+  # matched nothing, every list stayed empty, and the tick appeared over a check that compared
   # nothing at all -- the same shape as every other green this project has had to go back and
   # fix. Say what was looked at instead.
   if [ "$scanned" = 0 ]; then
     note "active repos overlaid" "no git repos found under ~/Projects, ~/conductor/repos or ~/conductor/workspaces — nothing scanned"
-  elif [ -z "$uncovered" ]; then
-    ok "active repos overlaid ($scanned scanned)"
   else
-    bad "active repos overlaid" "missing overlay: ${uncovered}(run 'vstack overlay <repo>')"
+    covdet=""
+    [ -n "$halfcov" ] && covdet="half-covered (one lane without the other): ${halfcov}"
+    [ -n "$stalecov" ] && covdet="${covdet}stale pin/trust or duplicate toml: ${stalecov}"
+    [ -n "$disabledcov" ] && covdet="${covdet}hooks disabled repo-locally: ${disabledcov}"
+    if [ -n "$covdet" ]; then
+      bad "active repos overlaid" "${covdet}(run 'vstack overlay <repo>' and commit; delete any disableAllHooks)"
+    elif [ -n "$localonly" ] && [ "$glive" = 0 ]; then
+      bad "active repos overlaid" "the global ~/.claude lane is dead and these repos have no overlay: ${localonly}(run install.sh, then 'vstack overlay <repo>')"
+    else
+      ok "active repos overlaid ($scanned scanned: $covready cloud-ready)"
+    fi
+    # Whatever the verdict above, local-only repos deserve their naming: fine for local work,
+    # invisible to a cloud sandbox until overlaid and committed.
+    if [ -n "$localonly" ] && [ "$glive" = 1 ]; then
+      note "local-only repos" "served by the global ~/.claude lane for local work; run 'vstack overlay <repo>' and commit before dispatching to a cloud sandbox: ${localonly}"
+    fi
   fi
 fi
 section "hook scope overlap"
