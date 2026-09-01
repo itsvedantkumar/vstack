@@ -151,6 +151,31 @@ case_max_turns() {
 # honest about "does this situation ever route there" without crying wolf.
 ATTEMPTS="${ATTEMPTS:-3}"
 
+# ---------------------------------------------------------------------------
+# SAMPLES=N -- rate mode. OFF by default (0): with SAMPLES unset every line below behaves
+# exactly as it did before, same output, same exit codes, same gate.
+#
+# ATTEMPTS is NOT a sample-size knob and raising it will never make one. It early-stops on the
+# first hit, so it answers "did this land within N tries" and biases upward -- the same
+# early-stopping error that read encode-lessons-lint as a dead skill when it was turn-starved
+# (see the note above case_max_turns). SAMPLES runs N INDEPENDENT, non-retrying invocations of
+# the same prompt and reports raw k/N.
+#
+# Report k/N, never a percentage and never an interval: at the n this mode is affordable at, a
+# point estimate implies precision the sample does not have.
+#
+# Measurement is not a verdict. A low rate does NOT fail the run -- only a fence breach does.
+# ---------------------------------------------------------------------------
+SAMPLES="${SAMPLES:-0}"
+SAMPLES_ALL="${SAMPLES_ALL:-0}"   # required to sample every case; see the cost guard below
+SAMPLE_LOG="${SAMPLE_LOG:-}"      # optional path; one JSON line per sample, append-only
+SAMPLE_CASES=0
+SAMPLE_CALLS=0
+SAMPLE_COST="0"
+SAMPLE_HEAD=""
+SAMPLE_DESCS=""
+AT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 PASS_COUNT=0
 FAIL_COUNT=0
 declare -a RESULT_LINES=()
@@ -314,6 +339,47 @@ top_level_subtype() {
 }
 
 # ---------------------------------------------------------------------------
+# top_level_cost OUT_JSONL
+# Billed cost of ONE invocation, read from the same terminal result event top_level_subtype
+# reads: the one with no `origin`. A subagent's result event carries origin.kind ==
+# "task-notification" and its own total_cost_usd. Agent/Workflow/Explore/Task are denied by
+# DISALLOWED_TOOLS, so there should be no second result event here; if that fence is ever
+# loosened this becomes an undercount, and this sentence is the warning.
+# Prints 0 when the field is absent, so a timed-out or crashed sample contributes 0 rather
+# than breaking the running total.
+#
+# Nothing in this file counted a billed call before this existed. A measurement that cannot
+# say what it cost cannot be budgeted, and every prior dispatch number here was published
+# without one.
+# ---------------------------------------------------------------------------
+top_level_cost() {
+  local jsonl="$1"
+  jq -r 'select(.type=="result" and (.origin==null)) | (.total_cost_usd // 0)' "$jsonl" 2>/dev/null | tail -1
+}
+
+# ---------------------------------------------------------------------------
+# named_in_prose OUT_JSONL REGEX
+# Prints 1 if the run's assistant TEXT names a skill matching REGEX without having called it.
+#
+# Measured 2026-08-27 (tests/evals/collision/RESULTS.md, "Why nothing fired"): when the tool a
+# skill needs is denied -- Write for a plan document, Agent for a fan-out -- the model names
+# the skill in prose and never calls Skill. Under `fired=[]` that scores identically to a
+# routing miss. Separating the two is the difference between "the description does not route"
+# and "the description routes and the fence blocks the payoff", and DISALLOWED_TOOLS denies
+# exactly the tools the four chain skills exist to use.
+#
+# A 0/10 printed without this number beside it is uninterpretable.
+#
+# Herestring, not a pipe: `grep -q` closes the pipe early and returns 141 under `pipefail`.
+# ---------------------------------------------------------------------------
+named_in_prose() {
+  local jsonl="$1" regex="$2" txt
+  txt="$(jq -r 'select(.type=="assistant") | (.message.content // [])[]
+                | select(.type=="text") | .text' "$jsonl" 2>/dev/null)"
+  if grep -qE "$regex" <<<"$txt"; then echo 1; else echo 0; fi
+}
+
+# ---------------------------------------------------------------------------
 # hash_snapshot DIR
 # One "hash  path" line per regular file under DIR (find -type f -- directories are excluded,
 # they have no content to hash; a mkdir is still caught by the path-diff half of
@@ -406,9 +472,134 @@ selected_() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# Provenance for anything SAMPLES mode publishes.
+#
+# The rule in this repository is that an instrument is committed before the run it produces a
+# number for -- a 55-sample collision result was withdrawn precisely because its harness edit
+# was never committed and the runlog is gone (CHANGELOG.md, 1.47.0). Recording the instrument
+# sha AND a digest of the description bytes in every sample row is what makes a published k/N
+# checkable afterwards instead of merely asserted, because in this suite the *subject* of the
+# measurement is the description text and the *instrument* is this file. Both have to be
+# pinned or the number cannot be reproduced.
+#
+# The descriptions digested here are the INSTALLED ones, not the repo's: the CLI runs in a
+# scratch workdir and reads ~/.claude/skills. Measured 2026-09-01: a project-local
+# .claude/skills/<name>/SKILL.md IS loaded, but a user-level skill of the same name WINS --
+# the installed description is what reaches the matcher, and a repo edit is invisible here
+# until it is installed. Digesting the wrong tree would pin a number to bytes the model never
+# saw.
+# ---------------------------------------------------------------------------
+SAMPLE_HEAD="$(git -C "$AT_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+SAMPLE_DESCS="$(grep -h '^description:' "$HOME"/.claude/skills/*/SKILL.md 2>/dev/null \
+  | "$SUM_CMD" | cut -c1-12)"
+
+if (( SAMPLES > 0 )) \
+   && [ -n "$(git -C "$AT_ROOT" status --porcelain -- tests/auto-trigger.sh 2>/dev/null)" ]; then
+  echo "WARNING: tests/auto-trigger.sh is uncommitted. A number from an uncommitted instrument"
+  echo "         is inadmissible here. Commit the harness, then re-run."
+fi
+
+# Cost guard. Nothing in this file counted a call before spending it. SAMPLES across the whole
+# suite is SAMPLES x every case, which at SAMPLES=10 is several hundred billed invocations from
+# one keystroke and no confirmation.
+if (( SAMPLES > 0 )) && [ ${#SELECTED[@]} -eq 0 ] && [ "$SAMPLES_ALL" != "1" ]; then
+  echo "SAMPLES=$SAMPLES with no case named would run $SAMPLES x $(grep -cE '^run_(negative_)?case ' "$0") invocations."
+  echo "Name the cases you want, or set SAMPLES_ALL=1 to mean it."
+  exit 2
+fi
+
+# ---------------------------------------------------------------------------
+# sample_case NAME PROMPT REGEX SETUP_FN POLARITY
+#
+# SAMPLES independent invocations of one prompt, no early stop, raw k/N. POLARITY is "pos"
+# (REGEX names the skill that SHOULD fire) or "neg" (REGEX names skills that must NOT); it
+# changes the printed label only, because a fire rate and a false-positive rate are the same
+# arithmetic pointed at different prompts.
+#
+# Deliberately never touches PASS_COUNT/FAIL_COUNT except on a fence breach. A rate is a
+# measurement, not a verdict: wiring a low rate to a red exit would make this suite refuse to
+# report the very thing it was run to find out.
+# ---------------------------------------------------------------------------
+sample_case() {
+  local name="$1" prompt="$2" regex="$3" setup_fn="$4" polarity="$5"
+  local i fired term cost prose_hit hits=0 prose=0 cutoff=0 case_cost="0"
+  local workdir out_jsonl err_log runner_pid waited baseline baseline_hashes violations
+  local case_turns; case_turns="$(case_max_turns "$name")"
+
+  for i in $(seq 1 "$SAMPLES"); do
+    workdir="$(mktemp -d "/tmp/auto-trigger-sample.XXXXXX")"
+    [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
+    baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
+    baseline_hashes="$(hash_snapshot "$workdir")"
+    out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
+
+    # Same exec/timeout discipline as run_case: without exec the kill -9 hits an empty parent
+    # and leaks a live, billed claude session per timed-out sample.
+    (
+      cd "$workdir" || exit 1
+      exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+        claude -p "$prompt" \
+          --output-format stream-json --verbose \
+          --disallowedTools "$DISALLOWED_TOOLS" \
+          --model "$MODEL" --max-turns "$case_turns" \
+          < /dev/null > "$out_jsonl" 2> "$err_log"
+    ) &
+    runner_pid=$!
+    waited=0
+    while kill -0 "$runner_pid" 2>/dev/null; do
+      sleep 1
+      waited=$((waited + 1))
+      if (( waited >= PER_CASE_TIMEOUT )); then kill -9 "$runner_pid" 2>/dev/null; break; fi
+    done
+    wait "$runner_pid" 2>/dev/null
+
+    fired=""; term="no-output"; cost=0; prose_hit=0
+    if [[ -s "$out_jsonl" ]]; then
+      fired="$(extract_fired_skills "$out_jsonl")"
+      term="$(top_level_subtype "$out_jsonl")"
+      cost="$(top_level_cost "$out_jsonl")"
+      prose_hit="$(named_in_prose "$out_jsonl" "$regex")"
+    fi
+    [[ "$term" == "error_max_turns" ]] && cutoff=$((cutoff + 1))
+    if [[ -n "$fired" ]] && grep -qE "^($regex)$" <<<"$fired"; then
+      hits=$((hits + 1))
+    elif [[ "$prose_hit" == "1" ]]; then
+      prose=$((prose + 1))
+    fi
+    # bash 3.2 has no float arithmetic; awk does the addition.
+    case_cost="$(awk -v a="$case_cost" -v b="${cost:-0}" 'BEGIN{printf "%.6f", a+b}')"
+    SAMPLE_CALLS=$((SAMPLE_CALLS + 1))
+
+    violations="$(fence_violations "$workdir" "$baseline" "$baseline_hashes" "$out_jsonl" "$err_log")"
+    if [[ -n "$SAMPLE_LOG" ]]; then
+      printf '{"case":"%s","sample":%d,"polarity":"%s","fired":"%s","subtype":"%s","named_in_prose":%s,"cost_usd":%s,"model":"%s","max_turns":%s,"instrument":"%s","descs":"%s"}\n' \
+        "$name" "$i" "$polarity" "$(tr '\n' ' ' <<<"$fired" | sed 's/ *$//')" "$term" \
+        "$prose_hit" "${cost:-0}" "$MODEL" "$case_turns" "$SAMPLE_HEAD" "$SAMPLE_DESCS" \
+        >> "$SAMPLE_LOG"
+    fi
+    rm -rf "$workdir"
+
+    if [[ -n "$violations" ]]; then
+      echo "FAIL $name -> fence breach on sample $i of $SAMPLES: $(tr '\n' ';' <<<"$violations")"
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      return
+    fi
+  done
+
+  SAMPLE_COST="$(awk -v a="$SAMPLE_COST" -v b="$case_cost" 'BEGIN{printf "%.6f", a+b}')"
+  SAMPLE_CASES=$((SAMPLE_CASES + 1))
+  printf 'SAMPLE %-30s %-3s fired %d/%d  named-not-called %d/%d  cut-off %d/%d  $%s (max-turns=%s)\n' \
+    "$name" "$polarity" "$hits" "$SAMPLES" "$prose" "$SAMPLES" "$cutoff" "$SAMPLES" \
+    "$case_cost" "$case_turns"
+  HIT_LINES+=("$(printf '%-30s %-3s %d/%d fired, %d/%d named-only, %d/%d cut off, $%s' \
+    "$name" "$polarity" "$hits" "$SAMPLES" "$prose" "$SAMPLES" "$cutoff" "$SAMPLES" "$case_cost")")
+}
+
 run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
   selected_ "$name" || return 0
+  if (( SAMPLES > 0 )); then sample_case "$name" "$prompt" "$expected_regex" "$setup_fn" pos; return; fi
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
   local baseline baseline_hashes violations term_subtype last_fired_csv=""
   local case_turns; case_turns="$(case_max_turns "$name")"
@@ -514,6 +705,9 @@ run_case() {
 run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
   selected_ "$name" || return 0
+  # In SAMPLES mode the forbidden regex is exactly what we want a rate for: k/N here IS the
+  # over-trigger rate of the new descriptions, measured for free alongside the positive arms.
+  if (( SAMPLES > 0 )); then sample_case "$name" "$prompt" "$forbidden_regex" "" neg; return; fi
   local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline baseline_hashes violations
   local case_turns; case_turns="$(case_max_turns "$name")"
 
@@ -957,9 +1151,23 @@ echo "---"
 # which is the same shape as a clean run. A typo'd case name must not read as a pass.
 # This sits above the hit-rate loop because HIT_LINES is unset when nothing ran, and
 # `set -u` turns that into a stack trace rather than an answer.
-if (( PASS_COUNT + FAIL_COUNT == 0 )); then
+if (( PASS_COUNT + FAIL_COUNT + SAMPLE_CASES == 0 )); then
   echo "no case ran. ${#SELECTED[@]} selector(s) given, none matched a case name."
   exit 2
+fi
+
+if (( SAMPLES > 0 )); then
+  echo "Rates (raw k/N, no early stop):"
+  for l in "${HIT_LINES[@]}"; do echo "  $l"; done
+  echo
+  echo "Sample mode: SAMPLES=$SAMPLES, $SAMPLE_CASES case(s), $SAMPLE_CALLS invocation(s), total_cost_usd=$SAMPLE_COST"
+  echo "  model=$MODEL  max-turns-default=$MAX_TURNS  instrument=$SAMPLE_HEAD  installed-descs=$SAMPLE_DESCS"
+  echo "  fence=$DISALLOWED_TOOLS"
+  echo "  k/N is a measurement, not a gate: a low rate does not fail this run. A fence breach does."
+  echo "  Read named-not-called beside every k/N -- a 0/N with a high named-not-called is the"
+  echo "  denied-affordance wall (tests/evals/collision/RESULTS.md), not a dead description."
+  if (( FAIL_COUNT > 0 )); then exit 1; fi
+  exit 0
 fi
 
 echo "Hit rates (which attempt each case landed on):"
