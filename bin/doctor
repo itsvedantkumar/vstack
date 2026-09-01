@@ -973,6 +973,12 @@ else
     seen="$seen $main"
     last=$(git -C "$main" log -1 --format=%cs 2>/dev/null) || continue
     [ -n "$last" ] && [ "$last" \> "$cutoff" ] || continue
+    # A vstack checkout is the source, not a target: it ships from claude/ and never carries
+    # its own overlay, so classifying it would make every checkout of this repo a permanent
+    # red. Same structural predicate resolve_vstack_repo uses.
+    if [ -f "$main/claude/settings.json" ] && [ -f "$main/overlay.sh" ]; then
+      continue
+    fi
     scanned=$((scanned+1))
     covb=$(basename "$main")
     # disableAllHooks in either repo-local settings file kills every hook in the session,

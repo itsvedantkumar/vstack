@@ -1410,6 +1410,14 @@ if want doctor-coverage; then
     cov_mkrepo "$CH/Projects/cov-nohooks"
     mkdir -p "$CH/Projects/cov-nohooks/.claude"
     printf '{"disableAllHooks": true}\n' > "$CH/Projects/cov-nohooks/.claude/settings.json"
+    # cov-source: a vstack checkout itself (claude/settings.json + overlay.sh at the root).
+    # It ships FROM claude/ and never carries its own overlay, so classifying it half-covered
+    # turns every checkout of this repo into a permanent red. It must not be classified at all.
+    cov_mkrepo "$CH/Projects/cov-source"
+    mkdir -p "$CH/Projects/cov-source/claude" "$CH/Projects/cov-source/.conductor"
+    printf '{}\n' > "$CH/Projects/cov-source/claude/settings.json"
+    printf '#!/bin/sh\n' > "$CH/Projects/cov-source/overlay.sh"
+    printf 'setup = "curl x"\n' > "$CH/Projects/cov-source/.conductor/settings.toml"
     js=$(HOME="$CH" VSTACK_DIR="$SRC" "$SRC/bin/doctor" --json 2>/dev/null)
     row=$(printf '%s' "$js" | jq -r '.checks[] | select(.label | startswith("active repos overlaid")) | "\(.status) \(.detail)"' 2>/dev/null)
     e=""
@@ -1421,6 +1429,9 @@ if want doctor-coverage; then
     case "$row" in *cov-bare*) e="$e; cov-bare (global-lane repo) was reported as a failure" ;; esac
     lo=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-bare"))] | length' 2>/dev/null)
     [ "${lo:-0}" -ge 1 ] || e="$e; cov-bare never appeared in a local-only note"
+    case "$row" in *cov-source*) e="$e; a vstack checkout was classified as a coverage target" ;; esac
+    src_note=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-source"))] | length' 2>/dev/null)
+    [ "${src_note:-0}" -eq 0 ] || e="$e; a vstack checkout leaked into the local-only note"
     [ -z "$e" ] && ok "doctor coverage classes (half, ready, bare, stale, hooks-disabled)" \
       || bad "doctor coverage classes" "${e#; }"
   fi
