@@ -784,8 +784,14 @@ jobs:
       # a digest already falls back to sha256sum, and that fallback is now exercised rather than
       # assumed. If a future change really does need a GNU tool, install that ONE package and
       # say which behaviour required it -- do not restore the blanket userland swap.
+      # python3 is here for one named behaviour: check 63 runs tests/transcript-census.sh
+      # --self-test, whose engine is stdlib Python. Without it the check skips, and this lane's
+      # own skip audit -- correctly -- refuses a skip it never declared. That exact sequence
+      # destroyed the v1.61.0 tag on 2026-09-01 (the fourth destruction): the census fix
+      # provisioned python3 in tests/container-matrix.sh's three images and missed this fourth
+      # container, the one wired into release gating. Same defect, fourth copy of the fix.
       - name: Tools a slim image does not ship (BusyBox kept, deliberately)
-        run: apk add --no-cache bash git jq curl nodejs npm
+        run: apk add --no-cache bash git jq curl nodejs npm python3
 
       # check 29 ("shellcheck clean") skips without a validator on PATH, and a check that skips
       # on a lane specifically kept around to catch BusyBox-vs-GNU differences is a green
