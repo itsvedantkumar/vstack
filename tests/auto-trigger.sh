@@ -459,7 +459,7 @@ fence_violations() {
 # run_case NAME PROMPT EXPECTED_REGEX SETUP_FN
 # SETUP_FN is a function name invoked with the temp dir as $1, or "" for none.
 # ---------------------------------------------------------------------------
-# Case selection. Without it, proving one fix means re-running all 28 cases and spending the
+# Case selection. Without it, proving one fix means re-running all 30 cases and spending the
 # whole allowance to learn about eight of them. Matches install-matrix.sh's convention:
 # no arguments runs everything, arguments name the cases to run.
 #   tests/auto-trigger.sh                       # all cases
@@ -932,6 +932,122 @@ type Order struct {
 EOF
 }
 
+# A spec that is settled and is NOT a plan. The distinction is the whole fixture: brainstorming's
+# situation ("the shape is undecided") is starved by "agreed, no open questions", and
+# executing-plans' situation ("a written plan already exists") is starved by the last line
+# saying in as many words that no file map or ordering exists anywhere.
+setup_spec() {
+  local dir="$1"
+  setup_webapp "$dir"
+  cat > "$dir/SPEC.md" <<'SPECEOF'
+# Spec: offline mode for the notes app
+
+Status: agreed 2026-08-30. No open questions. The shape is not up for discussion.
+
+Behaviour:
+- Notes stay editable with no network; edits queue locally.
+- On reconnect the queue drains oldest first; a note edited in two places keeps the newer timestamp.
+- The header reads exactly one of: online, offline, syncing.
+- No new dependencies. Storage is localStorage.
+
+Out of scope: accounts, multi-device, any conflict UI beyond last-write-wins.
+
+Written down nowhere: which files change, in what order, or how each step gets checked.
+SPECEOF
+}
+
+# A real defect, a real suite, and a gap between them. The suite existing is what separates this
+# from create-verification-skill ("nothing exists yet"); the suite being current is what
+# separates it from maintain-verification-skill (a gate that drifted).
+setup_bugfix() {
+  local dir="$1"
+  cat > "$dir/package.json" <<'PKGEOF'
+{
+  "name": "notes-app",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
+PKGEOF
+  cat > "$dir/notes.js" <<'NOTESEOF'
+const notes = [];
+
+export function addNote(text) {
+  notes.push({ text, at: 0 });
+  return notes.length;
+}
+
+export function listNotes() {
+  return notes;
+}
+
+export function clearNotes() {
+  notes.length = 0;
+}
+NOTESEOF
+  cat > "$dir/notes.test.js" <<'TESTEOF'
+import { test } from "node:test";
+import assert from "node:assert";
+import { addNote, listNotes, clearNotes } from "./notes.js";
+
+test("addNote stores the text it was given", () => {
+  clearNotes();
+  addNote("buy milk");
+  assert.strictEqual(listNotes()[0].text, "buy milk");
+});
+TESTEOF
+}
+
+# Six integrations, six unrelated defects, no imports between them: a master-password backdoor,
+# an unauthenticated non-idempotent refund, path traversal, a Math.random session id, an
+# unverified webhook, and CSV injection. Six independent verdicts is real independent work, not
+# one finding restated six times -- which is what makes this a swarm situation rather than a
+# single review.
+setup_audit() {
+  local dir="$1"
+  mkdir -p "$dir/services"
+  cat > "$dir/services/auth.js" <<'AUTHEOF'
+export function login(user, pass) {
+  if (pass === process.env.MASTER_PASSWORD) return { user, admin: true };
+  return null;
+}
+AUTHEOF
+  cat > "$dir/services/billing.js" <<'BILLEOF'
+export function refund(chargeId, amount) {
+  return fetch("https://api.example.com/charges/" + chargeId + "/refund", {
+    method: "POST",
+    body: JSON.stringify({ amount }),
+  });
+}
+BILLEOF
+  cat > "$dir/services/upload.js" <<'UPEOF'
+export function saveUpload(name, bytes) {
+  return { path: "/var/uploads/" + name, size: bytes.length };
+}
+UPEOF
+  cat > "$dir/services/session.js" <<'SESSEOF'
+const sessions = new Map();
+
+export function newSession(user) {
+  const id = String(Math.random()).slice(2);
+  sessions.set(id, user);
+  return id;
+}
+SESSEOF
+  cat > "$dir/services/webhook.js" <<'HOOKEOF'
+export function handle(req) {
+  const body = JSON.parse(req.body);
+  return { ok: true, event: body.type };
+}
+HOOKEOF
+  cat > "$dir/services/export.js" <<'CSVEOF'
+export function toCsv(rows) {
+  return rows.map(function (r) { return Object.values(r).join(","); }).join("\n");
+}
+CSVEOF
+}
+
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -951,11 +1067,24 @@ run_case \
   "typescript-best-practices" \
   "setup_typescript"
 
+# Rewritten 2026-09-01. The old prompt was "Audit this directory three different ways at once"
+# with no setup, so it tested two things this suite is not for: whether the model obeys the
+# literal string "at once" (which swarm's own description quoted back at it, making the case a
+# keyword echo rather than a routing test), and whether it can audit an empty directory -- the
+# no-referent confound in tests/evals/collision/RESULTS.md.
+#
+# All four quoted trigger strings are gone -- "in parallel", "at once", "all of these",
+# "try N ways" -- and splittability is stated as a property of the WORK, which is the thing a
+# description matcher can actually score. The routing-table line in the SessionStart hook still
+# carries the literal strings; this case deliberately exercises the other path.
+#
+# If this measures 0/N with a high named-not-called, the blocker is the Agent denial in
+# DISALLOWED_TOOLS, not the description, and the arm says so rather than reporting a dead skill.
 run_case \
   "swarm-audit" \
-  "Audit this directory three different ways at once and report back." \
+  "Each file in services/ is a separate integration with its own failure mode, and none of them import each other. I want a security verdict per file, and what you find in one tells you nothing about the next. Come back with one verdict per file." \
   "swarm" \
-  ""
+  "setup_audit"
 
 run_case \
   "blast-radius-auth" \
@@ -1134,6 +1263,31 @@ run_case \
   "Redesign this Go Order struct so an invalid combination like a cancelled order with a tracking code can't compile -- model pending, shipped, and cancelled as separate cases." \
   "principle-type-system-discipline" \
   "setup_gostruct"
+
+# writing-plans and test-driven-development had no isolated case until 2026-09-01. Their only
+# positive coverage was feature-chain's three-way alternation, which any one of the three can
+# satisfy on its own -- so both could be, and were, dead at zero lifetime dispatches while this
+# suite stayed green. A gate that cannot go red for a dead skill is not measuring that skill.
+
+# Discriminator, three ways. SPEC.md says "agreed ... no open questions", so brainstorming has
+# nothing to explore. Nothing on disk is a plan, so executing-plans has nothing to execute. And
+# the ask is for the ordered steps IN THE REPLY, not for a file: Write is denied by the fence,
+# and a fixture whose payoff needs a denied tool scores a blocked affordance as a routing miss.
+run_case \
+  "writing-plans-spec-to-steps" \
+  "SPEC.md is agreed and there are no open questions on it. Nothing anywhere says which files change, in what order, or how we would know each step worked. Work that out and give it to me before anyone touches app.js." \
+  "writing-plans" \
+  "setup_spec"
+
+# Discriminator: the cause is stated outright, which starves principle-fix-root-causes (its
+# situation is debugging, or reaching for a try/except). A suite exists and demonstrably does not
+# cover this path. "test" appears in the prompt only as a description of what is already on disk
+# -- the ask is for the fix -- so a hit here is routing rather than keyword echo.
+run_case \
+  "tdd-known-bugfix" \
+  "addNote('') files an empty note instead of rejecting it. The cause is not a mystery: addNote never looks at text. Wanted behaviour is that an empty or whitespace-only string is rejected and the list is left alone. notes.test.js covers the happy path only. Make the change." \
+  "test-driven-development" \
+  "setup_bugfix"
 
 run_negative_case \
   "negative-arithmetic" \
