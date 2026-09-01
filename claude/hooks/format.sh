@@ -104,6 +104,28 @@ is_project_trusted() {
   else h=$(sha256sum "$v" 2>/dev/null | cut -d' ' -f1); fi
   [ -n "$h" ] && grep -qxF "$h  $v" "$ts" 2>/dev/null
 }
+# package.json only *configures* prettier via a top-level "prettier" key. A grep for the
+# substring `"prettier":` cannot tell that key apart from the identically-shaped entry
+# `"prettier": "^3.4.2"` sitting in dependencies/devDependencies -- a version pin, not a
+# config -- so it matched there too, won the package.json slot ahead of a sibling .prettierrc
+# in the same directory (package.json is first in the name list, matching prettier's own
+# cosmiconfig search order), and got handed to `prettier --config package.json`. Cosmiconfig
+# then finds no real "prettier" field in it and silently falls back to prettier's built-in
+# defaults instead of erroring -- so the file gets reformatted to the wrong style, and the
+# .prettierrc this loop would otherwise have reached next is never tried. Parse the JSON and
+# check for a genuine top-level key instead of pattern-matching the source text.
+pkg_has_top_level_prettier() { # $1: package.json path
+  nb=$(find_bin node) || nb=$(command -v node) || return 1
+  "$nb" -e '
+    const fs = require("fs");
+    try {
+      const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      process.exit(Object.prototype.hasOwnProperty.call(pkg, "prettier") ? 0 : 1);
+    } catch (e) {
+      process.exit(1);
+    }
+  ' "$1" 2>/dev/null
+}
 find_prettier_cfg() {
   d="$dir"
   while [ "$d" != "/" ] && [ -n "$d" ]; do
@@ -114,7 +136,11 @@ find_prettier_cfg() {
       p="$d/$name"
       [ -e "$p" ] || continue
       if [ "$name" = package.json ]; then
-        grep -q '"prettier"[[:space:]]*:' "$p" 2>/dev/null || continue
+        # No node, or a package.json that fails to parse: fall through via `continue` so the
+        # loop keeps walking toward .prettierrc in this same directory. Degrading to the
+        # dedicated config file is the safe direction; silently formatting with built-in
+        # defaults because we couldn't check is not.
+        pkg_has_top_level_prettier "$p" || continue
       fi
       printf '%s\n' "$p"
       return 0
