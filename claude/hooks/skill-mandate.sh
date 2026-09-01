@@ -202,7 +202,6 @@ _read_cnt "$cnt_file.proveitworks"; cnt_proveitworks=$_rc
 _read_wcnt "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_breadth=$_rc
 _read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
 _read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
-_read_wcnt "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_serial=$_rc
 
 eval_unslop=1;       [ "$cnt_unslop" -ge 2 ]       && eval_unslop=0
 eval_typescript=1;   [ "$cnt_typescript" -ge 2 ]   && eval_typescript=0
@@ -210,7 +209,6 @@ eval_proveitworks=1; [ "$cnt_proveitworks" -ge 2 ] && eval_proveitworks=0
 eval_breadth=1;      [ "$cnt_breadth" -ge 2 ]      && eval_breadth=0
 eval_naming=1;       [ "$cnt_naming" -ge 2 ]       && eval_naming=0
 eval_swarm=1;        [ "$cnt_swarm" -ge 2 ]        && eval_swarm=0
-eval_serial=1;       [ "$cnt_serial" -ge 2 ]       && eval_serial=0
 
 # Second, SHORTER gate: how often to bother re-scanning at all once every skill-family mandate is
 # already latched, independent of whether delegation has struck. Family-exhausted alone is not a
@@ -238,7 +236,7 @@ fi
 skill_eval=1
 [ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && skill_eval=0
 deleg_eval=1
-[ "$eval_breadth" = 0 ] && [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && [ "$eval_serial" = 0 ] && deleg_eval=0
+[ "$eval_breadth" = 0 ] && [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && deleg_eval=0
 
 # Combined latch: skip the transcript-driven evaluation entirely only when NEITHER family can
 # still act on it. skill_eval=1 alone is enough to keep paying for the scan every Stop, unchanged
@@ -275,7 +273,6 @@ hit_proveitworks=0
 hit_breadth=0
 hit_naming=0
 hit_swarm=0
-hit_serial=0
 
 # We are doing a full scan this Stop for at least one reason (skill_eval=1 or deleg_eval=1 --
 # the latch above already exited otherwise). Record it now, unconditionally, so the cooldown
@@ -610,14 +607,6 @@ case "$task_count" in ''|*[!0-9]*) task_count=0 ;; esac
 # there is no identity to merge on, so each such line is its own singleton batch. That is what
 # makes "two Task calls in two separate lines, neither carrying an id" read as two batches of
 # one, not one batch of two: the exact serial-loop shape this fix exists to catch.
-# One pass, two numbers: "<fanout_batches> <serial_tail>". serial_tail is the count of
-# Task/Agent dispatches AFTER the last 2+-in-one-message batch (all of them when no batch ever
-# ran). fanout_batches answers "did a real batch ever happen"; serial_tail answers the question
-# it structurally cannot: "what has happened SINCE". A whole-transcript batch count amnesties
-# every later serial dispatch -- measured, not hypothesized: session 3ce9f899 batched 3 times
-# early and then made 25 one-at-a-time dispatches with the breadth mandate silenced for good,
-# and 8959d943 did the same behind 2 batches of 2. The serial-tail mandate below reads only the
-# suffix, so history cannot pay for the present.
 fanout_calc=$( "$JQ" -sr '
   ( [ .[] | select(.type=="assistant")
       | { id: (.message.id // null),
@@ -635,16 +624,10 @@ fanout_calc=$( "$JQ" -sr '
         )
     ) as $folded
   | ( $folded.runs + [{id: $folded.cid, n: $folded.cn}] ) as $all_runs
-  | ( $all_runs | map(.n) ) as $ns
-  | ( [ range(0; $ns|length) | select($ns[.] >= 2) ] | last ) as $lastb
-  | ( [ $ns[] | select(. >= 2) ] | length ) as $batches
-  | ( (if $lastb == null then $ns else $ns[($lastb+1):] end) | add // 0 ) as $tail
-  | "\($batches) \($tail)"
+  | ( $all_runs | map(select(.n >= 2)) | length )
 ' "$tr_" 2>/dev/null | tail -n 1 )
-fanout_batches=${fanout_calc%% *}
-serial_tail=${fanout_calc##* }
-case "$fanout_batches" in ''|*[!0-9]*) fanout_batches=0 ;; esac
-case "$serial_tail" in ''|*[!0-9]*) serial_tail=0 ;; esac
+case "$fanout_calc" in ''|*[!0-9]*) fanout_calc=0 ;; esac
+fanout_batches="$fanout_calc"
 
 # task_fail_count: of those same Task/Agent dispatches, how many resolved with is_error==true on
 # their tool_result. This is the field the delegation-drift ledger was missing entirely -- it
@@ -749,26 +732,6 @@ if [ "$eval_breadth" = 1 ] && [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] &
   unmet="$unmet
   multi-directory work -- touched $dir_count directories ($dirs_named$([ "$dir_count" -gt 3 ] && echo ', ...')) with $ext_count file types, $fanout_state. Dispatch 2+ agents in the SAME assistant message, each on a disjoint file set, so they actually run in parallel (try /team, or issue code-reviewer + qa + worker + planner + test-writer together in one turn) -- one Task/Agent call followed by another later does not satisfy this."
   hit_breadth=1
-fi
-
-# Serial dispatch tail: the shape the breadth gate above structurally cannot see. Its
-# fanout_batches==0 condition is evaluated over the whole transcript, so ONE early batch
-# satisfies it for every remaining Stop of the session while the model degrades into a serial
-# loop -- the amnesty measured in 3ce9f899 and 8959d943 (see the fanout_calc comment). This
-# mandate reads $serial_tail instead: dispatches after the last real batch, or all of them
-# when none ever ran. Threshold 3, replayed against real sessions before choosing it: tails
-# of 12 (e0cd5a40), 25 (3ce9f899) and 9 (8959d943) all fire; 416fb382's post-block tail of 2
-# does not, because two singleton dispatches are the shape two unrelated one-shot asks
-# legitimately produce, and a tail of 3 is necessarily 3 separate messages (3 in one message
-# would be a batch and would reset the tail). Its own windowed 2-strike latch above bounds
-# the cost when this call is wrong. Not gated on dir/ext breadth: the defect it polices is in
-# the dispatch pattern itself, not in what files were touched.
-if [ "$eval_serial" = 1 ] && [ "$serial_tail" -ge 3 ]; then
-  serial_n=$serial_tail
-  [ "$serial_n" -gt 5 ] && serial_n=5
-  unmet="$unmet
-  serial dispatch tail -- $serial_tail Task/Agent dispatch(es) sent one message at a time since the last parallel batch (or session start, if none ever ran). Send the remaining independent work as $serial_n Agent calls in ONE message (call Skill swarm first -- it routes the batch)."
-  hit_serial=1
 fi
 
 # --- delegation-drift logger (tests/delegation-drift.sh) ---------------------------------------
@@ -999,12 +962,6 @@ if [ "$hit_swarm" = 1 ]; then
 elif [ "$eval_swarm" = 1 ]; then
   rm -f "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts"
 fi
-if [ "$hit_serial" = 1 ]; then
-  echo $((cnt_serial + 1)) > "$cnt_file.delegate-serial"
-  date +%s > "$cnt_file.delegate-serial-ts" 2>/dev/null
-elif [ "$eval_serial" = 1 ]; then
-  rm -f "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts"
-fi
 
 [ -n "$unmet" ] || exit 0
 
@@ -1037,9 +994,6 @@ if [ "$hit_naming" = 1 ]; then
 fi
 if [ "$hit_swarm" = 1 ]; then
   reason="$reason$(_strike_line swarm "$((cnt_swarm + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
-fi
-if [ "$hit_serial" = 1 ]; then
-  reason="$reason$(_strike_line "serial dispatch tail" "$((cnt_serial + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
 fi
 reason="$reason
 Run each named skill with the Skill tool against the files listed, apply what it says, then finish.

@@ -8,7 +8,6 @@
 # "Task", never the "Agent" name the Claude Agent SDK build actually uses) and the Bash
 # write-extraction over-match defect ($VAR-containing paths and heredoc-body content read as
 # real writes) found by dogfooding this hook against a real 15MB transcript.
-# PROOFs 22-24 cover the serial-tail mandate; the per-prompt digest's own tests live in tests/test-session-context-mandate.sh.
 #
 # The hook's contract (Claude Code Stop-hook protocol, not exit code): a met mandate prints
 # nothing to stdout and exits 0; an unmet one prints one JSON object on stdout --
@@ -62,9 +61,6 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 19 (setup 1/3): lone prose write trips unslop" "jq not installed"
   skip "PROOF 19 (setup 2/3): lone TypeScript edit trips typescript-best-practices (unrelated 2nd strike)" "jq not installed"
   skip "PROOF 19 (the bleed): a THIRD, never-tried mandate still fires after two UNRELATED strikes" "jq not installed"
-  skip "PROOF 22: three singleton dispatches, no batch -> serial-tail mandate blocks" "jq not installed"
-  skip "PROOF 23: two singleton dispatches -> serial-tail mandate silent (below threshold)" "jq not installed"
-  skip "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -126,7 +122,6 @@ names_piw_(){ printf '%s' "$HOOK_REASON" | grep -qF 'prove-it-works --'; }
 names_swarm_(){ printf '%s' "$HOOK_REASON" | grep -qF 'swarm --'; }
 names_unslop_(){ printf '%s' "$HOOK_REASON" | grep -qF 'unslop --'; }
 names_ts_(){ printf '%s' "$HOOK_REASON" | grep -qF 'typescript-best-practices --'; }
-names_serial_(){ printf '%s' "$HOOK_REASON" | grep -qF 'serial dispatch tail --'; }
 
 # --- PROOF 1: 5 fixture writes, 1 directory, 1 extension, 0 Task calls ------------------------
 # Negative direction. Mechanical repetition (fixtures/case1.json .. case5.json) must not read
@@ -483,48 +478,6 @@ if [ "$HOOK_DECISION" = "block" ] && names_piw_; then
 else
   bad "PROOF 21: a THIRD, never-tried mandate still fires after two UNRELATED strikes (the bleed)" \
       "expected decision=block naming 'prove-it-works --' -- two strikes on unslop+typescript must not silence a mandate neither of them is, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
-fi
-
-# --- PROOF 22: three singleton Task/Agent dispatches, zero batches -> serial-tail blocks --------
-# Positive direction for the serial-tail mandate: three dispatches, each alone in its own
-# assistant line (no shared message.id), is the serial loop measured in real transcripts
-# (e0cd5a40: 12 singleton dispatches, never a batch). Swarm called and RICK named so no other
-# delegation mandate can confound; zero writes so no skill mandate can either.
-say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"0","name":"Skill","input":{"skill":"swarm"}},{"type":"text","text":"RICK: routing three reviews."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review a"}}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"2","name":"Task","input":{"prompt":"review b"}}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"3","name":"Agent","input":{"subagent_type":"qa","prompt":"review c","description":"review c"}}]}}'
-run_hook_ proof22
-if [ "$HOOK_DECISION" = "block" ] && names_serial_; then
-  ok "PROOF 22: three singleton dispatches, no batch -> serial-tail mandate blocks"
-else
-  bad "PROOF 22: three singleton dispatches, no batch -> serial-tail mandate blocks" \
-      "expected decision=block naming 'serial dispatch tail --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
-fi
-
-# --- PROOF 23: two singleton dispatches -> below the tail-3 threshold, strictly silent ----------
-# Negative direction: two serial dispatches are the shape a session legitimately produces when
-# two unrelated asks arrive in two turns (416fb382's post-block tail of 2). Nothing else in the
-# fixture can block, so the bar is strict empty stdout, not merely "no serial-tail line".
-say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"0","name":"Skill","input":{"skill":"swarm"}},{"type":"text","text":"RICK: routing two reviews."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review a"}}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"2","name":"Task","input":{"prompt":"review b"}}]}}'
-run_hook_ proof23
-if [ -z "$HOOK_OUT" ]; then
-  ok "PROOF 23: two singleton dispatches -> serial-tail mandate silent (below threshold)"
-else
-  bad "PROOF 23: two singleton dispatches -> serial-tail mandate silent (below threshold)" \
-      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
-fi
-
-# --- PROOF 24: an early real batch, then three singletons -> still blocks (amnesty closed) ------
-# The whole-transcript amnesty itself: fanout_batches=1 from the 2-in-one-message batch, so the
-# breadth mandate's own condition (fanout_batches == 0) can never be true again this session --
-# measured in real transcripts (3ce9f899: 3 early batches then 25 serial dispatches unblocked;
-# 8959d943: 2 batches of 2 then 9 serial). The serial-tail mandate reads only the dispatches
-# AFTER the last batch: three singletons -> block, early batch or not.
-say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"0","name":"Skill","input":{"skill":"swarm"}},{"type":"text","text":"RICK: batch first."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Task","input":{"prompt":"review a"}},{"type":"tool_use","id":"2","name":"Agent","input":{"subagent_type":"qa","prompt":"verify","description":"verify"}},{"type":"text","text":"ZEEP and GLOOTIE together."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"3","name":"Task","input":{"prompt":"review b"}}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"4","name":"Task","input":{"prompt":"review c"}}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"5","name":"Agent","input":{"subagent_type":"qa","prompt":"review d","description":"review d"}}]}}'
-run_hook_ proof24
-if [ "$HOOK_DECISION" = "block" ] && names_serial_; then
-  ok "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)"
-else
-  bad "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" \
-      "expected decision=block naming 'serial dispatch tail --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 echo
