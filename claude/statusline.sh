@@ -78,9 +78,15 @@ if [ -n "$ctxused" ] && [ "$ctxused" -gt 0 ] 2>/dev/null; then
   elif [ "$ctxused" -ge $(( CTX_COMPACT_WINDOW * 2 / 3 )) ] 2>/dev/null; then col=$Y; fi
   out="${out} ${D}·${R} ${col}ctx $(( ctxused / 1000 ))k${R}${D}/$(( CTX_COMPACT_WINDOW / 1000 ))k${R}"
 fi
-# Lead and delegation count: shows RICK and how many agents dispatched in this session.
-if [ -n "$dispatch_count" ]; then
+# Lead and delegation count: RICK renders on every turn. This used to gate on the counter
+# file existing, which hid the lead exactly when enforcement was failing -- a session that
+# never dispatched showed no team segment at all, and its absence read as "not installed"
+# rather than "zero dispatches". Zero is bad news and renders as one, in red; the segment
+# only goes green once the first agent has actually been dispatched.
+if [ -n "$dispatch_count" ] && [ "$dispatch_count" -gt 0 ] 2>/dev/null; then
   out="${out} ${D}·${R} ${M}RICK${R} ${G}·${dispatch_count}▸${R}"
+else
+  out="${out} ${D}·${R} ${M}RICK${R} ${RED}·0▸${R}"
 fi
 # The gate indicator. This repository spent a day removing greens that measured nothing, so an
 # indicator that only ever says "protected" would be the same defect wearing better clothes.
