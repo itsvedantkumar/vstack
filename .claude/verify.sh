@@ -4527,8 +4527,18 @@ if [ -f "$c62_f" ]; then
   # The tool keeps the finding. Derived from the file's own value, so a typo in either place is a
   # failure rather than two literals agreeing with nothing.
   if [ -n "$c62_lbl" ]; then
-    grep -Fq "bad \"$c62_lbl\"" bin/doctor \
-      || c62_errs="$c62_errs\nbin/doctor no longer reports \"$c62_lbl\" as a hard failure; the carve-out is scoped to two test lanes and must not reach a user's doctor"
+    # Anchor on the BRANCH, not on the label. bin/doctor spells this label six times -- two
+    # `bad`, three `note`, one `ok` -- so a whole-file `grep -F 'bad "<label>"'` stays green while
+    # the one branch the carve-out excuses is downgraded, because a different `bad` still matches.
+    # Row 62b did exactly that and this check reported ok. The branch is identified by its own
+    # message: a declared version with no tag on origin.
+    c62_ln=$(grep -n 'has no tag on origin' bin/doctor | head -1 | cut -d: -f1)
+    if [ -z "$c62_ln" ]; then
+      c62_errs="$c62_errs\nbin/doctor has no branch reporting a declared version with no tag on origin; that finding is what the carve-out excuses in two test lanes, and it must still exist for a user"
+    else
+      sed -n "${c62_ln}p" bin/doctor | grep -q "^[[:space:]]*bad \"$c62_lbl\"" \
+        || c62_errs="$c62_errs\nbin/doctor:$c62_ln no longer reports \"$c62_lbl\" as a hard failure when the declared version has no tag on origin; the carve-out is scoped to two test lanes and must not reach a user's doctor"
+    fi
   fi
 
   if [ -z "$c62_errs" ]; then
