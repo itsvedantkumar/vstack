@@ -217,8 +217,8 @@ Descriptions alone do not reliably trigger the first two lines below, so they ar
   show-me-your-work BEFORE doing the work, not after.
 - feature/change request, shape undecided -> brainstorming.
 - shape agreed, nothing written down -> writing-plans.
-- plan written, no test yet -> test-driven-development.
-- failing test exists against plan -> executing-plans.
+- about to write implementation code or a bugfix, no failing test covers it -> test-driven-development.
+- a written plan or task list already exists, the ask is to carry it out -> executing-plans.
 - you were corrected, or found a workflow worth keeping -> reflect.
 - PRINCIPLES (load the one that matches, then apply it): before claiming done ->
   principle-prove-it-works. Debugging or adding a try/except guard ->
