@@ -4440,7 +4440,19 @@ c61_mkrepo(){ # <dir> <extra line for verify.sh>
   chmod +x "$1/.claude/verify.sh"
 }
 c61_store(){ printf '%s' "$1/home/.config/agents/verify-trust"; }
-c61_trust(){ HOME="$1/home" ./bin/vstack trust "$1" --yes >/dev/null 2>&1; }
+# Keeps stderr and the exit code instead of discarding them. This check went red on Alpine in CI
+# and nowhere else, and all three lanes reported only "vstack trust failed" because the command
+# was run with `>/dev/null 2>&1` -- a check that knows something is wrong and has thrown away the
+# only sentence saying what. Two reproduction attempts against a byte-identical image failed to
+# make it fail, which is exactly the case where the swallowed stderr is the whole investigation.
+c61_last=""
+c61_trust(){
+  c61_last=$(HOME="$1/home" ./bin/vstack trust "$1" --yes 2>&1 >/dev/null)
+  c61_rc=$?
+  [ -n "$c61_last" ] || c61_last="(command printed nothing on stderr)"
+  c61_last="rc=$c61_rc, stderr: $(printf '%s' "$c61_last" | tr '\n' ' ')"
+  return "$c61_rc"
+}
 
 # Lane 2 -- positive control. A repo whose gate runs ./scripts/ci.sh must get ci.sh recorded, and
 # that path is in no hardcoded list anywhere: it can only come from reading verify.sh.
@@ -4450,7 +4462,7 @@ if c61_trust "$c61_a"; then
   grep -q '/scripts/ci\.sh$' "$(c61_store "$c61_a")" \
     || c61_errs="$c61_errs\nvstack trust did not record scripts/ci.sh, a path only verify.sh names -- the scan is not reading the gate"
 else
-  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming ./scripts/ci.sh"
+  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming ./scripts/ci.sh -- $c61_last"
 fi
 
 # Lane 3 -- negative control. A gate that runs nothing else gets one entry. Without this, lane 2
@@ -4463,13 +4475,15 @@ if c61_trust "$c61_b"; then
   [ "$c61_n" = 1 ] \
     || c61_errs="$c61_errs\nvstack trust recorded $c61_n entries for a gate that names no other script; it should record 1"
 else
-  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming nothing"
+  c61_errs="$c61_errs\nvstack trust failed on a synthetic repo naming nothing -- $c61_last"
 fi
 
 # Lane 4 -- this repository. The two files the narrow writer missed, named because they are the
 # ones verify.sh actually executes, not because they are a general category.
 c61_c="$c61_d/c"; mkdir -p "$c61_c/home"
-if HOME="$c61_c/home" ./bin/vstack trust "$PWD" --yes >/dev/null 2>&1; then
+if c61_last=$(HOME="$c61_c/home" ./bin/vstack trust "$PWD" --yes 2>&1 >/dev/null); c61_rc=$?; \
+   c61_last="rc=$c61_rc, stderr: $(printf '%s' "${c61_last:-(nothing on stderr)}" | tr '\n' ' ')"; \
+   [ "$c61_rc" -eq 0 ]; then
   for c61_f in install.sh overlay.sh; do
     grep -q "/$c61_f\$" "$(c61_store "$c61_c")" \
       || c61_errs="$c61_errs\nthe trust store for this repo does not record $c61_f, which .claude/verify.sh executes"
@@ -4477,7 +4491,7 @@ if HOME="$c61_c/home" ./bin/vstack trust "$PWD" --yes >/dev/null 2>&1; then
   c61_tot=$(grep -c . "$(c61_store "$c61_c")" || true)
 else
   c61_tot=0
-  c61_errs="$c61_errs\nvstack trust failed on this repository"
+  c61_errs="$c61_errs\nvstack trust failed on this repository -- $c61_last"
 fi
 rm -rf "$c61_d"
 

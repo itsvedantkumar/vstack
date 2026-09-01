@@ -81,8 +81,8 @@ fi
 cat > "$ROOT/bootstrap-apk.sh" <<'EOF'
 #!/bin/sh
 set -e
-apk add --no-cache bash git jq curl ca-certificates shellcheck 2>&1 || \
-  apk add --no-cache bash git jq curl ca-certificates 2>&1
+apk add --no-cache bash git jq curl ca-certificates shellcheck python3 2>&1 || \
+  apk add --no-cache bash git jq curl ca-certificates python3 2>&1
 EOF
 
 cat > "$ROOT/bootstrap-apt.sh" <<'EOF'
@@ -90,8 +90,8 @@ cat > "$ROOT/bootstrap-apt.sh" <<'EOF'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends git jq curl ca-certificates shellcheck || \
-  apt-get install -y -qq --no-install-recommends git jq curl ca-certificates
+apt-get install -y -qq --no-install-recommends git jq curl ca-certificates shellcheck python3 || \
+  apt-get install -y -qq --no-install-recommends git jq curl ca-certificates python3
 EOF
 
 # --- the in-container assertion runner ----------------------------------------------------------
@@ -193,10 +193,20 @@ if [ -x "$DOCTOR" ]; then
   # of .claude/verify.sh fails if either stops reading it or if the list grows.
   _pt_file="/work/repo/tests/pretag-findings.sh"
   if [ -f "$_pt_file" ]; then . "$_pt_file"; else PRETAG_ALLOWED_FINDING=""; fi
-  _dr_x=$(grep '✖' /tmp/doctor.out | grep -vF "$PRETAG_ALLOWED_FINDING")
+  # bin/doctor's closing line is `DRIFT ✖` for ANY non-zero FAIL count -- it is the summary
+  # banner, not a drift finding, and it name-collides with one. Left in the residual it made the
+  # carve-out unreachable by construction: with the allowed finding as the SOLE failure, _dr_x
+  # was still non-empty, holding a line with no diagnostic content, and every image reported
+  # `doctor exit=1; DRIFT ✖`. Dropping it does not soften anything -- each individual finding
+  # prints its own ✖ line, so a second, real failure still lands in the residual. What is added
+  # below is the guard that the banner was accidentally providing: the allowed finding must
+  # actually be present, or a doctor that failed while printing no findings at all would pass.
+  _dr_x=$(grep '✖' /tmp/doctor.out | grep -vF "$PRETAG_ALLOWED_FINDING" | grep -vxF 'DRIFT ✖')
   if [ "$rc" -eq 0 ]; then res PASS "2-doctor-exit0" "doctor exit=$rc"
   elif [ -z "$_pt_file" ] || [ ! -f "$_pt_file" ]; then
     res FAIL "2-doctor-exit0" "doctor exit=$rc and $_pt_file is missing, so the pre-tag carve-out cannot be applied; $(grep '✖' /tmp/doctor.out | tr '\n' ';')"
+  elif ! grep -qF "$PRETAG_ALLOWED_FINDING" /tmp/doctor.out; then
+    res FAIL "2-doctor-exit0" "doctor exit=$rc but did not report '$PRETAG_ALLOWED_FINDING' at all, so the carve-out is excusing a failure it cannot see; $(grep '✖' /tmp/doctor.out | tr '\n' ';')"
   elif [ -z "$_dr_x" ]; then
     res PASS "2-doctor-exit0" "doctor exit=$rc, only finding is '$PRETAG_ALLOWED_FINDING', a note in a commit-triggered lane"
   else res FAIL "2-doctor-exit0" "doctor exit=$rc; $(printf '%s' "$_dr_x" | tr '\n' ';')"; fi
