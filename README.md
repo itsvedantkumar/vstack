@@ -351,6 +351,7 @@ true.
 ## Docs
 
 - [How skills fire](docs/how-skills-fire.md) — the routing mechanism and what was measured
+- [How config reaches a session, measured](docs/config-precedence.md) — memory files load additively, hooks merge across scopes, one repo line can disable everything, and the coverage classes doctor reports
 - [Checks that inherit their answer](docs/checks-that-inherit-their-answer.md) — the failure shape behind every fake green found here
 - [Releasing this repository](docs/releasing-this-repo.md) — why three harnesses disagree between a version bump and its tag, and the order that satisfies all of them
 - [What this actually does](docs/what-this-actually-does.md) — every claim sorted into measured, mechanism-only, and unproven, each dated and sourced
