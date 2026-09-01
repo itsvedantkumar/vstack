@@ -1373,6 +1373,59 @@ if want doctor-stranger; then
   fi
 fi
 
+# --- doctor's coverage verdict reads the overlay, not just the conductor toml -------------------
+# The old predicate called a repo covered because .conductor/settings.toml existed. A repo with
+# that file and no committed .claude at all -- the exact shape the toml exists to serve -- scored
+# as overlaid, and a repo fully served by the global ~/.claude lane scored as a failure. Five
+# planted repos, one per coverage class from docs/config-precedence.md, and the verdict must name
+# each for what it is.
+if want doctor-coverage; then
+  if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    skip "doctor coverage classes" "git or jq not installed"
+  else
+    C="$ROOT/cov"; CH="$C/home"
+    mkdir -p "$CH/.claude/hooks" "$CH/Projects"
+    # A live global lane: settings plus every hook inventory.json declares.
+    cp "$SRC/claude/settings.json" "$CH/.claude/settings.json"
+    cp "$SRC"/claude/hooks/*.sh "$CH/.claude/hooks/"
+    cov_mkrepo(){ mkdir -p "$1"; git -C "$1" init -q; git -C "$1" config user.email t@example.com; git -C "$1" config user.name t; printf 'x\n' > "$1/f"; git -C "$1" add -A; git -C "$1" commit -qm init; }
+    # cov-half: the old lie -- conductor toml, no overlay artifacts.
+    cov_mkrepo "$CH/Projects/cov-half"
+    mkdir -p "$CH/Projects/cov-half/.conductor"
+    printf 'setup = "curl x"\n' > "$CH/Projects/cov-half/.conductor/settings.toml"
+    # cov-ready: freshly overlaid, pin == this checkout's HEAD, trust --yes present.
+    cov_mkrepo "$CH/Projects/cov-ready"
+    "$SRC/overlay.sh" "$CH/Projects/cov-ready" >/dev/null 2>&1
+    # cov-bare: nothing -- served by the global lane, must be a note, never a failure.
+    cov_mkrepo "$CH/Projects/cov-bare"
+    # cov-stale: overlaid, then the pin rewound to a commit that is not HEAD.
+    cov_mkrepo "$CH/Projects/cov-stale"
+    "$SRC/overlay.sh" "$CH/Projects/cov-stale" >/dev/null 2>&1
+    Z=0000000000000000000000000000000000000000
+    sed "s|/vstack/[0-9a-f]\{40\}/bootstrap\.sh|/vstack/$Z/bootstrap.sh|" \
+      "$CH/Projects/cov-stale/.conductor/settings.toml" > "$C/t" \
+      && cat "$C/t" > "$CH/Projects/cov-stale/.conductor/settings.toml" && rm -f "$C/t"
+    # cov-nohooks: one committed line that silences the whole global stack (measured in
+    # docs/config-precedence.md Q3) -- always a failure, whatever else the repo carries.
+    cov_mkrepo "$CH/Projects/cov-nohooks"
+    mkdir -p "$CH/Projects/cov-nohooks/.claude"
+    printf '{"disableAllHooks": true}\n' > "$CH/Projects/cov-nohooks/.claude/settings.json"
+    js=$(HOME="$CH" VSTACK_DIR="$SRC" "$SRC/bin/doctor" --json 2>/dev/null)
+    row=$(printf '%s' "$js" | jq -r '.checks[] | select(.label | startswith("active repos overlaid")) | "\(.status) \(.detail)"' 2>/dev/null)
+    e=""
+    case "$row" in bad*) ;; *) e="$e; verdict is '${row:-missing}', want bad naming the half-covered/stale/disabled repos" ;; esac
+    case "$row" in *cov-half*) ;; *) e="$e; cov-half (toml without overlay) not named" ;; esac
+    case "$row" in *cov-stale*) ;; *) e="$e; cov-stale (old pin) not named" ;; esac
+    case "$row" in *cov-nohooks*) ;; *) e="$e; cov-nohooks (disableAllHooks) not named" ;; esac
+    case "$row" in *cov-ready*) e="$e; cov-ready was reported as a failure" ;; esac
+    case "$row" in *cov-bare*) e="$e; cov-bare (global-lane repo) was reported as a failure" ;; esac
+    lo=$(printf '%s' "$js" | jq -r '[.skips[]? | select(.detail | contains("cov-bare"))] | length' 2>/dev/null)
+    [ "${lo:-0}" -ge 1 ] || e="$e; cov-bare never appeared in a local-only note"
+    [ -z "$e" ] && ok "doctor coverage classes (half, ready, bare, stale, hooks-disabled)" \
+      || bad "doctor coverage classes" "${e#; }"
+  fi
+fi
+
 echo
 printf '%d passed, %d failed' "$PASS" "$FAIL"
 [ "$SKIP" -gt 0 ] && printf ', %d skipped' "$SKIP"
