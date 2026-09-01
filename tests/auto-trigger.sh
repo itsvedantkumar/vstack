@@ -13,7 +13,12 @@ set -uo pipefail
 
 PER_CASE_TIMEOUT=120   # seconds; enforced by the polling loop in run_case (macOS has no timeout(1))
 MODEL="sonnet"
-MAX_TURNS=3
+# Env-overridable as of 2026-09-01, for probing turn starvation without editing the file.
+# The 2026-08-23 note above case_max_turns records the last such probe being run through a
+# throwaway script precisely because this was a literal -- and an uncommitted instrument is why
+# that arm's numbers were withdrawn. The value lands in every SAMPLES runlog row, so an arm run
+# at a different budget cannot be silently mixed with one run at the default.
+MAX_TURNS="${MAX_TURNS:-3}"
 # Per-case turn budget, measured not guessed (2026-08-23), enforced by case_max_turns() below.
 # MAX_TURNS above is still the global default -- a case with no row here is not in the case
 # statement below either, and inherits MAX_TURNS unchanged, same as before this table existed.
@@ -150,6 +155,31 @@ case_max_turns() {
 # just starts building instead of brainstorming first) — three attempts keep the suite
 # honest about "does this situation ever route there" without crying wolf.
 ATTEMPTS="${ATTEMPTS:-3}"
+
+# ---------------------------------------------------------------------------
+# SAMPLES=N -- rate mode. OFF by default (0): with SAMPLES unset every line below behaves
+# exactly as it did before, same output, same exit codes, same gate.
+#
+# ATTEMPTS is NOT a sample-size knob and raising it will never make one. It early-stops on the
+# first hit, so it answers "did this land within N tries" and biases upward -- the same
+# early-stopping error that read encode-lessons-lint as a dead skill when it was turn-starved
+# (see the note above case_max_turns). SAMPLES runs N INDEPENDENT, non-retrying invocations of
+# the same prompt and reports raw k/N.
+#
+# Report k/N, never a percentage and never an interval: at the n this mode is affordable at, a
+# point estimate implies precision the sample does not have.
+#
+# Measurement is not a verdict. A low rate does NOT fail the run -- only a fence breach does.
+# ---------------------------------------------------------------------------
+SAMPLES="${SAMPLES:-0}"
+SAMPLES_ALL="${SAMPLES_ALL:-0}"   # required to sample every case; see the cost guard below
+SAMPLE_LOG="${SAMPLE_LOG:-}"      # optional path; one JSON line per sample, append-only
+SAMPLE_CASES=0
+SAMPLE_CALLS=0
+SAMPLE_COST="0"
+SAMPLE_HEAD=""
+SAMPLE_DESCS=""
+AT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -314,6 +344,47 @@ top_level_subtype() {
 }
 
 # ---------------------------------------------------------------------------
+# top_level_cost OUT_JSONL
+# Billed cost of ONE invocation, read from the same terminal result event top_level_subtype
+# reads: the one with no `origin`. A subagent's result event carries origin.kind ==
+# "task-notification" and its own total_cost_usd. Agent/Workflow/Explore/Task are denied by
+# DISALLOWED_TOOLS, so there should be no second result event here; if that fence is ever
+# loosened this becomes an undercount, and this sentence is the warning.
+# Prints 0 when the field is absent, so a timed-out or crashed sample contributes 0 rather
+# than breaking the running total.
+#
+# Nothing in this file counted a billed call before this existed. A measurement that cannot
+# say what it cost cannot be budgeted, and every prior dispatch number here was published
+# without one.
+# ---------------------------------------------------------------------------
+top_level_cost() {
+  local jsonl="$1"
+  jq -r 'select(.type=="result" and (.origin==null)) | (.total_cost_usd // 0)' "$jsonl" 2>/dev/null | tail -1
+}
+
+# ---------------------------------------------------------------------------
+# named_in_prose OUT_JSONL REGEX
+# Prints 1 if the run's assistant TEXT names a skill matching REGEX without having called it.
+#
+# Measured 2026-08-27 (tests/evals/collision/RESULTS.md, "Why nothing fired"): when the tool a
+# skill needs is denied -- Write for a plan document, Agent for a fan-out -- the model names
+# the skill in prose and never calls Skill. Under `fired=[]` that scores identically to a
+# routing miss. Separating the two is the difference between "the description does not route"
+# and "the description routes and the fence blocks the payoff", and DISALLOWED_TOOLS denies
+# exactly the tools the four chain skills exist to use.
+#
+# A 0/10 printed without this number beside it is uninterpretable.
+#
+# Herestring, not a pipe: `grep -q` closes the pipe early and returns 141 under `pipefail`.
+# ---------------------------------------------------------------------------
+named_in_prose() {
+  local jsonl="$1" regex="$2" txt
+  txt="$(jq -r 'select(.type=="assistant") | (.message.content // [])[]
+                | select(.type=="text") | .text' "$jsonl" 2>/dev/null)"
+  if grep -qE "$regex" <<<"$txt"; then echo 1; else echo 0; fi
+}
+
+# ---------------------------------------------------------------------------
 # hash_snapshot DIR
 # One "hash  path" line per regular file under DIR (find -type f -- directories are excluded,
 # they have no content to hash; a mkdir is still caught by the path-diff half of
@@ -393,7 +464,7 @@ fence_violations() {
 # run_case NAME PROMPT EXPECTED_REGEX SETUP_FN
 # SETUP_FN is a function name invoked with the temp dir as $1, or "" for none.
 # ---------------------------------------------------------------------------
-# Case selection. Without it, proving one fix means re-running all 28 cases and spending the
+# Case selection. Without it, proving one fix means re-running all 30 cases and spending the
 # whole allowance to learn about eight of them. Matches install-matrix.sh's convention:
 # no arguments runs everything, arguments name the cases to run.
 #   tests/auto-trigger.sh                       # all cases
@@ -406,9 +477,146 @@ selected_() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# Provenance for anything SAMPLES mode publishes.
+#
+# The rule in this repository is that an instrument is committed before the run it produces a
+# number for -- a 55-sample collision result was withdrawn precisely because its harness edit
+# was never committed and the runlog is gone (CHANGELOG.md, 1.47.0). Recording the instrument
+# sha AND a digest of the description bytes in every sample row is what makes a published k/N
+# checkable afterwards instead of merely asserted, because in this suite the *subject* of the
+# measurement is the description text and the *instrument* is this file. Both have to be
+# pinned or the number cannot be reproduced.
+#
+# The descriptions digested here are the INSTALLED ones, not the repo's: the CLI runs in a
+# scratch workdir and reads ~/.claude/skills. Measured 2026-09-01: a project-local
+# .claude/skills/<name>/SKILL.md IS loaded, but a user-level skill of the same name WINS --
+# the installed description is what reaches the matcher, and a repo edit is invisible here
+# until it is installed. Digesting the wrong tree would pin a number to bytes the model never
+# saw.
+# ---------------------------------------------------------------------------
+SAMPLE_HEAD="$(git -C "$AT_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+SAMPLE_DESCS="$(grep -h '^description:' "$HOME"/.claude/skills/*/SKILL.md 2>/dev/null \
+  | "$SUM_CMD" | cut -c1-12)"
+
+if (( SAMPLES > 0 )) \
+   && [ -n "$(git -C "$AT_ROOT" status --porcelain -- tests/auto-trigger.sh 2>/dev/null)" ]; then
+  echo "WARNING: tests/auto-trigger.sh is uncommitted. A number from an uncommitted instrument"
+  echo "         is inadmissible here. Commit the harness, then re-run."
+fi
+
+# Cost guard. Nothing in this file counted a call before spending it. SAMPLES across the whole
+# suite is SAMPLES x every case, which at SAMPLES=10 is several hundred billed invocations from
+# one keystroke and no confirmation.
+if (( SAMPLES > 0 )) && [ ${#SELECTED[@]} -eq 0 ] && [ "$SAMPLES_ALL" != "1" ]; then
+  echo "SAMPLES=$SAMPLES with no case named would run $SAMPLES x $(grep -cE '^run_(negative_)?case ' "$0") invocations."
+  echo "Name the cases you want, or set SAMPLES_ALL=1 to mean it."
+  exit 2
+fi
+
+# ---------------------------------------------------------------------------
+# sample_case NAME PROMPT REGEX SETUP_FN POLARITY
+#
+# SAMPLES independent invocations of one prompt, no early stop, raw k/N. POLARITY is "pos"
+# (REGEX names the skill that SHOULD fire) or "neg" (REGEX names skills that must NOT); it
+# changes the printed label only, because a fire rate and a false-positive rate are the same
+# arithmetic pointed at different prompts.
+#
+# Deliberately never touches PASS_COUNT/FAIL_COUNT except on a fence breach. A rate is a
+# measurement, not a verdict: wiring a low rate to a red exit would make this suite refuse to
+# report the very thing it was run to find out.
+# ---------------------------------------------------------------------------
+sample_case() {
+  local name="$1" prompt="$2" regex="$3" setup_fn="$4" polarity="$5"
+  local i fired term cost prose_hit hits=0 prose=0 cutoff=0 case_cost="0"
+  local workdir out_jsonl err_log runner_pid waited baseline baseline_hashes violations
+  local case_turns; case_turns="$(case_max_turns "$name")"
+
+  for i in $(seq 1 "$SAMPLES"); do
+    workdir="$(mktemp -d "/tmp/auto-trigger-sample.XXXXXX")"
+    [[ -n "$setup_fn" ]] && "$setup_fn" "$workdir"
+    baseline="$(find "$workdir" -mindepth 1 2>/dev/null | sort)"
+    baseline_hashes="$(hash_snapshot "$workdir")"
+    out_jsonl="$workdir/.out.jsonl"; err_log="$workdir/.err.log"
+
+    # Same exec/timeout discipline as run_case: without exec the kill -9 hits an empty parent
+    # and leaks a live, billed claude session per timed-out sample.
+    (
+      cd "$workdir" || exit 1
+      exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+        claude -p "$prompt" \
+          --output-format stream-json --verbose \
+          --disallowedTools "$DISALLOWED_TOOLS" \
+          --model "$MODEL" --max-turns "$case_turns" \
+          < /dev/null > "$out_jsonl" 2> "$err_log"
+    ) &
+    runner_pid=$!
+    waited=0
+    while kill -0 "$runner_pid" 2>/dev/null; do
+      sleep 1
+      waited=$((waited + 1))
+      if (( waited >= PER_CASE_TIMEOUT )); then kill -9 "$runner_pid" 2>/dev/null; break; fi
+    done
+    wait "$runner_pid" 2>/dev/null
+
+    fired=""; term="no-output"; cost=0; prose_hit=0
+    if [[ -s "$out_jsonl" ]]; then
+      fired="$(extract_fired_skills "$out_jsonl")"
+      term="$(top_level_subtype "$out_jsonl")"
+      cost="$(top_level_cost "$out_jsonl")"
+      prose_hit="$(named_in_prose "$out_jsonl" "$regex")"
+    fi
+    [[ "$term" == "error_max_turns" ]] && cutoff=$((cutoff + 1))
+    if [[ -n "$fired" ]] && grep -qE "^($regex)$" <<<"$fired"; then
+      hits=$((hits + 1))
+    elif [[ "$prose_hit" == "1" ]]; then
+      prose=$((prose + 1))
+    fi
+    # bash 3.2 has no float arithmetic; awk does the addition.
+    case_cost="$(awk -v a="$case_cost" -v b="${cost:-0}" 'BEGIN{printf "%.6f", a+b}')"
+    SAMPLE_CALLS=$((SAMPLE_CALLS + 1))
+
+    violations="$(fence_violations "$workdir" "$baseline" "$baseline_hashes" "$out_jsonl" "$err_log")"
+    if [[ -n "$SAMPLE_LOG" ]]; then
+      # jq builds the row, not printf. `fired` comes from .input.skill, a model-controlled
+      # tool-call argument: nothing constrains it to be quote-free, and a bare %s interpolation
+      # of a value containing a double quote emits a line that fails `jq .`. That would corrupt
+      # the runlog silently -- the same runlog the provenance block above calls the thing that
+      # makes a published k/N checkable. A measurement log that can be broken by its own subject
+      # is not a record.
+      jq -cn \
+        --arg case "$name" --argjson sample "$i" --arg polarity "$polarity" \
+        --arg fired "$(tr '\n' ' ' <<<"$fired" | sed 's/ *$//')" --arg subtype "$term" \
+        --argjson named_in_prose "${prose_hit:-0}" --argjson cost_usd "${cost:-0}" \
+        --arg model "$MODEL" --argjson max_turns "$case_turns" \
+        --arg instrument "$SAMPLE_HEAD" --arg descs "$SAMPLE_DESCS" \
+        '{case:$case,sample:$sample,polarity:$polarity,fired:$fired,subtype:$subtype,
+          named_in_prose:$named_in_prose,cost_usd:$cost_usd,model:$model,
+          max_turns:$max_turns,instrument:$instrument,descs:$descs}' \
+        >> "$SAMPLE_LOG"
+    fi
+    rm -rf "$workdir"
+
+    if [[ -n "$violations" ]]; then
+      echo "FAIL $name -> fence breach on sample $i of $SAMPLES: $(tr '\n' ';' <<<"$violations")"
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      return
+    fi
+  done
+
+  SAMPLE_COST="$(awk -v a="$SAMPLE_COST" -v b="$case_cost" 'BEGIN{printf "%.6f", a+b}')"
+  SAMPLE_CASES=$((SAMPLE_CASES + 1))
+  printf 'SAMPLE %-30s %-3s fired %d/%d  named-not-called %d/%d  cut-off %d/%d  $%s (max-turns=%s)\n' \
+    "$name" "$polarity" "$hits" "$SAMPLES" "$prose" "$SAMPLES" "$cutoff" "$SAMPLES" \
+    "$case_cost" "$case_turns"
+  HIT_LINES+=("$(printf '%-30s %-3s %d/%d fired, %d/%d named-only, %d/%d cut off, $%s' \
+    "$name" "$polarity" "$hits" "$SAMPLES" "$prose" "$SAMPLES" "$cutoff" "$SAMPLES" "$case_cost")")
+}
+
 run_case() {
   local name="$1" prompt="$2" expected_regex="$3" setup_fn="$4"
   selected_ "$name" || return 0
+  if (( SAMPLES > 0 )); then sample_case "$name" "$prompt" "$expected_regex" "$setup_fn" pos; return; fi
   local attempt fired fired_csv matched workdir out_jsonl err_log runner_pid waited
   local baseline baseline_hashes violations term_subtype last_fired_csv=""
   local case_turns; case_turns="$(case_max_turns "$name")"
@@ -514,6 +722,9 @@ run_case() {
 run_negative_case() {
   local name="$1" prompt="$2" forbidden_regex="$3"
   selected_ "$name" || return 0
+  # In SAMPLES mode the forbidden regex is exactly what we want a rate for: k/N here IS the
+  # over-trigger rate of the new descriptions, measured for free alongside the positive arms.
+  if (( SAMPLES > 0 )); then sample_case "$name" "$prompt" "$forbidden_regex" "" neg; return; fi
   local workdir out_jsonl err_log runner_pid waited fired fired_csv baseline baseline_hashes violations
   local case_turns; case_turns="$(case_max_turns "$name")"
 
@@ -738,6 +949,122 @@ type Order struct {
 EOF
 }
 
+# A spec that is settled and is NOT a plan. The distinction is the whole fixture: brainstorming's
+# situation ("the shape is undecided") is starved by "agreed, no open questions", and
+# executing-plans' situation ("a written plan already exists") is starved by the last line
+# saying in as many words that no file map or ordering exists anywhere.
+setup_spec() {
+  local dir="$1"
+  setup_webapp "$dir"
+  cat > "$dir/SPEC.md" <<'SPECEOF'
+# Spec: offline mode for the notes app
+
+Status: agreed 2026-08-30. No open questions. The shape is not up for discussion.
+
+Behaviour:
+- Notes stay editable with no network; edits queue locally.
+- On reconnect the queue drains oldest first; a note edited in two places keeps the newer timestamp.
+- The header reads exactly one of: online, offline, syncing.
+- No new dependencies. Storage is localStorage.
+
+Out of scope: accounts, multi-device, any conflict UI beyond last-write-wins.
+
+Written down nowhere: which files change, in what order, or how each step gets checked.
+SPECEOF
+}
+
+# A real defect, a real suite, and a gap between them. The suite existing is what separates this
+# from create-verification-skill ("nothing exists yet"); the suite being current is what
+# separates it from maintain-verification-skill (a gate that drifted).
+setup_bugfix() {
+  local dir="$1"
+  cat > "$dir/package.json" <<'PKGEOF'
+{
+  "name": "notes-app",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
+PKGEOF
+  cat > "$dir/notes.js" <<'NOTESEOF'
+const notes = [];
+
+export function addNote(text) {
+  notes.push({ text, at: 0 });
+  return notes.length;
+}
+
+export function listNotes() {
+  return notes;
+}
+
+export function clearNotes() {
+  notes.length = 0;
+}
+NOTESEOF
+  cat > "$dir/notes.test.js" <<'TESTEOF'
+import { test } from "node:test";
+import assert from "node:assert";
+import { addNote, listNotes, clearNotes } from "./notes.js";
+
+test("addNote stores the text it was given", () => {
+  clearNotes();
+  addNote("buy milk");
+  assert.strictEqual(listNotes()[0].text, "buy milk");
+});
+TESTEOF
+}
+
+# Six integrations, six unrelated defects, no imports between them: a master-password backdoor,
+# an unauthenticated non-idempotent refund, path traversal, a Math.random session id, an
+# unverified webhook, and CSV injection. Six independent verdicts is real independent work, not
+# one finding restated six times -- which is what makes this a swarm situation rather than a
+# single review.
+setup_audit() {
+  local dir="$1"
+  mkdir -p "$dir/services"
+  cat > "$dir/services/auth.js" <<'AUTHEOF'
+export function login(user, pass) {
+  if (pass === process.env.MASTER_PASSWORD) return { user, admin: true };
+  return null;
+}
+AUTHEOF
+  cat > "$dir/services/billing.js" <<'BILLEOF'
+export function refund(chargeId, amount) {
+  return fetch("https://api.example.com/charges/" + chargeId + "/refund", {
+    method: "POST",
+    body: JSON.stringify({ amount }),
+  });
+}
+BILLEOF
+  cat > "$dir/services/upload.js" <<'UPEOF'
+export function saveUpload(name, bytes) {
+  return { path: "/var/uploads/" + name, size: bytes.length };
+}
+UPEOF
+  cat > "$dir/services/session.js" <<'SESSEOF'
+const sessions = new Map();
+
+export function newSession(user) {
+  const id = String(Math.random()).slice(2);
+  sessions.set(id, user);
+  return id;
+}
+SESSEOF
+  cat > "$dir/services/webhook.js" <<'HOOKEOF'
+export function handle(req) {
+  const body = JSON.parse(req.body);
+  return { ok: true, event: body.type };
+}
+HOOKEOF
+  cat > "$dir/services/export.js" <<'CSVEOF'
+export function toCsv(rows) {
+  return rows.map(function (r) { return Object.values(r).join(","); }).join("\n");
+}
+CSVEOF
+}
+
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -757,11 +1084,24 @@ run_case \
   "typescript-best-practices" \
   "setup_typescript"
 
+# Rewritten 2026-09-01. The old prompt was "Audit this directory three different ways at once"
+# with no setup, so it tested two things this suite is not for: whether the model obeys the
+# literal string "at once" (which swarm's own description quoted back at it, making the case a
+# keyword echo rather than a routing test), and whether it can audit an empty directory -- the
+# no-referent confound in tests/evals/collision/RESULTS.md.
+#
+# All four quoted trigger strings are gone -- "in parallel", "at once", "all of these",
+# "try N ways" -- and splittability is stated as a property of the WORK, which is the thing a
+# description matcher can actually score. The routing-table line in the SessionStart hook still
+# carries the literal strings; this case deliberately exercises the other path.
+#
+# If this measures 0/N with a high named-not-called, the blocker is the Agent denial in
+# DISALLOWED_TOOLS, not the description, and the arm says so rather than reporting a dead skill.
 run_case \
   "swarm-audit" \
-  "Audit this directory three different ways at once and report back." \
+  "Each file in services/ is a separate integration with its own failure mode, and none of them import each other. I want a security verdict per file, and what you find in one tells you nothing about the next. Come back with one verdict per file." \
   "swarm" \
-  ""
+  "setup_audit"
 
 run_case \
   "blast-radius-auth" \
@@ -941,6 +1281,31 @@ run_case \
   "principle-type-system-discipline" \
   "setup_gostruct"
 
+# writing-plans and test-driven-development had no isolated case until 2026-09-01. Their only
+# positive coverage was feature-chain's three-way alternation, which any one of the three can
+# satisfy on its own -- so both could be, and were, dead at zero lifetime dispatches while this
+# suite stayed green. A gate that cannot go red for a dead skill is not measuring that skill.
+
+# Discriminator, three ways. SPEC.md says "agreed ... no open questions", so brainstorming has
+# nothing to explore. Nothing on disk is a plan, so executing-plans has nothing to execute. And
+# the ask is for the ordered steps IN THE REPLY, not for a file: Write is denied by the fence,
+# and a fixture whose payoff needs a denied tool scores a blocked affordance as a routing miss.
+run_case \
+  "writing-plans-spec-to-steps" \
+  "SPEC.md is agreed and there are no open questions on it. Nothing anywhere says which files change, in what order, or how we would know each step worked. Work that out and give it to me before anyone touches app.js." \
+  "writing-plans" \
+  "setup_spec"
+
+# Discriminator: the cause is stated outright, which starves principle-fix-root-causes (its
+# situation is debugging, or reaching for a try/except). A suite exists and demonstrably does not
+# cover this path. "test" appears in the prompt only as a description of what is already on disk
+# -- the ask is for the fix -- so a hit here is routing rather than keyword echo.
+run_case \
+  "tdd-known-bugfix" \
+  "addNote('') files an empty note instead of rejecting it. The cause is not a mystery: addNote never looks at text. Wanted behaviour is that an empty or whitespace-only string is rejected and the list is left alone. notes.test.js covers the happy path only. Make the change." \
+  "test-driven-development" \
+  "setup_bugfix"
+
 run_negative_case \
   "negative-arithmetic" \
   "What is 17 times 23? Just the number." \
@@ -957,9 +1322,23 @@ echo "---"
 # which is the same shape as a clean run. A typo'd case name must not read as a pass.
 # This sits above the hit-rate loop because HIT_LINES is unset when nothing ran, and
 # `set -u` turns that into a stack trace rather than an answer.
-if (( PASS_COUNT + FAIL_COUNT == 0 )); then
+if (( PASS_COUNT + FAIL_COUNT + SAMPLE_CASES == 0 )); then
   echo "no case ran. ${#SELECTED[@]} selector(s) given, none matched a case name."
   exit 2
+fi
+
+if (( SAMPLES > 0 )); then
+  echo "Rates (raw k/N, no early stop):"
+  for l in "${HIT_LINES[@]}"; do echo "  $l"; done
+  echo
+  echo "Sample mode: SAMPLES=$SAMPLES, $SAMPLE_CASES case(s), $SAMPLE_CALLS invocation(s), total_cost_usd=$SAMPLE_COST"
+  echo "  model=$MODEL  max-turns-default=$MAX_TURNS  instrument=$SAMPLE_HEAD  installed-descs=$SAMPLE_DESCS"
+  echo "  fence=$DISALLOWED_TOOLS"
+  echo "  k/N is a measurement, not a gate: a low rate does not fail this run. A fence breach does."
+  echo "  Read named-not-called beside every k/N -- a 0/N with a high named-not-called is the"
+  echo "  denied-affordance wall (tests/evals/collision/RESULTS.md), not a dead description."
+  if (( FAIL_COUNT > 0 )); then exit 1; fi
+  exit 0
 fi
 
 echo "Hit rates (which attempt each case landed on):"

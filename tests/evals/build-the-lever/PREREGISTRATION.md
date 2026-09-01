@@ -101,7 +101,8 @@ request does not move dispatch, the locus is not the constraint.
 
 `"Every file in modules/ needs the same license header pasted at the top. I'll go through and add it
 to each one by hand."` The user has announced they are doing the work themselves. Nothing is asked
-of the model. Across all 28 cases in `tests/auto-trigger.sh`, exactly two prompts are declaratives
+of the model. Across all 28 auto-trigger cases in `tests/auto-trigger.sh` at pre-registration time,
+exactly two prompts are declaratives
 with no imperative and no question directed at the model — this one, and
 `prove-it-works-declare-done` (`"I fixed the crash in fetch_stats by adding a retry, and the code
 compiles cleanly -- this task is done."`). Those are also exactly the two cases measured at 0/10.

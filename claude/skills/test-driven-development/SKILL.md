@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: "Third, once the shape is known, including any bugfix: write the failing test before the implementation code."
+description: "About to write implementation code or a bugfix and no test fails for that behaviour yet: write the failing test first, watch it fail, then write the minimum that passes."
 ---
 
 # Test-Driven Development (TDD)

@@ -1,0 +1,10 @@
+{"case":"tdd-known-bugfix","sample":1,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.2870228,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":2,"polarity":"pos","fired":"test-driven-development","subtype":"success","named_in_prose":0,"cost_usd":0.3048088,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":3,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.2603012,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":4,"polarity":"pos","fired":"test-driven-development","subtype":"success","named_in_prose":0,"cost_usd":0.3981236,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":5,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.1043738,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":6,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.2474064,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":7,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.2120628,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":8,"polarity":"pos","fired":"test-driven-development","subtype":"success","named_in_prose":0,"cost_usd":0.2736248,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":9,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.1625512,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}
+{"case":"tdd-known-bugfix","sample":10,"polarity":"pos","fired":"","subtype":"success","named_in_prose":0,"cost_usd":0.2106834,"model":"sonnet","max_turns":12,"instrument":"17f918b","descs":"d4251fb4eda7"}

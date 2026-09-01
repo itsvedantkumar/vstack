@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: "Second, once the shape is agreed and before code: turn a spec or requirements into a written multi-step plan."
+description: "Requirements are settled, nothing is written down about how, and the work is more than one edit: produce the plan document, file map, bite-sized tasks, one verification per task."
 ---
 
 > **Ported here, and some of what it names is not.** This skill comes from upstream, where it

@@ -203,7 +203,7 @@ CLI wrappers under `~/.config/agents/bin/`.
 
 Skills are not slash commands. They fire on the situation from their description — writing prose
 reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practices` — and
-`tests/auto-trigger.sh` asserts that with 28 cases against the live model.
+`tests/auto-trigger.sh` asserts that with 30 cases against the live model.
 
 ## Checks that can fail
 

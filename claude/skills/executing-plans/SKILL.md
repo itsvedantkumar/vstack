@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Use when you have a written implementation plan to execute in a separate session with review checkpoints
+description: "A written plan or numbered task list already exists and the ask is to carry it out: work the tasks in order, verify each, pause at the review checkpoint between phases."
 ---
 
 > **Ported here, and some of what it names is not.** This skill comes from upstream, where it
