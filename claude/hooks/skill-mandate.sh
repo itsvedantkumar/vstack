@@ -161,7 +161,7 @@ printf '%s' "$ckpt" > "$ckpt_file" 2>/dev/null
 # both ends to already cover any suffix appended after the session id) keeps sweeping every one
 # of these without needing to know the new names:
 #   skill family (session-persistent, no window):
-#     $cnt_file.unslop  $cnt_file.typescript  $cnt_file.proveitworks
+#     $cnt_file.unslop  $cnt_file.typescript  $cnt_file.proveitworks  $cnt_file.register
 #   delegation family (windowed, cnt+timestamp pair per mandate):
 #     $cnt_file.delegate-breadth(-ts)  $cnt_file.delegate-naming(-ts)  $cnt_file.delegate-swarm(-ts)
 # $cnt_file.delegate-scan (the re-scan cooldown) and $cnt_file.lock stay singular and family-wide
@@ -199,6 +199,7 @@ DELEGATE_RESET_SECS="${VSTACK_DELEGATE_RESET_SECS:-1800}"
 _read_cnt "$cnt_file.unslop";       cnt_unslop=$_rc
 _read_cnt "$cnt_file.typescript";   cnt_typescript=$_rc
 _read_cnt "$cnt_file.proveitworks"; cnt_proveitworks=$_rc
+_read_cnt "$cnt_file.register";     cnt_register=$_rc
 _read_wcnt "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_breadth=$_rc
 _read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
 _read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
@@ -207,6 +208,7 @@ _read_wcnt "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts" "$now_d" "
 eval_unslop=1;       [ "$cnt_unslop" -ge 2 ]       && eval_unslop=0
 eval_typescript=1;   [ "$cnt_typescript" -ge 2 ]   && eval_typescript=0
 eval_proveitworks=1; [ "$cnt_proveitworks" -ge 2 ] && eval_proveitworks=0
+eval_register=1;     [ "$cnt_register" -ge 2 ]     && eval_register=0
 eval_breadth=1;      [ "$cnt_breadth" -ge 2 ]      && eval_breadth=0
 eval_naming=1;       [ "$cnt_naming" -ge 2 ]       && eval_naming=0
 eval_swarm=1;        [ "$cnt_swarm" -ge 2 ]        && eval_swarm=0
@@ -231,12 +233,12 @@ if [ "$dscan" -gt 0 ] && [ "$now_d" -gt 0 ] && [ $((now_d - dscan)) -lt "$DELEGA
   dscan_recent=1
 fi
 
-# Family-level flags, derived from the six per-mandate flags above by OR (ANY member of the
+# Family-level flags, derived from the per-mandate flags above by OR (ANY member of the
 # family still has headroom): used ONLY for the top-level scan-skip decision below and for the
 # turn_json/prove-it-works cost gate further down, never for deciding whether an individual
 # mandate contributes to $unmet -- each mandate's own eval_* flag alone decides that now.
 skill_eval=1
-[ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && skill_eval=0
+[ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && [ "$eval_register" = 0 ] && skill_eval=0
 deleg_eval=1
 [ "$eval_breadth" = 0 ] && [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && [ "$eval_serial" = 0 ] && deleg_eval=0
 
@@ -272,6 +274,7 @@ fi
 hit_unslop=0
 hit_typescript=0
 hit_proveitworks=0
+hit_register=0
 hit_breadth=0
 hit_naming=0
 hit_swarm=0
@@ -913,11 +916,13 @@ fi
 # faster than just the `tail` step of the "optimization" meant to beat it. Reverted to the
 # simpler single-pass slurp below in favor of the version that is both less code and faster.
 #
-# Gated on eval_proveitworks specifically, not the family-level skill_eval: this jq slurp is
-# prove-it-works's own cost alone (unslop/typescript-best-practices need none of turn_json), so
-# now that the three no longer share a latch, this must not run just because unslop or
-# typescript-best-practices still has headroom -- only because prove-it-works itself does.
-if [ "$eval_proveitworks" = 1 ]; then
+# Gated on the two mandates that read the current turn -- prove-it-works and register -- not
+# the family-level skill_eval: this jq slurp is their shared cost alone (unslop/
+# typescript-best-practices need none of turn_json), so it must not run just because unslop or
+# typescript-best-practices still has headroom -- only because a turn-reading mandate does.
+# Each consumer below re-gates on its OWN eval_* flag: a latched prove-it-works must not get a
+# free evaluation because register kept the slurp alive, and vice versa.
+if [ "$eval_proveitworks" = 1 ] || [ "$eval_register" = 1 ]; then
 turn_json=$(
   "$JQ" -sc '
     . as $all
@@ -932,6 +937,7 @@ turn_json=$(
       ) as $ts
     | ($all[(($ts // -1) + 1):] | map(select(.type == "assistant"))) as $turn
     | {
+        turn_texts: ( [ $turn[] | .message.content[]? | select(.type == "text") | .text ] | join("\n") ),
         final_text: ( [ $turn[] | .message.content[]? | select(.type == "text") | .text ] | last // "" ),
         bash_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and .name == "Bash") ] | length ),
         read_n: ( [ $turn[] | .message.content[]? | select(.type == "tool_use" and .name == "Read") ] | length ),
@@ -941,6 +947,29 @@ turn_json=$(
   ' "$tr_" 2>/dev/null
 )
 [ -n "$turn_json" ] || turn_json='{}'
+
+# The register mandate: ~/.claude/CLAUDE.md's REGISTER rule, enforced instead of remembered.
+# Scans every assistant text block of the CURRENT TURN (same turn boundary prove-it-works uses
+# -- whole-transcript scanning would re-block old sins on every later Stop forever) for the
+# exact banned-opener list, line-anchored. Deliberately narrow: no narration heuristics
+# ("^Reading...") in v1 -- their false-positive rate on imperative prose is unmeasured; widen
+# only from measured misses. Known accepted false positives, bounded by the 2-strike session
+# latch: quoted peer text and list items that start a line with a banned word.
+if [ "$eval_register" = 1 ]; then
+  reg_texts=$(printf '%s' "$turn_json" | "$JQ" -r '.turn_texts // ""' 2>/dev/null)
+  reg_pattern="^(Ah|I see|Got it|Right|Okay|Sure|Great|Perfect|Good catch|You('|’)re right|Let me|Now I('|’)ll|Now I('|’)m)[,! .]"
+  reg_match=""
+  if [ -n "$reg_texts" ]; then
+    reg_match=$(printf '%s\n' "$reg_texts" | grep -oE "$reg_pattern" 2>/dev/null | head -1 | sed 's/[,! .]*$//')
+  fi
+  if [ -n "$reg_match" ]; then
+    unmet="$unmet
+  register -- banned opener \"$reg_match\" in this turn's text. Delete it; state the fact or make the tool call instead."
+    hit_register=1
+  fi
+fi
+
+if [ "$eval_proveitworks" = 1 ]; then
 piw_final_text=$(printf '%s' "$turn_json" | "$JQ" -r '.final_text // ""' 2>/dev/null)
 piw_bash_n=$(printf '%s' "$turn_json" | "$JQ" -r '.bash_n // 0' 2>/dev/null)
 piw_read_n=$(printf '%s' "$turn_json" | "$JQ" -r '.read_n // 0' 2>/dev/null)
@@ -963,7 +992,8 @@ if [ "$piw_edit_n" -ge 1 ] && [ "$piw_claims" -eq 1 ] \
   prove-it-works -- this turn edited a file and closed claiming it is done, with no Bash/Read/Task/Agent call in the turn to back it up"
   hit_proveitworks=1
 fi
-fi # eval_proveitworks: turn_json / prove-it-works
+fi # eval_proveitworks: the prove-it-works evaluation itself
+fi # eval_proveitworks || eval_register: turn_json and its two consumers
 
 # Per-mandate bookkeeping, replacing the two shared-counter blocks above: each of the six
 # mandates persists or clears its OWN counter file independently now, so hitting one never
@@ -986,6 +1016,11 @@ if [ "$hit_proveitworks" = 1 ]; then
   echo $((cnt_proveitworks + 1)) > "$cnt_file.proveitworks"
 elif [ "$eval_proveitworks" = 1 ]; then
   rm -f "$cnt_file.proveitworks"
+fi
+if [ "$hit_register" = 1 ]; then
+  echo $((cnt_register + 1)) > "$cnt_file.register"
+elif [ "$eval_register" = 1 ]; then
+  rm -f "$cnt_file.register"
 fi
 if [ "$hit_breadth" = 1 ]; then
   echo $((cnt_breadth + 1)) > "$cnt_file.delegate-breadth"
@@ -1035,6 +1070,9 @@ fi
 if [ "$hit_proveitworks" = 1 ]; then
   reason="$reason$(_strike_line prove-it-works "$((cnt_proveitworks + 1))"     "this session -- after 2, prove-it-works alone stops being enforced for the rest of the session (self-police from here).")"
 fi
+if [ "$hit_register" = 1 ]; then
+  reason="$reason$(_strike_line register "$((cnt_register + 1))"     "this session -- after 2, register alone stops being enforced for the rest of the session (self-police from here).")"
+fi
 if [ "$hit_breadth" = 1 ]; then
   reason="$reason$(_strike_line "multi-directory work" "$((cnt_breadth + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
 fi
@@ -1051,6 +1089,7 @@ reason="$reason
 Run each named skill with the Skill tool against the files listed, apply what it says, then finish.
 For prove-it-works: run the command that proves the change, read its actual output, then restate
 the claim with that evidence -- or state the real status if the output disagrees with it.
+For register: there is no skill to run -- delete the named phrase from the reply text.
 Set VSTACK_NO_MANDATE=1 to disable this gate."
 "$JQ" -cn --arg r "$reason" '{decision:"block",reason:$r}'
 exit 0

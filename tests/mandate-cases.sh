@@ -57,7 +57,7 @@
 #   invoke the hook at all, but this file does not).
 
 # shellcheck disable=SC2034  # read by callers that source this file (verify.sh check 27, tests/container-matrix.sh), not used within it
-MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12"
+MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12 13 14 15"
 
 # --- fixture records (shared building blocks, same literal shapes check 27 already proved) -------
 _MC_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
@@ -97,6 +97,14 @@ _MC_11_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"W
 _MC_DONE='{"type":"assistant","message":{"content":[{"type":"text","text":"The fix is done."}]}}'
 _MC_12_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"piw2/fix.sh","content":""}}]}}'
 _MC_12_BASH='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bash piw2/fix.sh --selftest"}}]}}'
+# 13/14/15: the register mandate. 13 is the positive direction: a turn whose text opens with a
+# banned CLAUDE.md REGISTER phrase ("Let me ...") at line start. 14 and 15 are the two anchors
+# that keep the pattern honest: 14 starts a line with "Right" but follows it with "-" (not in
+# the [,! .] boundary class) -- "Right-sizing" is vocabulary, not an acknowledgement token; 15
+# carries "Great," mid-line only, which the ^ anchor must ignore. Neither may block.
+_MC_13='{"type":"assistant","message":{"content":[{"type":"text","text":"Let me check the logs first."}]}}'
+_MC_14='{"type":"assistant","message":{"content":[{"type":"text","text":"Right-sizing the buffer comes later; the cap stays at 512."}]}}'
+_MC_15='{"type":"assistant","message":{"content":[{"type":"text","text":"I ran it twice. Great, both runs agree."}]}}'
 
 mandate_case_lines() {
   case "$1" in
@@ -124,6 +132,9 @@ mandate_case_lines() {
     10) printf '%s\n' "$_MC_10" ;;
     11) printf '%s\n' "$_MC_11_W" "$_MC_DONE" ;;
     12) printf '%s\n' "$_MC_12_W" "$_MC_12_BASH" "$_MC_DONE" ;;
+    13) printf '%s\n' "$_MC_13" ;;
+    14) printf '%s\n' "$_MC_14" ;;
+    15) printf '%s\n' "$_MC_15" ;;
     *) return 1 ;;
   esac
 }
@@ -154,6 +165,9 @@ mandate_case_expect() {
     10) printf '%s\n' 'SILENT' ;;
     11) printf '%s\n' 'BLOCK:prove-it-works' ;;
     12) printf '%s\n' 'SILENT' ;;
+    13) printf '%s\n' 'BLOCK:register -- banned opener' ;;
+    14) printf '%s\n' 'SILENT' ;;
+    15) printf '%s\n' 'SILENT' ;;
     *) return 1 ;;
   esac
 }
@@ -193,6 +207,9 @@ mandate_case_desc() {
     10) printf '%s\n' 'a purely conversational turn (no tool_use) blocked' ;;
     11) printf '%s\n' 'edit + completion claim with no verification did not block prove-it-works' ;;
     12) printf '%s\n' 'edit + completion claim WITH a Bash call in the turn blocked anyway' ;;
+    13) printf '%s\n' 'a turn opening with "Let me" did not trip the register mandate' ;;
+    14) printf '%s\n' 'a line starting "Right-" (no boundary char after the opener) tripped register anyway' ;;
+    15) printf '%s\n' 'a mid-line "Great," tripped register anyway (the line anchor was lost)' ;;
     *) return 1 ;;
   esac
 }

@@ -2908,9 +2908,14 @@ if command -v jq >/dev/null; then
     # invocation of $sm below, piped or not.
     export VSTACK_DELEGATION_LOG="$c40_log"
 
-    # Trips ALL THREE skill-family mandates on every Stop: a prose write with no unslop, a .tsx
-    # edit with no typescript-best-practices, and a turn that closes claiming done with no
-    # Bash/Read/Task/Agent call to back it (prove-it-works). One mandate is no longer enough.
+    # Trips ALL FOUR skill-family mandates on every Stop: a prose write with no unslop, a .tsx
+    # edit with no typescript-best-practices, a turn that closes claiming done with no
+    # Bash/Read/Task/Agent call to back it (prove-it-works), and a closing text that opens with
+    # a banned register phrase ("Perfect."). One mandate is no longer enough, and this fixture
+    # must grow a new trigger every time the skill family grows a mandate -- otherwise the
+    # never-tripped mandate's counter stays clear, the family latch is never reached, and Stop 3
+    # falls through to a dense latched:false row (exactly how the register mandate turned this
+    # check red the day it was added).
     #
     # 1.57.0 split the 2-strike latch per mandate, because one shared counter meant two unrelated
     # unslop misses disarmed the other mandates for the rest of the session -- measured at the
@@ -2924,7 +2929,7 @@ if command -v jq >/dev/null; then
     # Each mandate's counter is CLEARED when it is evaluated and not hit, so all three have to
     # trip on the same Stop to accumulate together. Verified against the real hook: Stops 1 and 2
     # block and log dense rows, Stop 3 is silent and logs latched:true with all four counts null.
-    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}},{"type":"text","text":"All done, the feature is complete and working."}]}}' \
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}},{"type":"text","text":"Perfect. All done, the feature is complete and working."}]}}' \
       > "$c40_transcript"
 
     c40_hit(){
