@@ -196,10 +196,17 @@ _read_wcnt() { # <cntfile> <tsfile> <now> <window_secs> -> sets $_rc, windowed r
 now_d=$(date +%s 2>/dev/null || echo 0)
 DELEGATE_RESET_SECS="${VSTACK_DELEGATE_RESET_SECS:-1800}"
 
-_read_cnt "$cnt_file.unslop";       cnt_unslop=$_rc
-_read_cnt "$cnt_file.typescript";   cnt_typescript=$_rc
-_read_cnt "$cnt_file.proveitworks"; cnt_proveitworks=$_rc
-_read_cnt "$cnt_file.register";     cnt_register=$_rc
+# Skill family, same windowed re-arm the delegation family below already uses. A plain
+# _read_cnt latched each of these to 0 evaluations for the rest of the session after two
+# misses -- measured over ten real sessions, that retired every skill mandate early and is
+# the mechanical cause of "the gate stops triggering". The window lets a latched mandate
+# re-arm after SKILL_RESET_SECS instead of dying for hours; delegation has run this way since
+# 1.63.0 without over-firing (21 blocks / 628 turns), so the cadence is already calibrated.
+SKILL_RESET_SECS="${VSTACK_SKILL_RESET_SECS:-1800}"
+_read_wcnt "$cnt_file.unslop"       "$cnt_file.unslop-ts"       "$now_d" "$SKILL_RESET_SECS"; cnt_unslop=$_rc
+_read_wcnt "$cnt_file.typescript"   "$cnt_file.typescript-ts"   "$now_d" "$SKILL_RESET_SECS"; cnt_typescript=$_rc
+_read_wcnt "$cnt_file.proveitworks" "$cnt_file.proveitworks-ts" "$now_d" "$SKILL_RESET_SECS"; cnt_proveitworks=$_rc
+_read_wcnt "$cnt_file.register"     "$cnt_file.register-ts"     "$now_d" "$SKILL_RESET_SECS"; cnt_register=$_rc
 _read_wcnt "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_breadth=$_rc
 _read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
 _read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
@@ -733,7 +740,11 @@ ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | gre
 # many times 2+ Task/Agent calls landed in the SAME assistant message, which is the only shape
 # Claude Code actually executes concurrently. Eligibility (dir_count/ext_count) is unchanged --
 # only what counts as having answered it changed.
-if [ "$eval_breadth" = 1 ] && [ "$dir_count" -ge 3 ] && [ "$ext_count" -ge 2 ] && [ "$fanout_batches" -eq 0 ]; then
+# Threshold lowered from dir>=3 to dir>=2 in 1.66.0. Measured: a two-directory, two-extension
+# edit is a cross-cutting change that fans out cleanly, and it was never gated before, first
+# offence or repeat. The AND with ext>=2 stays -- a three-file edit inside one file type is
+# often legitimately serial, and gating it would be the nag that gets a guard switched off.
+if [ "$eval_breadth" = 1 ] && [ "$dir_count" -ge 2 ] && [ "$ext_count" -ge 2 ] && [ "$fanout_batches" -eq 0 ]; then
   # Names the actual parts (bounded to 3, same head-N precedent the prose/typescript mandates
   # above already use for file paths) instead of only a count -- "touched 5 directories" tells
   # the model a number it already knew; "touched claude/hooks, tests, docs, ..." tells it which
@@ -1002,25 +1013,32 @@ fi # eval_proveitworks || eval_register: turn_json and its two consumers
 # evaluated this Stop (its own eval_* flag was 1) and did NOT contribute to $unmet had every
 # chance to and passed -- its own counter resets to 0, the same "fully met -> clear" rule the
 # shared counters used, now scoped to one mandate instead of a whole family.
+# Skill-family writes now carry a -ts sidecar so the windowed read above can re-arm them,
+# exactly as the delegation family does below. On hit, stamp the time; on a clean evaluated
+# turn, clear both the counter and its stamp.
 if [ "$hit_unslop" = 1 ]; then
   echo $((cnt_unslop + 1)) > "$cnt_file.unslop"
+  date +%s > "$cnt_file.unslop-ts" 2>/dev/null
 elif [ "$eval_unslop" = 1 ]; then
-  rm -f "$cnt_file.unslop"
+  rm -f "$cnt_file.unslop" "$cnt_file.unslop-ts"
 fi
 if [ "$hit_typescript" = 1 ]; then
   echo $((cnt_typescript + 1)) > "$cnt_file.typescript"
+  date +%s > "$cnt_file.typescript-ts" 2>/dev/null
 elif [ "$eval_typescript" = 1 ]; then
-  rm -f "$cnt_file.typescript"
+  rm -f "$cnt_file.typescript" "$cnt_file.typescript-ts"
 fi
 if [ "$hit_proveitworks" = 1 ]; then
   echo $((cnt_proveitworks + 1)) > "$cnt_file.proveitworks"
+  date +%s > "$cnt_file.proveitworks-ts" 2>/dev/null
 elif [ "$eval_proveitworks" = 1 ]; then
-  rm -f "$cnt_file.proveitworks"
+  rm -f "$cnt_file.proveitworks" "$cnt_file.proveitworks-ts"
 fi
 if [ "$hit_register" = 1 ]; then
   echo $((cnt_register + 1)) > "$cnt_file.register"
+  date +%s > "$cnt_file.register-ts" 2>/dev/null
 elif [ "$eval_register" = 1 ]; then
-  rm -f "$cnt_file.register"
+  rm -f "$cnt_file.register" "$cnt_file.register-ts"
 fi
 if [ "$hit_breadth" = 1 ]; then
   echo $((cnt_breadth + 1)) > "$cnt_file.delegate-breadth"

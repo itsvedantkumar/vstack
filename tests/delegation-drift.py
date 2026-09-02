@@ -396,7 +396,11 @@ def eligible(row):
     ext_count = row.get("ext_count")
     if dir_count is None or ext_count is None:
         return False
-    return dir_count >= 3 and ext_count >= 2
+    # Tracks skill-mandate.sh's breadth gate, lowered to dir>=2 in 1.66.0. "Eligible" here must
+    # mean "the gate would have considered this turn", so the two move together; there is no live
+    # drift result yet (the suite reports NOT EVALUATED until its floors are met) so nothing was
+    # invalidated by the change.
+    return dir_count >= 2 and ext_count >= 2
 
 
 def any_dispatch(row):

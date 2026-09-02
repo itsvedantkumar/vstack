@@ -4,6 +4,25 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.66.0 — 2026-09-02
+
+Auto-enforcement tightened after measuring it. Across ten real sessions in the last ten days the
+Stop gate got 94% compliance whenever it fired, but it fired on almost no turns: 72% of turns ran
+with zero Agent and zero Skill, 65% of edit-turns had neither, and one active workspace ran with
+the hooks not reaching it at all. The gate was not loose; it was retiring early and skipping cases.
+
+- **Skill mandates now re-arm.** unslop, typescript-best-practices, prove-it-works and register
+  used a plain counter with no window, so two misses latched each one silent for the rest of the
+  session. They now re-arm after `VSTACK_SKILL_RESET_SECS` (default 1800), exactly the windowed
+  reset the four delegation mandates have run on since 1.63.0 without over-firing. This is the
+  mechanical cause of "the gate stops triggering."
+- **The breadth mandate gates two-directory work.** The fan-out mandate required `dir>=3 AND
+  ext>=2`; a two-directory, two-extension cross-cutting edit was never gated. Lowered to `dir>=2
+  AND ext>=2`. The AND with the extension floor stays, so a three-file edit inside one file type
+  is not gated, because a guard that nags a legitimately serial change gets switched off.
+  `tests/test-breadth-mandate.sh` gains PROOFs 27 and 28 for the new boundary; `tests/
+  delegation-drift.py`'s eligibility mirror tracks the same threshold.
+
 ## 1.65.1 — 2026-09-02
 
 - **bootstrap.sh resolves the latest release without the GitHub API.** 1.65.0 made an unpinned

@@ -67,6 +67,8 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" "jq not installed"
   skip "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" "jq not installed"
   skip "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" "jq not installed"
+  skip "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)" "jq not installed"
+  skip "PROOF 28: one dir, two extensions, zero Task -> breadth mandate silent (dir floor holds)" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
   [ "$FAIL" -eq 0 ] && echo VERIFIED || echo "VERIFICATION FAILED"
@@ -555,6 +557,34 @@ if [ -z "$HOOK_OUT" ]; then
   ok "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent"
 else
   bad "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 27: 2 files, 2 directories, 2 extensions, 0 Task calls -----------------------------
+# Positive direction for the 1.66.0 threshold. src/a.sh and lib/b.py span 2 directories and 2
+# extensions -- below the old dir>=3 floor, so this exact shape was NEVER gated before and is the
+# common cross-cutting edit the lowered threshold now catches. No .md/.ts and no Task calls, so
+# nothing else can confound the read; the breadth mandate must name itself.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"src/a.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"lib/b.py","content":"x=1"}}]}}'
+run_hook_ proof27
+if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
+  ok "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)"
+else
+  bad "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)" \
+      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+fi
+
+# --- PROOF 28: 2 files, 1 directory, 2 extensions, 0 Task calls --------------------------------
+# Negative direction. src/a.sh and src/b.py are 2 extensions but one directory, so dir_count is 1
+# and the >=2 floor is not met even after the lowering. The AND with the dir floor must still
+# hold -- two file types inside a single directory is not multi-directory work -- so the hook
+# stays completely silent.
+say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"src/a.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"src/b.py","content":"x=1"}}]}}'
+run_hook_ proof28
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 28: one dir, two extensions, zero Task -> breadth mandate silent (dir floor holds)"
+else
+  bad "PROOF 28: one dir, two extensions, zero Task -> breadth mandate silent (dir floor holds)" \
       "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
