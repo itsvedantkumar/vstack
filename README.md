@@ -44,6 +44,26 @@ Trying vstack costs nothing you cannot cleanly undo.
 **Every claim checked by a mutation that can fail.** The property the rest of this page is about,
 below.
 
+### Measured against gstack and bare Claude
+
+The features above were put in front of a harness before they went on this page. Fifty-one paid
+runs on Opus 5 and Haiku 4.5, three arms, four fixtures with held-out checks the agent never sees.
+The full tables, the preregistration and the raw rows are in `tests/evals/showcase/RESULTS.md`.
+
+| | bare Claude | vstack | gstack |
+|---|---|---|---|
+| held-out check green | every run | every run | every run |
+| said `DONE` on a red check | never | never | never |
+| cost per task, no delegation | baseline | within noise | within noise |
+| cost per task, when vstack fans out | | 3.6 to 4.4x | |
+| Stop hook that refuses a red tree | no | yes, always on | no |
+| skills installed | 0 | 28 | 54 |
+
+Read that honestly: on a task small enough to fit in one prompt, a frontier model does not need
+this configuration to get the answer right, and asking it to delegate costs more than it saves.
+What vstack buys is the property below, which does not show up as a per-task number: every
+piece of it can be shown to fail when it should, and it undoes itself byte for byte.
+
 ## Requirements
 
 The [Claude Code CLI](https://claude.com/product/claude-code) on `PATH`, bash, and macOS or Linux.

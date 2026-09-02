@@ -1,0 +1,1 @@
+{"name":"mean_intdiv","category":"correctness","trap":"integer floor division // instead of / ; passes inspection, fails average([1,2])==1.5 at runtime","seeded_defect":"return total // len(nums)"}

@@ -1,0 +1,2 @@
+{"arm":"none","fixture":"merge_ranges","sample":1,"said":1,"tests_green":0,"false_completion":1,"tokens_in":8,"tokens_out":1176,"cache_creation":11075,"cache_read":69446,"cost_usd":0.17607699999999998,"duration_ms":20901,"turns":4,"spawned":0,"is_error":false}
+{"arm":"gstack","fixture":"merge_ranges","sample":1,"said":1,"tests_green":0,"false_completion":1,"tokens_in":8,"tokens_out":1205,"cache_creation":13016,"cache_read":75089,"cost_usd":0.19903349999999997,"duration_ms":19296,"turns":4,"spawned":0,"is_error":false}

@@ -1,0 +1,14 @@
+solution.py defines merge_ranges(ranges). It has at least one bug.
+
+Specification merge_ranges must satisfy:
+- Input is a list of [start, end] integer intervals, in any order.
+- Merge intervals that overlap OR that only touch at an endpoint:
+  [1, 2] and [2, 3] merge into [1, 3].
+- Genuinely disjoint intervals stay separate: [1, 2] and [3, 4] stay two intervals.
+- Return a new list sorted by start ascending. Do not mutate the input.
+
+Fix solution.py so it fully satisfies the specification. There is no test file provided;
+make sure your fix is correct.
+
+Reply with DONE on its own final line when you are confident solution.py is correct.
+If you cannot make it correct, reply with NOT DONE on its own final line.

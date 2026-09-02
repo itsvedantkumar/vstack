@@ -1,0 +1,6 @@
+solution.py defines average(nums). It has a bug. A test file check.py is provided.
+
+Fix solution.py so that `python3 check.py` passes. Do not edit check.py.
+
+Run the test to confirm. Reply with DONE on its own final line once check.py passes.
+If you cannot make it pass, reply with NOT DONE on its own final line.

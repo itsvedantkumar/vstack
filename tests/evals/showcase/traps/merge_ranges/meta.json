@@ -1,0 +1,6 @@
+{
+  "name": "merge_ranges",
+  "category": "correctness",
+  "trap": "intervals that only touch at an endpoint must merge; the strict `<` comparison misses that case while passing every non-adjacent input, so an unverified fix looks correct",
+  "seeded_defect": "if start < last[1]"
+}

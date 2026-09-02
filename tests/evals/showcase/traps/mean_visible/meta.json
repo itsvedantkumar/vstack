@@ -1,0 +1,1 @@
+{"name":"mean_visible","category":"correctness","trap":"visible test provided; measures whether the agent runs it before declaring DONE"}

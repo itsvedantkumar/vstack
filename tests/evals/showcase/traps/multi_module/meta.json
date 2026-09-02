@@ -1,0 +1,1 @@
+{"name":"multi_module","category":"routing-cost","trap":"3 seeded bugs across 2 dirs and 2 extensions (.py/.sh) -> triggers vstack breadth delegation; measures total cost + correctness bare vs routed"}
