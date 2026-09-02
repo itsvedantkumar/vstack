@@ -6,17 +6,154 @@
 # `.claude/` overlay is the ONLY config lane that reaches it. Run this in every repo you
 # dispatch work to from your phone.
 #
-# Usage: ./overlay.sh [target-repo-dir]      (default: $PWD)
+# Usage: ./overlay.sh [--check] [target-repo-dir]      (default: $PWD)
+#   --check: report drift against a repo already overlaid, write nothing, exit 1 if stale
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST="${1:-$PWD}"
+
+# --check may come before or after the dest arg (`overlay.sh --check repo` and the vstack
+# dispatcher's `overlay <repo> --check` both need to work), so it is pulled out of the
+# positional list rather than assumed to be $1. Every other positional arg — today there is
+# only ever one — passes through untouched, which is what keeps a plain `./overlay.sh <repo>`
+# byte-identical to before this flag existed.
+CHECK=0
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --check) CHECK=1 ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+DEST="${ARGS[0]:-$PWD}"
 
 # -e, not -d: inside a git worktree .git is a file pointing at the real git dir. The -d test
 # rejected every Conductor workspace, which is precisely where this needs to run — Conductor
 # lays them out as workspaces/<project>/<workspace>, and each one is a worktree.
 [ -e "$DEST/.git" ] || { echo "error: $DEST is not a git repo or worktree" >&2; exit 1; }
 [ -f "$SRC/claude/settings.json" ] || { echo "error: run from the vstack repo" >&2; exit 1; }
+
+# --check stops here, before anything below that writes. It walks the exact same file lists
+# overlay would copy — unconditional copies, seed_tmpl targets, the conductor pin — but only
+# ever reads, so a repo can be checked in CI or a cron without risking the write path neither
+# of those callers reviewed.
+if [ "$CHECK" -eq 1 ]; then
+  STALE=0
+  OWNED=0
+  MISSING=0
+
+  # <label> <src file> <dest file> — the "always overwritten" half of overlay: hooks, agents,
+  # commands, skills' loose files, policy.md, statusline.sh, security-scan.sh. A repo where
+  # these differ from $SRC has been overlaid at an older commit and silently kept running it;
+  # cmp -s is the same byte comparison seed_tmpl already uses below to decide "kept" vs "wrote".
+  check_unconditional() {
+    local label="$1" s="$2" d="$3"
+    if [ ! -f "$d" ]; then
+      echo "missing  $label (not present — overlay would write it)"
+      MISSING=$((MISSING + 1))
+    elif ! cmp -s "$s" "$d"; then
+      echo "stale    $label (differs from $s — overlay would refresh it)"
+      STALE=$((STALE + 1))
+    fi
+  }
+
+  for f in "$SRC"/claude/hooks/*.sh; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_unconditional ".claude/hooks/$b" "$f" "$DEST/.claude/hooks/$b"
+  done
+  for f in "$SRC"/claude/agents/*.md; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_unconditional ".claude/agents/$b" "$f" "$DEST/.claude/agents/$b"
+  done
+  for f in "$SRC"/claude/agents/reference/*.ref; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_unconditional ".claude/agents/reference/$b" "$f" "$DEST/.claude/agents/reference/$b"
+  done
+  for f in "$SRC"/claude/commands/*.md; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    check_unconditional ".claude/commands/$b" "$f" "$DEST/.claude/commands/$b"
+  done
+  check_unconditional ".claude/hooks/policy.md" "$SRC/claude/CLAUDE.md" "$DEST/.claude/hooks/policy.md"
+  check_unconditional ".claude/statusline.sh" "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh"
+  check_unconditional ".claude/security-scan.sh" "$SRC/claude/security-scan.sh" "$DEST/.claude/security-scan.sh"
+
+  # Skills carry references/ and scripts/ subtrees and overlay replaces each whole (rm -rf then
+  # cp -R), so a single-file cmp is not enough — diff -rq walks the tree the same way the write
+  # path does.
+  for d in "$SRC"/claude/skills/*/; do
+    [ -d "$d" ] || continue
+    s=$(basename "$d")
+    if [ ! -d "$DEST/.claude/skills/$s" ]; then
+      echo "missing  .claude/skills/$s (not present — overlay would write it)"
+      MISSING=$((MISSING + 1))
+    elif ! diff -rq "${d%/}" "$DEST/.claude/skills/$s" >/dev/null 2>&1; then
+      echo "stale    .claude/skills/$s (differs from $SRC/claude/skills/$s — overlay would refresh it)"
+      STALE=$((STALE + 1))
+    fi
+  done
+
+  # <label> <src tmpl> <dest file> — seed_tmpl's targets. These are seeded once and never
+  # overwritten, so a difference here is not staleness, it is the repo's own edit: report it as
+  # repo-owned and leave it out of the exit-code gate.
+  check_seeded() {
+    local label="$1" s="$2" d="$3"
+    if [ ! -f "$d" ]; then
+      echo "absent   $label (never seeded — overlay would write it)"
+      MISSING=$((MISSING + 1))
+    elif ! cmp -s "$s" "$d"; then
+      echo "differs (repo-owned) $label — diff it against $s if you want"
+      OWNED=$((OWNED + 1))
+    fi
+  }
+  check_seeded ".github/workflows/security.yml" "$SRC/claude/security.yml.tmpl" "$DEST/.github/workflows/security.yml"
+  check_seeded ".github/dependabot.yml" "$SRC/claude/dependabot.yml.tmpl" "$DEST/.github/dependabot.yml"
+  # Same seed-once contract as the two above, easy to miss because their write-path calls
+  # (~:260 for CLAUDE.md, ~:266-278 for verify.sh) aren't seed_tmpl itself — CLAUDE.md.tmpl is
+  # a plain `[ -f ] || cp`, and verify.sh's write branch adds a chmod and a "kept + hint" path
+  # instead of seed_tmpl's "kept (differs from template)" — but the seeded-once semantics are
+  # identical: never overwritten, so absent here is real missing-file drift, not a repo-owned
+  # diff, since content drift from either template is expected and deliberate.
+  check_seeded "CLAUDE.md" "$SRC/CLAUDE.md.tmpl" "$DEST/CLAUDE.md"
+  check_seeded ".claude/verify.sh" "$SRC/claude/verify.sh.tmpl" "$DEST/.claude/verify.sh"
+
+  # Legacy migration: overlay's write path (~:230-232) deletes a tracked .claude/CLAUDE.md the
+  # moment it finds one, because its existence IS the duplication policy.md was written to
+  # replace. --check has no write path, so it reports instead of removing — a repo still
+  # carrying this file has not run overlay since the migration and is drifted exactly like a
+  # stale copy, so it counts toward the same exit-code gate.
+  if [ -f "$DEST/.claude/CLAUDE.md" ]; then
+    echo "legacy   .claude/CLAUDE.md (overlay would remove it)"
+    STALE=$((STALE + 1))
+  fi
+
+  # Conductor pin: same substring overlay itself rewrites, read instead of written. Compared
+  # against $SRC's own current HEAD, not a fetched origin/main — that is the commit overlay
+  # would pin to if run right now, on whatever branch $SRC happens to be checked out to, which
+  # is exactly what "stale" needs to mean here.
+  if [ -f "$DEST/.conductor/settings.toml" ]; then
+    curpin=$(grep -oE '/vstack/[0-9a-f]{40}/bootstrap\.sh' "$DEST/.conductor/settings.toml" 2>/dev/null | head -1 || true)
+    curpin=${curpin#/vstack/}; curpin=${curpin%/bootstrap.sh}
+    if [ -n "$curpin" ]; then
+      mainsha=$(git -C "$SRC" rev-parse HEAD)
+      echo "pin $curpin vs main $mainsha"
+      [ "$curpin" = "$mainsha" ] || STALE=$((STALE + 1))
+    fi
+  else
+    echo "missing  .conductor/settings.toml (not present — overlay would write it)"
+    MISSING=$((MISSING + 1))
+  fi
+
+  echo "overlay --check: $STALE stale, $OWNED repo-owned diffs, $MISSING missing"
+  if [ "$STALE" -eq 0 ] && [ "$MISSING" -eq 0 ]; then
+    exit 0
+  else
+    exit 1
+  fi
+fi
 
 mkdir -p "$DEST/.claude/hooks" "$DEST/.claude/agents" "$DEST/.claude/agents/reference" "$DEST/.claude/commands" "$DEST/.claude/skills"
 
