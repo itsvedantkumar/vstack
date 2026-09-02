@@ -1039,9 +1039,39 @@ if want uninstall-clean; then
     && installed_srv=$(jq -r '[(.mcpServers // {}) | keys[]] | length' "$H/.claude.json" 2>/dev/null || echo 0)
   installed_cond=0
   [ -f "$H/.conductor/settings.toml" ] && installed_cond=1
+  # Positive control for the compat-canary.sh state file and the empty directories it and every
+  # other hook/agent/command/skill leave behind: fire the real hook once, the way a live Claude
+  # Code session would (PreToolUse/SessionStart payload on stdin), so the state file actually
+  # exists before uninstall runs. Asserting only "the canary is gone" afterwards passes for free
+  # if it was never created in the first place -- the same fake-green shape as every other
+  # positive control in this case.
+  canary_hook="$H/.claude/hooks/compat-canary.sh"
+  if [ -x "$canary_hook" ]; then
+    printf '{"hook_event_name":"SessionStart","session_id":"unclean-test"}' \
+      | HOME="$H" "$canary_hook" >/dev/null 2>&1
+  fi
+  installed_canary=0
+  [ -f "$H/.claude/vstack-compat-canary.json" ] && installed_canary=1
   HOME="$H" "$SRC/uninstall.sh" --yes >/dev/null 2>&1
   e=""
   [ "${installed_cond:-0}" -eq 1 ] || e="$e; install never wrote ~/.conductor/settings.toml, so its removal proves nothing"
+  [ "${installed_canary:-0}" -eq 1 ] || e="$e; compat-canary.sh never wrote its state file, so the canary assertion below proves nothing"
+  [ -e "$H/.claude/vstack-compat-canary.json" ] && e="$e; compat-canary.sh's state file survived uninstall"
+  # Nothing vstack put under ~/.claude should survive -- neither its files (checked individually
+  # above and below) nor the now-empty directories those files leave behind. Two paths are
+  # excluded, neither of them vstack's: settings.json is legitimately theirs to keep (uninstall
+  # unpicks vstack's keys out of it, it does not delete the file), and backups/ is the real
+  # `claude` binary's OWN bootstrap backup of .claude.json -- install.sh's TypeScript-LSP
+  # detection shells out to `claude plugin list` (install.sh ~701), and on any machine that
+  # already has the real CLI on PATH (this one included) that first invocation under a fresh
+  # HOME writes ~/.claude/backups/.claude.json.backup.* on its own, before vstack does anything.
+  # Nothing else still there, file or directory, is a real leftover.
+  leftover=$(find "$H/.claude" -mindepth 1 \
+    ! -path "$H/.claude/settings.json" \
+    ! -path "$H/.claude/backups" \
+    ! -path "$H/.claude/backups/*" \
+    2>/dev/null)
+  [ -z "$leftover" ] || e="$e; vstack left behind: $(printf '%s' "$leftover" | tr '\n' ' ')"
   if command -v jq >/dev/null 2>&1; then
     want_srv=$(jq -r 'keys | length' "$SRC/mcp/servers.json" 2>/dev/null || echo 0)
     [ "${installed_srv:-0}" -gt "$want_srv" ] \

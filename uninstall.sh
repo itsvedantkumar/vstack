@@ -396,6 +396,41 @@ printf '%s' "$FILE_REMOVE_LIST" | while IFS= read -r tgt; do
   [ -e "$tgt" ] && rm -f "$tgt"
 done
 
+# --- compat-canary.sh's state file: remove if vstack owns the hook that writes it -------------
+# compat-canary.sh (a hook this repo owns; see PROFILE_HOOK_CORE in install.sh) writes
+# $CDIR/vstack-compat-canary.json at runtime, on every tool call. install.sh never copies this
+# file itself -- it does not exist until the hook fires -- so it is never in $OWNED_PATHS
+# directly the way a copied file is. Ownership follows the hook that produces it instead: the
+# state file is vstack's exactly when the hook that writes it is (owns_path on the hook's own
+# path, the same gate plan_file_removal uses above for every other hook), and only if what is on
+# disk still looks like a canary record -- a JSON object with a "status" field -- rather than
+# some other file a user happened to name the same way.
+CANARY_FILE="$CDIR/vstack-compat-canary.json"
+if [ -e "$CANARY_FILE" ] && [ ! -L "$CANARY_FILE" ] && owns_path "$CDIR/hooks/compat-canary.sh"; then
+  _canary_ok=0
+  if command -v jq >/dev/null 2>&1; then
+    jq -e 'has("status")' "$CANARY_FILE" >/dev/null 2>&1 && _canary_ok=1
+  else
+    grep -q '"status"' "$CANARY_FILE" 2>/dev/null && _canary_ok=1
+  fi
+  if [ "$_canary_ok" = 1 ]; then
+    rm -f "$CANARY_FILE"
+    echo "removed  $CANARY_FILE  (compat-canary.sh's own state file)"
+  fi
+fi
+
+# --- directories left behind once every vstack file under them is gone ------------------------
+# hooks/, agents/, agents/reference/, commands/ and skills/ are directories vstack creates but
+# never itself deletes -- a machine where vstack's files were the only thing ever placed there
+# was left with four empty directories after uninstall, contradicting the "restores byte for
+# byte" this script documents at its own top. rmdir (never rm -rf) refuses on anything non-empty
+# by construction, so a foreign file a user left in any of these keeps the directory around
+# untouched; deepest path first so agents/reference/ does not block agents/ from clearing.
+for d in "$CDIR/agents/reference" "$CDIR/agents" "$CDIR/commands" "$CDIR/hooks" "$CDIR/skills"; do
+  [ -d "$d" ] || continue
+  rmdir "$d" 2>/dev/null && echo "removed  $d  (empty)"
+done
+
 # --- settings.json: unpick vstack's own entries, leave everything else ------------------------
 #
 # Not deleting the file — install.sh merges into it, so it holds the user's configuration too.
