@@ -12,31 +12,6 @@ vstack installs skills, subagents, commands and hooks into Claude Code, and a ga
 agent reporting a task done while the tests are red. It is for people who run agents unattended
 and need to know afterwards which parts actually held.
 
-The distinguishing property is not the count of anything. It is that **every check in this
-repository has a mutation proving it can fail**, and the project has a written record of the
-eighteen times a check here reported a verdict it had not measured. <!-- catalogue-count --> Sixteen of those printed
-`ok`. The seventeenth printed an accurate `FAIL` that a release workflow then acted on by deleting
-the evidence. The eighteenth printed a `FAIL` about the harness's own scratch directory and held a
-release back over an installer that was never broken.
-
-## Repository layout
-
-Two directory pairs differ only by a leading dot, and the difference is the whole mental model:
-
-| path | what it is |
-|---|---|
-| `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 63 checks; not shipped to anyone |
-| `conductor/` | payload copied to `~/.conductor/` |
-| `.conductor/` | this repository's own workspace config |
-| `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
-| `ui-gate/` | a UI lint harness for **other people's** repos, driven by the `impeccable` skill |
-| `bin/` | CLI wrappers installed to `~/.config/agents/bin/`, not this repo's executables |
-| `docs/` | research, provenance and the failure-shape writeups |
-
-The dotted one is always this repository holding itself to something. The undotted one is always
-what you receive.
-
 ## Requirements
 
 The [Claude Code CLI](https://claude.com/product/claude-code) on `PATH`, bash, and macOS or Linux.
@@ -142,6 +117,33 @@ above actually landed and checks that one — skill, subagent and command counts
 lane; the full hook, wrapper and MCP breakdown for the full install — rather than printing a
 generic "installed" with nothing behind it. This is also the fastest way to see the payload is
 real: it names files on disk, not a slogan.
+
+## The distinguishing property
+
+The distinguishing property is not the count of anything. It is that **every check in this
+repository has a mutation proving it can fail**, and the project has a written record of the
+eighteen times a check here reported a verdict it had not measured. <!-- catalogue-count --> Sixteen of those printed
+`ok`. The seventeenth printed an accurate `FAIL` that a release workflow then acted on by deleting
+the evidence. The eighteenth printed a `FAIL` about the harness's own scratch directory and held a
+release back over an installer that was never broken.
+
+## Repository layout
+
+Two directory pairs differ only by a leading dot, and the difference is the whole mental model:
+
+| path | what it is |
+|---|---|
+| `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
+| `.claude/verify.sh` | **this repository's own gate**, 63 checks; not shipped to anyone |
+| `conductor/` | payload copied to `~/.conductor/` |
+| `.conductor/` | this repository's own workspace config |
+| `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
+| `ui-gate/` | a UI lint harness for **other people's** repos, driven by the `impeccable` skill |
+| `bin/` | CLI wrappers installed to `~/.config/agents/bin/`, not this repo's executables |
+| `docs/` | research, provenance and the failure-shape writeups |
+
+The dotted one is always this repository holding itself to something. The undotted one is always
+what you receive.
 
 ## What lands where
 
