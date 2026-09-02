@@ -12,6 +12,38 @@ vstack installs skills, subagents, commands and hooks into Claude Code, and a ga
 agent reporting a task done while the tests are red. It is for people who run agents unattended
 and need to know afterwards which parts actually held.
 
+## What it gives you
+
+What a bare Claude Code install does not, stated as mechanisms you can read rather than promises.
+Each names a file on disk and, where it makes a claim, a check that can fail.
+
+**A gate that refuses a false "done."** `goal-gate.sh` on Stop will not let an agent end a turn
+reporting success while a recorded goal still carries unchecked rubric items, and the full
+install's `.claude/verify.sh` refuses to pass while the tests it names are red. An agent left
+running overnight cannot quietly mark its own work complete.
+
+**Skills that fire on the situation, not a slash command.** `inject-session-context.sh` on
+SessionStart and `skill-mandate.sh` on Stop read what the turn is doing and route it to the skill
+or subagent that fits — a review to the reviewer, a plan to the planner — so the right tool runs
+whether or not you thought to ask for it.
+
+**Tiered model routing.** Mechanical work — search, renames, boilerplate — goes to Haiku scouts;
+judgment work like review, tests and debugging goes to Sonnet; only the hard cross-cutting
+reasoning stays on the frontier model. You stop paying frontier price for a file search, and the
+expensive context is left free for the part that needs it. This is a deliberate policy in
+`CLAUDE.md` and the per-agent model settings, not Claude Code's default.
+
+**A team of specialist subagents.** A reviewer, a security auditor, a QA verifier, a planner, a
+test writer and more, each dispatched with an attribution so a verdict always has an author you
+can challenge, and `/team` to fan them out concurrently.
+
+**Reversible by construction.** Profiles install only what you ask for, an ownership record scopes
+what uninstall is allowed to touch, and `./uninstall.sh --yes` puts every file back byte for byte.
+Trying vstack costs nothing you cannot cleanly undo.
+
+**Every claim checked by a mutation that can fail.** The property the rest of this page is about,
+below.
+
 ## Requirements
 
 The [Claude Code CLI](https://claude.com/product/claude-code) on `PATH`, bash, and macOS or Linux.
