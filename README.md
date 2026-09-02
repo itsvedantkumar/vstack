@@ -422,6 +422,7 @@ true.
 - [Checks that measure nothing](docs/research/fake-greens-2026-08.md) — the whole evidence base in one paper
 - [Do harnesses help?](docs/research/do-harnesses-help.md) — the null result, in full
 - [Harness value: literature](docs/research/harness-value-literature-2026-08.md) — what anyone has actually measured
+- [Harness effect: research folder](docs/research/harness-effect/README.md) — the literature by topic, GLM-drafted and adversarially re-checked, and [what this repository has measured](docs/research/harness-effect/findings/measured-so-far.md) against gstack, bare Claude and bare GLM
 - [What we changed, and what we declined](docs/research/what-we-changed-2026-08-22.md)
 - [Provenance](docs/provenance/README.md) — dated audit records, including [research-v1.7.0.md](docs/provenance/research-v1.7.0.md)
 - [MCP servers](mcp/README.md) — what is wired and what it reaches

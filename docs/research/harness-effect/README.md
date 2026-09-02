@@ -7,31 +7,38 @@ customer has been served and the measurements are preregistered.
 
 ## Layout
 
-- `literature/` one file per topic. Each was drafted by GLM 5.3 Flash through OpenCode against a
+- [`literature/`](literature/) one file per topic. Each was drafted by GLM 5.3 Flash through OpenCode against a
   brief that forbids unverified citations and requires the fetched URL per source. Treat every
   entry as unconfirmed until its `status` line in the table below says otherwise; a model that
   can fetch can still misread.
-- `findings/` what this repository has measured itself, with pointers to the raw rows and the
-  harness that produced them. These are the facts the literature has to explain or contradict.
+- [`findings/`](findings/) what this repository has measured itself, with pointers to the raw rows and the
+  harness that produced them ([`findings/measured-so-far.md`](findings/measured-so-far.md)), and
+  the provisional change list the literature implies
+  ([`findings/recommendations-draft.md`](findings/recommendations-draft.md)). These are the facts
+  the literature has to explain or contradict.
 
 ## Literature files and their verification status
 
 | file | topic | drafted | status |
 |---|---|---|---|
-| `literature/scaffold-ablation.md` | scaffold versus model on SWE-bench | GLM 5.3 Flash | unverified |
-| `literature/false-completion.md` | reward hacking, overclaimed completion | GLM 5.3 Flash | unverified |
-| `literature/instruction-files.md` | long instruction files, context rot | GLM 5.3 Flash | unverified |
-| `literature/multi-agent-overhead.md` | when delegation pays | GLM 5.3 Flash | unverified |
-| `literature/model-routing.md` | cascades and routers | GLM 5.3 Flash | unverified |
-| `literature/self-verification.md` | limits of self-repair | GLM 5.3 Flash | unverified |
-| `literature/benchmark-methodology.md` | error bars, contamination, preregistration | GLM 5.3 Flash | unverified |
-| `literature/capability-scaling.md` | scaffold benefit versus model strength | GLM 5.3 Flash | unverified |
-| `literature/competitor-claims.md` | claims audit of public Claude Code bundles | GLM 5.3 Flash | unverified |
-| `literature/publishing-null.md` | venues and framing for a null result | GLM 5.3 Flash | unverified |
+| [`literature/scaffold-ablation.md`](literature/scaffold-ablation.md) | scaffold versus model on SWE-bench | GLM 5.3 Flash | 15 verified, 0 misread |
+| [`literature/false-completion.md`](literature/false-completion.md) | reward hacking, overclaimed completion | GLM 5.3 Flash | unverified |
+| [`literature/instruction-files.md`](literature/instruction-files.md) | long instruction files, context rot | GLM 5.3 Flash | unverified |
+| [`literature/multi-agent-overhead.md`](literature/multi-agent-overhead.md) | when delegation pays | GLM 5.3 Flash | 16 verified, 0 misread |
+| [`literature/model-routing.md`](literature/model-routing.md) | cascades and routers | GLM 5.3 Flash | 13 verified, 0 misread |
+| [`literature/self-verification.md`](literature/self-verification.md) | limits of self-repair | GLM 5.3 Flash | 14 verified, 1 misread |
+| [`literature/benchmark-methodology.md`](literature/benchmark-methodology.md) | error bars, contamination, preregistration | GLM 5.3 Flash | 15 verified, 0 misread |
+| [`literature/capability-scaling.md`](literature/capability-scaling.md) | scaffold benefit versus model strength | GLM 5.3 Flash | 12 verified, 1 misread |
+| [`literature/competitor-claims.md`](literature/competitor-claims.md) | claims audit of public Claude Code bundles | GLM 5.3 Flash | 20 verified, 2 misread |
+| [`literature/publishing-null.md`](literature/publishing-null.md) | venues and framing for a null result | GLM 5.3 Flash | 20 verified, 0 misread |
 
-A file moves to `verified` when a second reader has fetched every cited source and struck the
-ones that do not say what the entry claims. Until then nothing in `literature/` is quoted in the
-README or the paper.
+Each file's second reading sits beside it as `literature/<topic>.verification.md`, one row per
+entry. The counts above are the second reader's verdicts, run 2026-09-03 by a separate GLM 5.3 Flash
+session per file with an adversarial brief: re-fetch every source, mark VERIFIED, MISREAD or
+UNREACHABLE. A misread is an overstatement or a wrong attribution, not a missing source; every
+misread so far is listed with its correction at the foot of the matching verification file.
+Across the eight checked files: 125 entries verified, 4 misread, 0 unreachable. Nothing in
+`literature/` is quoted in the README or the paper until its file has a verification beside it.
 
 ## Earlier work this folder builds on
 

@@ -30,7 +30,7 @@ ARMS_CSV="${1:-none,vstack,gstack}"
 SAMPLES="${2:-5}"
 SET="${3:-traps}"                                     # traps | controls
 ONLY="${4:-}"                                          # optional exact fixture basename filter
-STAMP="$(date +%Y%m%d-%H%M%S)"
+STAMP="$(date +%Y%m%d-%H%M%S).$$"   # pid too: two runs launched in the same second shared one OUT and one WORKROOT, and each EXIT trap deleted the other's workdirs
 OUT="$ROOT/runs/$STAMP.jsonl"
 mkdir -p "$ROOT/runs"
 WORKROOT="$ROOT/.work.$STAMP"; mkdir -p "$WORKROOT"
@@ -131,6 +131,13 @@ run_one() { # <arm> <fixture_dir> <sample>
      models:(.modelUsage|keys), model_cost:(.modelUsage|map_values(.costUSD)),
      is_error:(.is_error//false)}' 2>/dev/null >> "$OUT"
   log "  $arm/$name #$s said=$said green=$green fc=$fc turns=$(printf '%s' "$json" | jq -r '.num_turns//0')"
+  # SHOWCASE_KEEP_RED=1 keeps the tree of every red run for post-mortem: which file the agent
+  # left broken is the finding, and the row alone cannot say.
+  if [ "${SHOWCASE_KEEP_RED:-0}" = 1 ] && [ "$green" -ne 1 ]; then
+    local keep="$ROOT/runs/$STAMP-red/$arm-$name-$s"; mkdir -p "$keep"
+    cp -R "$wd"/. "$keep"/ 2>/dev/null; rm -rf "$keep/.claude" "$keep/.git"
+    printf '%s\n' "$json" | jq -r '.result//""' > "$keep/RESULT.txt" 2>/dev/null
+  fi
   rm -rf "$wd"
 }
 
@@ -153,7 +160,7 @@ for arm in "${ARMS[@]}"; do
   done
 done
 export -f run_one install_arm score_check log
-export SRC GSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT
+export SRC GSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT ROOT STAMP
 if [ "$JOBS" -gt 1 ]; then
   # shellcheck disable=SC2016  # $1..$3 are positionals of the inner bash, expanded there, not here
   # stdin, not -a: BSD xargs has no -a, and the first parallel run on macOS emitted a usage

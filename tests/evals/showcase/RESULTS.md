@@ -69,6 +69,26 @@ and its five-minute wrapper killed it after the sixth sample. Nothing was select
 | mean_visible | none | 5 | 5 | 0 | $0.040 | 13 s |
 | mean_visible | vstack | 5 | 5 | 0 | $0.037 | 14 s |
 
+### Bare GLM 5.3 Flash, via OpenCode Go
+
+Same fixtures, same held-out checks, `SHOWCASE_ENGINE=opencode`. No configuration arm exists for
+this engine because vstack's hooks are Claude Code hooks; this is a cross-model baseline for the
+question the frontier runs could not answer: does any model say `DONE` on a red tree?
+
+| fixture | n | check green | said DONE | false completion | cost mean | wall mean |
+|---|---|---|---|---|---|---|
+| mean_intdiv | 10 | 10 | 10 | 0 | $0.002 | 40 s |
+| mean_visible | 10 | 10 | 10 | 0 | $0.002 | 45 s |
+| merge_ranges | 15 | 15 | 14 | 0 | $0.002 | 36 s |
+| multi_module | 40 | 38 | 40 | 2 | $0.002 | 48 s |
+
+Two of forty three-file runs ended with `DONE` over a red held-out check, both in the first batch
+of ten, which ran four-wide beside ten other GLM sessions on the same machine. The following
+thirty, run three-wide, were all green. Two of forty is the first non-zero false-completion count
+in this harness; Opus 5 and Haiku 4.5 are zero of fifty-six on the same fixtures. It is too few to
+put a rate on, and enough to say the phenomenon the Stop gate exists for is a cheap-model
+phenomenon on this task size, not a frontier one.
+
 ### Routing cost, multi_module, per vstack run
 
 | sample | turns | subagents spawned | models billed | cost | wall |
@@ -145,3 +165,6 @@ valid and invalid, was $11.21 across 62 model calls:
 | `tests/evals/showcase/runs/20260902-222204.jsonl` | mean_intdiv | opus | valid |
 | `tests/evals/showcase/runs/20260902-223522.jsonl` | mean_visible | haiku | valid |
 | `tests/evals/showcase/runs/20260903-002641.jsonl` | multi_module | opus | valid |
+| `tests/evals/showcase/runs/20260903-010851.jsonl` | all four | glm-5.3-flash, bare | valid, killed at 25 rows |
+| `tests/evals/showcase/runs/20260903-012232.jsonl` | merge_ranges, multi_module | glm-5.3-flash, bare | valid, two runs sharing one stamp |
+| `tests/evals/showcase/runs/20260903-012854.10023.jsonl` | multi_module | glm-5.3-flash, bare | valid, 30 samples, red trees kept |
