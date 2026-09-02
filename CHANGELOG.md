@@ -4,7 +4,7 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
-## Unreleased
+## 1.68.0 — 2026-09-03
 
 - **`overlay.sh --check` reports drift without writing.** Every file the write path would
   touch is compared against the payload and reported as `stale`, `absent`, `legacy` or
