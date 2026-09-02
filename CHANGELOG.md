@@ -4,6 +4,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.65.1 — 2026-09-02
+
+- **bootstrap.sh resolves the latest release without the GitHub API.** 1.65.0 made an unpinned
+  bootstrap look up `releases/latest` on api.github.com, unauthenticated, and refuse when that
+  returned nothing. On the first push after the release the Linux install-matrix job did exactly
+  that: a shared Actions runner IP is rate-limited on that endpoint, the resolver came back
+  empty, bootstrap refused, and main went red while the macOS job with identical code was
+  green. The resolver now asks `git ls-remote --tags` first (git protocol, no API quota), picks
+  the highest `vX.Y.Z` numerically (no `sort -V`, which busybox lacks), and falls back to the
+  API only without git, sending `GITHUB_TOKEN`/`GH_TOKEN` when one is set. Refusal without a
+  fallback to main stays. The install matrix's curl lane now carries bootstrap's last output
+  lines into its FAIL line, because the cause of this red was captured and thrown away, and
+  the three CI install-matrix steps pass `GITHUB_TOKEN` through.
+
 ## 1.65.0 — 2026-09-02
 
 The public-readiness audit's three P2s, plus the leftovers it turned up.

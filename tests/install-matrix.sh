@@ -574,7 +574,12 @@ if want bootstrap; then
     # this checkout's.
     lh=$(count_files "$SRC/claude/hooks" '*.sh'); rh=$(count_files "$H/.vstack/claude/hooks" '*.sh')
     [ "$lh" = "$rh" ] || printf 'note  latest release has %s hooks, this checkout has %s\n' "$rh" "$lh"
-    [ "$rc" = 0 ] && [ -z "$e" ] && ok "curl bootstrap lane" || bad "curl bootstrap lane" "exit=$rc$e"
+    # On red, carry bootstrap's own last lines into the finding. The lane went red on CI with
+    # "exit=1; no CLAUDE.md; ..." and nothing else, and the cause (an unauthenticated
+    # api.github.com lookup rate-limited on a shared runner IP) was only in the output this
+    # variable had captured and discarded. A verdict without the finding is a verdict to guess at.
+    if [ "$rc" = 0 ] && [ -z "$e" ]; then ok "curl bootstrap lane"
+    else bad "curl bootstrap lane" "exit=$rc$e; bootstrap said: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' '|' | cut -c1-300)"; fi
   fi
 fi
 

@@ -636,6 +636,10 @@ jobs:
 
       - name: Install matrix (all environments, plus the network lanes)
         run: ./tests/install-matrix.sh
+        # The curl bootstrap lane resolves the latest release; its API fallback authenticates
+        # with this token so a shared runner IP's unauthenticated rate limit cannot red the lane.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The marketplace case is allowed to skip when there is no CLI, which meant it skipped in
       # every job: the CLI was installed only in the verify job, and the matrix ran only in the
@@ -722,6 +726,10 @@ jobs:
 
       - name: Install matrix on macOS
         run: ./tests/install-matrix.sh
+        # The curl bootstrap lane resolves the latest release; its API fallback authenticates
+        # with this token so a shared runner IP's unauthenticated rate limit cannot red the lane.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # check 29 ("shellcheck clean") skips without a validator on PATH, and a skip is not a pass.
       # macos-latest stopped shipping shellcheck, so this lane silently stopped linting all 71
@@ -824,6 +832,10 @@ jobs:
 
       - name: Install matrix on Alpine
         run: bash ./tests/install-matrix.sh
+        # The curl bootstrap lane resolves the latest release; its API fallback authenticates
+        # with this token so a shared runner IP's unauthenticated rate limit cannot red the lane.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run the verification gate
         # Not piped, for the reason spelled out on the macOS lane above: no pipefail under this
