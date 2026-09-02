@@ -4,6 +4,20 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.65.0 — 2026-09-02
+
+- **install.sh no longer arms the Stop-hook verify gate on a non-interactive install with no
+  opt-in.** It ran `bin/vstack trust "$SRC" --yes` unconditionally, so bootstrap.sh's
+  `curl|bash` one-liner — which drives install.sh non-interactively — left a stranger who never
+  read a line of the repo with standing unattended-execution rights over `.claude/verify.sh`
+  (which itself runs `install.sh --dry-run` and `overlay.sh`). Every other repo's gate stays off
+  until `vstack trust` runs there and its terminal confirmation is answered; a bare
+  non-interactive install of this repo now gets the same refusal. Arms on an interactive
+  terminal (`[ -t 0 ]`) or an explicit opt-in (`--trust`, or `VSTACK_TRUST=1`); otherwise prints
+  how to arm it later. Check 61b in `.claude/verify.sh` proves the non-interactive,
+  no-opt-in path leaves the trust store without this repo's entry — regression-tested against
+  `git show origin/main:install.sh`, which fails the same assertion.
+
 ## 1.64.0 — 2026-09-02
 
 - **format.sh no longer mistakes a prettier devDependency for a prettier config.** The grep

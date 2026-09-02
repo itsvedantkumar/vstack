@@ -17,6 +17,13 @@
 #                                 stop asking before every tool call. Deliberately opt-in:
 #                                 this repo is public, and nobody should get it by default.
 #   ./install.sh --dry-run        print what would change, touch nothing
+#   ./install.sh --trust          arm the Stop-hook verify gate on a non-interactive install
+#                                 (or VSTACK_TRUST=1). Interactive installs (stdin is a tty)
+#                                 arm it without this flag; running install.sh yourself at a
+#                                 prompt IS the consent. bootstrap.sh's curl|bash one-liner is
+#                                 non-interactive, so it needs this flag to arm the gate --
+#                                 otherwise the gate stays off and install.sh says how to arm
+#                                 it later (`vstack trust`).
 #   ./install.sh --profile=NAME   install a subset instead of everything (or VSTACK_PROFILE=NAME).
 #                                 core        safety/lifecycle only: hooks that guard, format,
 #                                             self-heal and gate Stop; doctor; vstack trust;
@@ -138,11 +145,16 @@ DRY=0
 WITH_DEPS=0
 BYPASS=0
 PROFILE="${VSTACK_PROFILE:-opinionated}"
+# Same env-then-flag precedence as PROFILE above: VSTACK_TRUST=1 lets a scripted/CI install opt
+# in once via env, and an explicit --trust on the actual invocation overrides it either way.
+TRUST_OPT_IN=0
+[ "${VSTACK_TRUST:-0}" = 1 ] && TRUST_OPT_IN=1
 for a in "$@"; do
   case "$a" in
     --bypass-permissions) BYPASS=1 ;;
     --with-deps)    WITH_DEPS=1 ;;
     --dry-run)      DRY=1 ;;
+    --trust)        TRUST_OPT_IN=1 ;;
     --profile=*)    PROFILE="${a#--profile=}" ;;
     -h|--help)      sed -n '2,34p' "$0"; exit 0 ;;
     *) echo "unknown flag: $a" >&2; exit 2 ;;
@@ -435,9 +447,16 @@ back(){ [ "$DRY" = 1 ] && return 0
 # when it is cloned somewhere other than ~/.vstack and $VSTACK_DIR is unset.
 [ "$DRY" = 0 ] && printf '%s\n' "$SRC" > "$HOME/.config/agents/vstack-repo"
 
-# Trust this repo's own verify.sh for the Stop-hook gate: running install.sh IS the explicit
-# consent. Other repos' gates stay off until the user runs `vstack trust` there — the gate
-# executes repo-controlled code, so a bare clone must never arm it by itself.
+# Trust this repo's own verify.sh for the Stop-hook gate, but only when someone was actually
+# there to read it: an interactive terminal ([ -t 0 ]), or an explicit opt-in (--trust /
+# VSTACK_TRUST=1). "Running install.sh IS the consent" holds when a human typed
+# `./install.sh` at a prompt and could see it — that is the same ceremony `vstack trust`'s
+# "have you read this, just now? [y/N]" stands in for. It does not hold when bootstrap.sh's
+# curl|bash one-liner drives install.sh non-interactively: stdin is the pipe carrying the
+# script, nobody read a line, and a stranger walked away with standing unattended-execution
+# rights they never agreed to. Other repos' gates already stay off until `vstack trust` runs
+# there — the gate executes repo-controlled code, so a non-interactive bare install of THIS
+# repo must not arm it by itself either.
 #
 # Delegate to `vstack trust`; do not hash verify.sh here. This block used to record exactly one
 # file. verify.sh executes ./install.sh --dry-run and ./overlay.sh, so an install-lane user got
@@ -447,12 +466,16 @@ back(){ [ "$DRY" = 1 ] && return 0
 # hashing was wrong, it was that there were two trust writers and only one of them knew what
 # verify.sh runs. There is now one.
 if [ "$DRY" = 0 ] && [ -f "$SRC/.claude/verify.sh" ]; then
-  if [ -x "$SRC/bin/vstack" ] && "$SRC/bin/vstack" trust "$SRC" --yes >/dev/null 2>&1; then
-    say "trusted    $SRC/.claude/verify.sh and the scripts it executes (verify gate)"
+  if [ -t 0 ] || [ "$TRUST_OPT_IN" = 1 ]; then
+    if [ -x "$SRC/bin/vstack" ] && "$SRC/bin/vstack" trust "$SRC" --yes >/dev/null 2>&1; then
+      say "trusted    $SRC/.claude/verify.sh and the scripts it executes (verify gate)"
+    else
+      # Fail closed and say so. A gate that is off is recoverable with one command; a gate armed
+      # over an incomplete trust store is the thing this delegation exists to prevent.
+      say "WARNING    could not trust $SRC/.claude/verify.sh; the verify gate stays off (run: vstack trust)"
+    fi
   else
-    # Fail closed and say so. A gate that is off is recoverable with one command; a gate armed
-    # over an incomplete trust store is the thing this delegation exists to prevent.
-    say "WARNING    could not trust $SRC/.claude/verify.sh; the verify gate stays off (run: vstack trust)"
+    say "gate off   non-interactive install did not arm the verify gate (run: $SRC/bin/vstack trust $SRC)"
   fi
 fi
 
