@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b 20d 61 61b 62 62b 63 63b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -304,6 +304,8 @@ files_for(){ case "$1" in
   62b) printf 'bin/doctor' ;;
   63) printf 'tests/transcript-census.py' ;;
   63b) printf 'tests/transcript-census.sh' ;;
+  64)  printf 'claude/security-scan.sh' ;;
+  64b) printf 'claude/security.yml.tmpl' ;;
   9b)  printf 'overlay.sh' ;;
   10)  printf 'claude/agents/debugger.md' ;;
   10b) printf 'claude/agents/debugger.md' ;;
@@ -410,6 +412,8 @@ label_for(){ case "$1" in
   62b) printf "pre-tag carve-out is one finding, read by both harnesses, still hard in bin/doctor" ;;
   63) printf "corpus census arithmetic is proven" ;;
   63b) printf "corpus census arithmetic is proven" ;;
+  64)  printf "the security lane skips a missing scanner and fails on a finding" ;;
+  64b) printf "the security lane skips a missing scanner and fails on a finding" ;;
   9b)  printf 'overlay merge path' ;;
   10)  printf 'agents + commands loadable' ;;
   10b) printf 'agents + commands loadable' ;;
@@ -752,6 +756,20 @@ exit 7
       # the founding defect of this repository, and check 63's assertion floor is what catches it.
       sed -i.t 's/^expect "P1 /#expect "P1 /' tests/transcript-census.sh \
         && rm -f tests/transcript-census.sh.t ;;
+
+  64) # Lane 1: take away the skip. A tool that is not installed becomes a failure, so the scan
+      # exits 1 on every machine that has not installed five binaries -- which is not a stricter
+      # gate, it is a gate everybody turns off. Check 64's no-scanner sandbox must go red on the
+      # exit code. Anchored on the reporter and the reason, not on the tool's own branch shape.
+      sed -i.t 's/^  skip "gitleaks" "not installed"$/  bad "gitleaks" "not installed"/' \
+        claude/security-scan.sh && rm -f claude/security-scan.sh.t ;;
+
+  64b) # Unpin one action back to a floating tag. `@v7` is a pointer the action's owner can move,
+      # so a compromised upstream tag runs in this workflow on the next push -- the supply-chain
+      # hole the whole template exists to not have. One occurrence, not all five: a rule that only
+      # catches a wholesale unpinning is not the rule anybody needs.
+      perl -0pi -e 's{actions/checkout\@[0-9a-f]{40} \# v[0-9.]+}{actions/checkout\@v7}' \
+        claude/security.yml.tmpl ;;
   58c) # Remove the check count the measurement was taken at. Without it the recorded cost cannot
       # be scaled to this gate's size, so it would silently stay frozen at the size it was
       # measured on, which is how the constant it replaced went stale in the first place. A

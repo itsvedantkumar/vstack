@@ -5,36 +5,50 @@ description: Run security checks (secrets, dependencies, optional: external scan
 
 Run security checks on this project. **$ARGUMENTS**
 
-vstack ships with built-in security checks in the verification gate. External security tools (OWASP ZAP, Trivy, Nuclei, nmap) are optional and can be installed separately if desired.
+Mandatory for any repo that is public or serves prod traffic.
 
-1. **Run the built-in verification gate.**
+1. **Run the scanner.**
    ```bash
-   bash ./.claude/verify.sh
+   bash .claude/security-scan.sh
    ```
-   This checks for:
-   - Hardcoded secrets (API keys, tokens, credentials): reads against real token shapes (sk-ant-, sk-proj-, github_pat-, etc.)
-   - Hardcoded home paths or infrastructure identifiers
-   - Committed files that look like credentials
-   - No other files in the repo are checked — only git-tracked files via `git grep`.
-   Report the results.
+   Runs gitleaks, semgrep, osv-scanner, and zizmor (eslint too, if a config exists and
+   `npm run lint` doesn't already cover it). Prints one line per tool: `ok NAME`, `FAIL NAME`
+   (with findings), or `skip NAME (reason)`. A `skip ... (not installed)` means the tool is
+   missing — run `./setup-machine.sh` (gitleaks, semgrep, osv-scanner, and zizmor install by
+   default there now). Report every line, not just the failures.
 
-2. **Run npm audit for dependency vulnerabilities** (JavaScript/Node projects only):
+2. **`npm audit` for dependency vulnerabilities** (only if `package-lock.json` exists):
    ```bash
    npm audit --audit-level=high
    ```
-   This scans `package-lock.json` and `package.json` for known vulnerabilities in your dependency tree. Report findings.
+   Report findings.
 
-3. **Scan git history for secrets** (optional, catches mistakes that slipped through):
+3. **History sweep** (catches a secret that's already committed, not just in the working tree):
    ```bash
-   git log --all --full-history -p | grep -iE 'api_key|secret|token|sk-' | head -20
+   gitleaks git --log-opts="--all" --no-banner --redact .
    ```
-   This searches commit history for patterns that look like credentials. If found, use `git filter-branch` or `git-filter-repo` to remove them and force-push.
+   A hit here needs `git filter-repo` (or BFG) and a force-push, not a new commit — the secret
+   is still in history either way.
 
-4. **For advanced scanning (optional, tools not shipped):** If the user has installed external tools and wants to use them:
-   - Trivy (filesystem/image/SBOM scanning): `trivy fs --scanners vuln,secret,misconfig .`
-   - npm's audit CI mode (CI/CD pipelines): `npm audit --audit-level=high --production`
-   - Container image scans (if building images): `trivy image myapp:latest`
-   
-   These tools are not provided by vstack; the user must install them separately and provide their own configuration.
+4. **Confirm CI is wired.** Check `.github/workflows/security.yml` and `.github/dependabot.yml`
+   exist. If either is missing, run `vstack overlay .` to seed them, then report what landed.
 
-5. **Report summary.** Built-in gate status (pass/fail), npm audit findings (if any), git history scan (if run), and status of any optional external tools the user has installed.
+5. **Post-deploy scan** (optional — only run this if the user has supplied a deployed
+   preview/prod URL; skip otherwise):
+   ```bash
+   nuclei -u <url> -severity medium,high,critical -silent
+   docker run --rm -t zaproxy/zap-stable zap-baseline.py -t <url>
+   ```
+   If the repo ships a container, also run `trivy fs --scanners vuln,secret,misconfig .`.
+
+6. **Report summary** as a table:
+
+   | Tool | Result | Action |
+   |---|---|---|
+   | gitleaks | ok / FAIL / skip | ... |
+   | semgrep | ok / FAIL / skip | ... |
+   | osv-scanner | ok / FAIL / skip | ... |
+   | zizmor | ok / FAIL / skip | ... |
+   | npm audit | ok / FAIL / skip | ... |
+   | nuclei | ok / FAIL / n/a | ... |
+   | ZAP baseline | ok / FAIL / n/a | ... |

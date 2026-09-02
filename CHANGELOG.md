@@ -4,6 +4,24 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.67.0 — 2026-09-02
+
+- **A security toolchain ships with the overlay.** `claude/security-scan.sh` runs gitleaks,
+  semgrep, osv-scanner, zizmor and eslint locally and is copied into every overlaid repo, where
+  the `verify.sh` template calls it; a scanner that is not installed skips rather than failing, so
+  the gate does not go red on a machine missing five binaries. `claude/security.yml.tmpl` and
+  `claude/dependabot.yml.tmpl` are seeded once into `.github/workflows/security.yml` and
+  `.github/dependabot.yml` and never overwritten — a second `vstack overlay .` reports whether the
+  file still matches the template or has drifted from it, and names the file to diff against.
+  `setup-machine.sh` installs the scanners by default.
+- **Check 64 measures it in both directions.** The scan is run in a throwaway repo with
+  `PATH=/usr/bin:/bin` (every tool must skip, exit 0) and again against a stub gitleaks that
+  reports a finding (must exit 1 naming it), because a scan that can only ever skip passes the
+  first lane perfectly. 64b requires every `uses:` in the workflow template to be pinned to a
+  40-hex commit with its tag beside it, and requires README's Prod-ready gates table and the
+  script to name the same tools. Falsifiability rows 64 and 64b delete the skip branch and unpin
+  one action.
+
 ## 1.66.0 — 2026-09-02
 
 Auto-enforcement tightened after measuring it. Across ten real sessions in the last ten days the
