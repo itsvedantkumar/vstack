@@ -245,6 +245,17 @@ if [ "${VSTACK_PROFILE:-}" = "skills" ]; then
   exit 0
 fi
 
+# --- who the human is ------------------------------------------------------------------------
+# The roster above hands the lead the call sign RICK, and a reply that opens "Rick:" reads to the
+# person at the keyboard as their own name. Derive theirs from git config rather than shipping
+# anyone's as a literal; the charset strip is the same rule the workspace block applies to
+# repo-controlled strings.
+operator=$(git config --get user.name 2>/dev/null | tr -cd 'A-Za-z0-9 ._-' | head -c 60)
+if [ -n "$operator" ]; then
+  MSG="$MSG
+OPERATOR: the human is $operator. RICK is the lead's call sign, never the operator's name."
+fi
+
 # --- workspace conventions: only outside Conductor (the app prepends its own, richer block) ---
 if [ -z "$CONDUCTOR_WORKSPACE_PATH" ]; then
   d="${CLAUDE_PROJECT_DIR:-$PWD}"

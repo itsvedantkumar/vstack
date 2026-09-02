@@ -6,6 +6,30 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.65.0 — 2026-09-02
 
+The public-readiness audit's three P2s, plus the leftovers it turned up.
+
+- **bootstrap.sh no longer installs the default branch when unpinned.** It resolves the
+  latest release tag from the GitHub releases API and refuses when that lookup fails, rather
+  than falling back to `main`. A stranger who runs the one-liner now gets the version the
+  manifests and changelog describe, not whatever landed since.
+- **The context7 MCP server is pinned** (`@upstash/context7-mcp@4.0.4`) instead of floating on
+  `npx`'s latest, so a re-install cannot silently pick up a different server than the one that
+  was reviewed.
+- **uninstall.sh leaves nothing behind.** It removes `vstack-compat-canary.json` (written by
+  the compat-canary hook, so ownership follows the hook, not the installer) and `rmdir`s the
+  now-empty `agents/reference`, `agents`, `commands`, `hooks` and `skills` directories,
+  deepest first, so a directory holding anything foreign is left alone. The install matrix's
+  `uninstall-clean` lane fires the real hook first so the file genuinely exists before it
+  asserts on its absence.
+- **The session baseline names the operator.** `inject-session-context.sh` derives the
+  human's name from `git config user.name` and says that RICK is the lead's call sign, not
+  theirs. A reply opening "Rick:" had been read as a salutation. Nothing shipped carries a
+  literal name.
+- **README puts the install command on the first screen** and states what distinguishes this
+  repository before the counts.
+- Repository settings: secret scanning and push protection enabled; three stale branches
+  deleted.
+
 - **install.sh no longer arms the Stop-hook verify gate on a non-interactive install with no
   opt-in.** It ran `bin/vstack trust "$SRC" --yes` unconditionally, so bootstrap.sh's
   `curl|bash` one-liner — which drives install.sh non-interactively — left a stranger who never

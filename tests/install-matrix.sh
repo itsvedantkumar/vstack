@@ -569,10 +569,11 @@ if want bootstrap; then
     out=$(HOME="$H" VSTACK_DIR="$H/.vstack" bash "$ROOT/bootstrap.sh" --skip-deps 2>&1); rc=$?
     e=$(assert_install bootstrap "$H/.claude" "$H" exact "$H/.vstack")
     [ -d "$H/.vstack/.git" ] || e="$e; bootstrap did not leave a clone at VSTACK_DIR"
-    # Local being ahead of the published tree is normal mid-change, and worth saying out loud
-    # so the lane's numbers are never mistaken for this checkout's.
+    # An unpinned bootstrap installs the latest release tag, so local being ahead of it is
+    # normal mid-change, and worth saying out loud so the lane's numbers are never mistaken for
+    # this checkout's.
     lh=$(count_files "$SRC/claude/hooks" '*.sh'); rh=$(count_files "$H/.vstack/claude/hooks" '*.sh')
-    [ "$lh" = "$rh" ] || printf 'note  published main has %s hooks, this checkout has %s\n' "$rh" "$lh"
+    [ "$lh" = "$rh" ] || printf 'note  latest release has %s hooks, this checkout has %s\n' "$rh" "$lh"
     [ "$rc" = 0 ] && [ -z "$e" ] && ok "curl bootstrap lane" || bad "curl bootstrap lane" "exit=$rc$e"
   fi
 fi
@@ -1030,7 +1031,10 @@ if want uninstall-clean; then
   printf '{"theirKey":"keep","theme":"dracula","skillOverrides":{"their-skill":"off"}}\n' > "$H/.claude/settings.json"
   printf 'THEIR_MANAGED=true\n' > "$H/.conductor/settings.managed.toml"
   printf '{"mcpServers":{"their-server":{"command":"theirs"}}}\n' > "$H/.claude.json"
-  HOME="$H" "$SRC/install.sh" >/dev/null 2>&1
+  # VSTACK_TRUST=1: a bare non-interactive install no longer arms the gate (check 61b), so
+  # without the opt-in the trust-store assertion below would pass on a store that was never
+  # written.
+  HOME="$H" VSTACK_TRUST=1 "$SRC/install.sh" >/dev/null 2>&1
   # Positive control, taken between install and uninstall. Asserting only that vstack's servers
   # are gone afterwards passes for free on any machine where they were never registered, which
   # is the shape of every fake green this repo has shipped.

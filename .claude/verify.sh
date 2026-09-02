@@ -1756,8 +1756,9 @@ else
 fi
 
 # --- 24. the declared version describes what actually installs -------------------------------
-# Three lanes install three different trees, and only one of them is pinned. `VSTACK_REF=v1.4.0`
-# gets the tag; the unpinned bootstrap and the plugin marketplace both take the default branch.
+# Three lanes install three different trees. `VSTACK_REF=v1.4.0` gets the tag; an unpinned
+# bootstrap resolves the latest release tag (since 1.65.0; it took the default branch before);
+# the plugin marketplace still takes the default branch.
 # So when the payload moves ahead of the tag while the manifests still name it, a stranger
 # installs something that is not the version it claims to be — and the changelog describes a
 # different artefact than the one they got.
