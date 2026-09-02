@@ -4,6 +4,16 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## Unreleased
+
+- **`overlay.sh --check` reports drift without writing.** Every file the write path would
+  touch is compared against the payload and reported as `stale`, `absent`, `legacy` or
+  `differs (repo-owned)`; exit 1 on anything the next `overlay` run would change. Overlaid repos
+  can now learn that the template moved. (#10)
+- **`tests/inventory-contract.sh --write` re-points the inventory.** Replaces the hand-run jq
+  after every payload commit; refuses on a dirty tree, re-validates, prints the commit line, and
+  is a no-op when the contract already holds. (#9)
+
 ## 1.67.0 — 2026-09-02
 
 - **A security toolchain ships with the overlay.** `claude/security-scan.sh` runs gitleaks,
