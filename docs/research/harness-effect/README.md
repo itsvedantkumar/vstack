@@ -14,7 +14,9 @@ customer has been served and the measurements are preregistered.
 - [`findings/`](findings/) what this repository has measured itself, with pointers to the raw rows and the
   harness that produced them ([`findings/measured-so-far.md`](findings/measured-so-far.md)), and
   the provisional change list the literature implies
-  ([`findings/recommendations-draft.md`](findings/recommendations-draft.md)). These are the facts
+  ([`findings/recommendations-draft.md`](findings/recommendations-draft.md)), and whether
+  OpenCode can host a Stop gate at all
+  ([`findings/opencode-stop-gate-feasibility.md`](findings/opencode-stop-gate-feasibility.md)). These are the facts
   the literature has to explain or contradict.
 
 ## Literature files and their verification status

@@ -89,6 +89,50 @@ in this harness; Opus 5 and Haiku 4.5 are zero of fifty-six on the same fixtures
 put a rate on, and enough to say the phenomenon the Stop gate exists for is a cheap-model
 phenomenon on this task size, not a frontier one.
 
+### After retiring the breadth mandate, multi_module, Opus 5, paired
+
+Run file `runs/20260903-022953.55428.jsonl`, 10 samples per arm, JOBS=2, tree at 1.68.0-pre
+(`773f3d4`, the commit that removed the breadth block from `skill-mandate.sh`). Preregistered
+acceptance in `docs/research/harness-effect/findings/plan-breadth-retirement.md`: vstack
+`spawned == 0` on 10 of 10, 20 of 20 green, mean vstack cost within 1.25x of bare.
+
+| arm | n | held-out green | false completions | runs that spawned | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|
+| none | 10 | 10 | 0 | 0 | $0.275 | 43 s | 5.9 |
+| vstack | 10 | 10 | 0 | 0 | $0.245 | 39 s | 5.3 |
+
+Acceptance met: cost ratio 0.89. The 3.6 to 4.4x rows in the routing-cost table below were the
+breadth mandate firing; with it gone, vstack on the same three-file fix costs what bare costs.
+The bare arm's model list includes Haiku 4.5 on some rows (Claude Code's own background calls,
+not a delegation; `spawned` is 0), so its mean cost is not purely Opus.
+
+### Gate arms on GLM 5.3 Flash, harness-side driver loop
+
+OpenCode has no blocking Stop hook and `opencode run` exits at its first idle, so vstack's
+`verify-gate.sh` cannot run there (`docs/research/harness-effect/findings/opencode-stop-gate-feasibility.md`).
+The harness plays its part from outside: run the agent, run a verifier, and while it is red and
+under a cap of three, continue the same session with the failure text and "fix the code, not the
+tests". `gate` uses the fixture's visible `verify.sh`; `oracle` uses the held-out check itself
+and reports only which check failed, the ceiling for any gate. Rows carry `gate_rounds`, the
+number of red rounds fed back, so a gate that never fired is a zero and not a green.
+
+| fixture | run file | arm | n | held-out green | said `DONE` | false completions | gate rounds | mean cost | mean wall |
+|---|---|---|---|---|---|---|---|---|---|
+| multi_module_tested (visible tests) | `runs/20260903-023828.96398.jsonl` | none | 20 | 20 | 20 | 0 | 0 | $0.0019 | 37 s |
+| multi_module_tested (visible tests) | same | gate | 20 | 20 | 20 | 0 | 0 | $0.0024 | 47 s |
+| multi_module (no tests) | `runs/20260903-030932.25374.jsonl` | none | 150 | 149 | 148 | 0 | 0 | $0.0020 | 40 s |
+| multi_module (no tests) | same | oracle | 150 | 150 | 148 | 0 | 0 | $0.0020 | 34 s |
+
+Reading. Given a runnable test, GLM runs it unprompted; every held-out check is green and the
+gate never has a red round to feed back. On the test-less fixture the earlier two false
+completions (`runs/20260903-012232.jsonl`, samples 7 and 8) did not recur: bare GLM now stands at
+2 in 200 across all batches, and the oracle arm saw no red first pass in 150 tries, so the loop
+ran zero rounds on a live run. Its red path is proven only by the harness self-test
+(`oracle_verify` on the untouched buggy tree reports three failing checks). The 150-per-arm run
+cost nothing beyond time (OpenCode Go allowance). The gate question stays open for lack of
+events, not for lack of a gate: measuring it needs a fixture with a base rate well above one
+percent, which means a harder task, not a bigger n.
+
 ### Routing cost, multi_module, per vstack run
 
 | sample | turns | subagents spawned | models billed | cost | wall |
@@ -168,3 +212,6 @@ valid and invalid, was $11.21 across 62 model calls:
 | `tests/evals/showcase/runs/20260903-010851.jsonl` | all four | glm-5.3-flash, bare | valid, killed at 25 rows |
 | `tests/evals/showcase/runs/20260903-012232.jsonl` | merge_ranges, multi_module | glm-5.3-flash, bare | valid, two runs sharing one stamp |
 | `tests/evals/showcase/runs/20260903-012854.10023.jsonl` | multi_module | glm-5.3-flash, bare | valid, 30 samples, red trees kept |
+| `tests/evals/showcase/runs/20260903-022953.55428.jsonl` | multi_module | opus, none vs vstack | valid, paired, breadth mandate retired |
+| `tests/evals/showcase/runs/20260903-023828.96398.jsonl` | multi_module_tested | glm-5.3-flash, none vs gate | valid, gate never fired |
+| `tests/evals/showcase/runs/20260903-030932.25374.jsonl` | multi_module | glm-5.3-flash, none vs oracle | valid, 150 per arm, oracle never fired |

@@ -64,6 +64,11 @@ Pass: vstack `spawned == 0` on 10 of 10, 20 of 20 green, mean vstack cost within
 If vstack still spawns after commit 1, the driver is prose (commit 2), not the hook. If parity
 still fails, revert commits 1 and 2.
 
+Result (2026-09-03, `tests/evals/showcase/runs/20260903-022953.55428.jsonl`, tree `773f3d4`):
+vstack spawned on 0 of 10, 20 of 20 green, vstack $0.245 against bare $0.275 per run (ratio
+0.89), 39 s against 43 s. Acceptance met on the first paired run; commits 1 and 2 stand. The
+table is in `tests/evals/showcase/RESULTS.md` under "After retiring the breadth mandate".
+
 ## Risks
 
 - `dispatch-counter.sh` and the statusline read the dispatch counter, not the breadth counters.

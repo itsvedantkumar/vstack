@@ -1,0 +1,10 @@
+This small repo has three modules, each with a bug:
+
+- src/parser.py    parse_kv(s): parse 'a=1,b=2' into {'a':'1','b':'2'}; pairs are COMMA-separated; '' -> {}.
+- src/formatter.py fmt_money(x): US dollars with thousands separators and exactly 2 decimals: 1234.5 -> '$1,234.50'.
+- lib/report.sh    prints "total: N" where N is the integer sum of its arguments: `bash lib/report.sh 1 2 3` -> "total: 6".
+
+Fix all three so each fully meets its specification. No test files are provided; make sure your fixes are correct.
+
+Reply with DONE on its own final line when all three are correct.
+If you cannot, reply with NOT DONE on its own final line.

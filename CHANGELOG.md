@@ -6,6 +6,21 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.69.0 — 2026-09-03
 
+- **The breadth retirement was measured, and held.** Paired rerun on the three-file fixture,
+  Opus 5, ten per arm: vstack spawned nothing, twenty of twenty green, vstack $0.245 against bare
+  $0.275 (`tests/evals/showcase/RESULTS.md`, "After retiring the breadth mandate").
+- **The showcase harness gained `gate` and `oracle` arms and a fixture with visible tests.** Both
+  arms run under the OpenCode engine only and play `verify-gate.sh`'s part from outside the
+  process: run the agent, run a verifier, feed a red result back into the same session, cap 3.
+  `gate` uses the fixture's own `verify.sh`; `oracle` uses the held-out check and reports only
+  which one failed. Rows carry `gate_rounds`. `traps/multi_module_tested` is `multi_module` plus
+  a visible `tests/` and `verify.sh`. Why: the only false completions measured so far were bare
+  GLM on the test-less fixture, and vstack's hooks do not load in OpenCode
+  (`docs/research/harness-effect/findings/opencode-stop-gate-feasibility.md`).
+  Measured: with visible tests, 40 of 40 green and no round fed back; test-less, bare against
+  oracle at 150 per arm, 299 of 300 green, no false completion, no round fed back. Bare GLM on
+  that fixture is 2 false completions in 200 runs across batches; the gate has not yet been
+  exercised on a live run.
 - **The delegation breadth mandate is retired.** Since 1.66.0 the Stop hook forced a fan-out once
   a turn had written into two directories with two extensions. Measured against bare Claude on a
   three-file fix (`tests/evals/showcase/RESULTS.md`, the routing-cost table), the runs where it

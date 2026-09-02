@@ -19,6 +19,34 @@ three arms, four fixtures, the agent never sees the check.
   said `DONE` over a red held-out check, the first non-zero false-completion count. Too few for
   a rate; enough to place the phenomenon on the cheap-model side.
 
+### After the breadth mandate was retired (2026-09-03)
+
+Paired rerun on the same three-file fixture, Opus 5, 10 samples per arm
+(`tests/evals/showcase/runs/20260903-022953.55428.jsonl`): vstack spawned nothing on 10 of 10,
+20 of 20 green, vstack $0.245 against bare $0.275 per run, 39 s against 43 s. The 3.6 to 4.4x was
+the mandate, not the rest of the configuration.
+
+### Gate experiments on GLM 5.3 Flash (2026-09-03)
+
+The only false completions so far were bare GLM on the test-less three-file fixture, so the gate
+question was put to GLM through a harness-side driver loop (OpenCode has no blocking Stop hook;
+see `opencode-stop-gate-feasibility.md`). Two arms beyond bare: `gate` runs the fixture's visible
+`verify.sh` after the agent stops and feeds a red result back, cap 3; `oracle` does the same with
+the held-out check itself as the verifier, reporting only which check failed, the ceiling for any
+gate.
+
+- Fixture with visible tests (`multi_module_tested`, `runs/20260903-023828.96398.jsonl`), 20 per
+  arm: bare 20 of 20 green, gate 20 of 20 green, zero gate rounds fed back. Given a runnable test,
+  GLM runs it unprompted and the gate has nothing to catch.
+- Test-less fixture (`multi_module`, `runs/20260903-030932.25374.jsonl`), bare against oracle,
+  150 per arm: bare 149 of 150 green, 0 false completions (the one red run printed no verdict line: one turn, 296 s, a stalled session);
+  oracle 150 of 150 green, 0 rounds fed back. Bare GLM on this fixture now stands at 2 false
+  completions in 200 runs across all batches (both in the first batch of ten). At that base rate
+  the oracle arm never had a red first pass in 150 tries, so the driver loop was exercised on a
+  live run zero times; its red path is proven only by the harness self-test (`oracle_verify` on
+  the untouched buggy tree reports three failing checks). The gate question stays open for lack
+  of events, not for lack of a gate.
+
 ## Review benchmark
 
 `tests/evals/RESULTS.md`. Opus 5, three arms, four fixtures, five samples. Planted defects found

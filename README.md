@@ -55,12 +55,14 @@ The full tables, the preregistration and the raw rows are in `tests/evals/showca
 | held-out check green | every run | every run | every run |
 | said `DONE` on a red check | never | never | never |
 | cost per task, no delegation | baseline | within noise | within noise |
-| cost per task, when vstack fans out | | 3.6 to 4.4x | |
+| cost per task, when the 1.66.0 breadth mandate forced a fan-out | | 3.6 to 4.4x | |
+| cost per task, same fixture, mandate retired (1.69.0, paired n=10) | baseline | 0.89x | |
 | Stop hook that refuses a red tree | no | yes, always on | no |
 | skills installed | 0 | 28 | 54 |
 
 Read that honestly: on a task small enough to fit in one prompt, a frontier model does not need
-this configuration to get the answer right, and asking it to delegate costs more than it saves.
+this configuration to get the answer right, and forcing it to delegate cost more than it saved,
+so 1.69.0 stopped forcing it.
 What vstack buys is the property below, which does not show up as a per-task number: every
 piece of it can be shown to fail when it should, and it undoes itself byte for byte.
 
