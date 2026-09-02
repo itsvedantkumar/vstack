@@ -14,3 +14,4 @@ __pycache__/
 # carry absolute paths from other people's machines, which the home-path scanner correctly
 # objects to, and which are not ours to redistribute.
 tests/evals/swebench/*.json
+tests/evals/showcase/.work.*
