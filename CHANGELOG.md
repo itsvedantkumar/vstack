@@ -22,8 +22,8 @@ The public-readiness audit's three P2s, plus the leftovers it turned up.
   `uninstall-clean` lane fires the real hook first so the file genuinely exists before it
   asserts on its absence.
 - **The session baseline names the operator.** `inject-session-context.sh` derives the
-  human's name from `git config user.name` and says that RICK is the lead's call sign, not
-  theirs. A reply opening "Rick:" had been read as a salutation. Nothing shipped carries a
+  human's name from `git config vstack.operator`, falling back to `git config user.name`, and
+  says that RICK is the lead's call sign, not theirs. A reply opening "Rick:" had been read as a salutation. Nothing shipped carries a
   literal name.
 - **README puts the install command on the first screen** and states what distinguishes this
   repository before the counts.

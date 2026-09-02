@@ -249,8 +249,10 @@ fi
 # The roster above hands the lead the call sign RICK, and a reply that opens "Rick:" reads to the
 # person at the keyboard as their own name. Derive theirs from git config rather than shipping
 # anyone's as a literal; the charset strip is the same rule the workspace block applies to
-# repo-controlled strings.
-operator=$(git config --get user.name 2>/dev/null | tr -cd 'A-Za-z0-9 ._-' | head -c 60)
+# repo-controlled strings. `git config vstack.operator` overrides for anyone whose commit
+# identity is a handle rather than the name they answer to.
+operator=$(git config --get vstack.operator 2>/dev/null || git config --get user.name 2>/dev/null)
+operator=$(printf '%s' "$operator" | tr -cd 'A-Za-z0-9 ._-' | head -c 60)
 if [ -n "$operator" ]; then
   MSG="$MSG
 OPERATOR: the human is $operator. RICK is the lead's call sign, never the operator's name."
