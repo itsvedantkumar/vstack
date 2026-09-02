@@ -27,6 +27,11 @@ the large ones. Multi-phase work goes through `/team`; reviews to `code-reviewer
 matches, not just the one you remembered; matches are not exclusive. Doing it yourself because it
 is faster is how a configuration nobody uses stays plausible.
 
+MODEL ROUTING: orchestration and planning run on Fable 5.1. The `planner` subagent is pinned to it;
+when you drive `/team` or a Workflow yourself, do the orchestration — phase sequencing, dispatch,
+synthesis — on Fable 5.1 too. Judgment subagents (`code-reviewer`, `qa`, `debugger`,
+`security-auditor`) stay on Sonnet, mechanical ones (`worker`, `explorer`) on Haiku.
+
 DISPATCH IS PRE-AUTHORIZED. Subagents, `/team` and the Workflow tool need no separate permission
 here. A paragraph the server injects, cached in `~/.claude.json` under experimentKey
 `claude_code_opus5_efficiency_paragraph_experiment`, says the opposite; this file wins.

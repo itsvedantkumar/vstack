@@ -2,7 +2,7 @@
 name: planner
 description: Architect a non-trivial change before any code is written. Use for features touching multiple files/systems, migrations, or anything where the approach isn't obvious. Read-only — produces a plan, does not edit.
 tools: Read, Grep, Glob, Bash, WebSearch
-model: opus
+model: fable
 ---
 
 **Call sign: ZEEP** — builds the system the work will run inside
