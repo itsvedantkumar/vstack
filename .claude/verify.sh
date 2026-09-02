@@ -2240,6 +2240,8 @@ while IFS= read -r f; do
     # directory and globs it (run-pathways.sh:42), so naming each fixture individually somewhere
     # would be redundant rather than informative. Adding a fixture is meant to be a file drop.
     tests/evals/fixtures/*|tests/evals/holdout/*|tests/evals/*/fixture/*) continue ;;
+    # showcase/run.sh globs its trap fixtures the same way (traps/*/PROMPT.txt), so the same rule.
+    tests/evals/showcase/traps/*) continue ;;
   esac
   # Matched on the path, not the basename. A basename match means every README.md in the tree is
   # "referenced" by any mention of any README.md, and a subtree that names only itself passes as

@@ -103,6 +103,9 @@ run_one() { # <arm> <fixture_dir> <sample>
               --setting-sources=project --output-format json < /dev/null 2>/dev/null )
   fi
 
+  # A run the wrapper killed has no JSON. It still gets a row, flagged, so a timeout is a
+  # measurement and not a vanished sample: the first GLM batch lost 15 of 40 this way, silently.
+  [ -n "$json" ] || json='{"is_error":true,"result":"","subtype":"timeout"}'
   mkdir -p "$wd/checks"; cp "$fx"/checks/*.py "$wd/checks/" 2>/dev/null
   local green; score_check "$wd"; case $? in 0) green=1;; 1) green=0;; *) green=-1;; esac
 
@@ -153,9 +156,13 @@ export -f run_one install_arm score_check log
 export SRC GSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT
 if [ "$JOBS" -gt 1 ]; then
   # shellcheck disable=SC2016  # $1..$3 are positionals of the inner bash, expanded there, not here
-  xargs -P "$JOBS" -L1 -a "$JOBLIST" bash -c 'run_one "$1" "$2" "$3"' _
+  # stdin, not -a: BSD xargs has no -a, and the first parallel run on macOS emitted a usage
+  # error, ran nothing, and printed "done." below over an empty file.
+  xargs -P "$JOBS" -L1 bash -c 'run_one "$1" "$2" "$3"' _ < "$JOBLIST"
 else
   while IFS=$'\t' read -r a f s; do run_one "$a" "$f" "$s"; done < "$JOBLIST"
 fi
 
+# A run that produced no rows is a failure, not a quiet success.
+[ -s "$OUT" ] || { log "no rows written: every job failed before scoring"; exit 1; }
 log "done. rows: $(wc -l < "$OUT" | tr -d ' ') -> $OUT"
