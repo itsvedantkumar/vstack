@@ -12,10 +12,12 @@
 #
 # VSTACK_REF pins what gets installed. Set it explicitly (a tag, e.g. VSTACK_REF=v1.64.0, or a
 # branch) to install exactly that. Leave it unset and this script resolves the latest release
-# tag from the GitHub API and installs that — never main — so `curl | bash` with no VSTACK_REF
-# does not install whatever happens to be on main at that instant with no human review. If the
-# API is unreachable (no network, rate limited, no releases), this refuses rather than silently
-# falling back to main; set VSTACK_REF yourself to proceed.
+# tag and installs that — never main — so `curl | bash` with no VSTACK_REF does not install
+# whatever happens to be on main at that instant with no human review. Resolution tries
+# `git ls-remote` first (the git protocol has no per-IP rate limit, unlike the GitHub API), then
+# falls back to the GitHub releases API. If both fail (no network, no git, rate limited, no
+# releases), this refuses rather than silently falling back to main; set VSTACK_REF yourself to
+# proceed.
 set -euo pipefail
 
 DIR="${VSTACK_DIR:-$HOME/.vstack}"
@@ -24,20 +26,53 @@ REPO="${VSTACK_REPO:-https://github.com/itsvedantkumar/vstack.git}"
 if [ -n "${VSTACK_REF:-}" ]; then
   REF="$VSTACK_REF"
 else
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "bootstrap: VSTACK_REF is not set and curl is unavailable to resolve the latest release." >&2
-    echo "           set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
-    exit 1
+  REF=""
+  route=""
+  if command -v git >/dev/null 2>&1; then
+    echo "bootstrap: VSTACK_REF not set — resolving the latest release tag via git ls-remote"
+    # Only exact vX.Y.Z tags are candidates; anything else (v1.2.0-rc1, non-version tags) is
+    # ignored. sort -V is not used because the Alpine lane in the container matrix runs busybox,
+    # which lacks it; numeric field sort after stripping the leading "v" is portable to busybox.
+    tags="$(git ls-remote --tags --refs "$REPO" 'refs/tags/v*' 2>/dev/null \
+      | awk '{print $2}' \
+      | sed 's#^refs/tags/##' \
+      | grep '^v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' \
+      || true)"
+    REF="$(printf '%s\n' "$tags" \
+      | sed 's/^v//' \
+      | sort -t. -k1,1n -k2,2n -k3,3n \
+      | tail -1)"
+    if [ -n "$REF" ]; then
+      REF="v$REF"
+      route="ls-remote"
+    fi
   fi
-  echo "bootstrap: VSTACK_REF not set — resolving the latest release tag from the GitHub API"
-  latest_json="$(curl -fsSL --max-time 10 "https://api.github.com/repos/itsvedantkumar/vstack/releases/latest" 2>/dev/null || true)"
-  REF="$(printf '%s' "$latest_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
   if [ -z "$REF" ]; then
-    echo "bootstrap: could not resolve the latest release tag (api.github.com unreachable, rate limited, or no releases exist)." >&2
-    echo "           refusing to fall back to main — set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
-    exit 1
+    if ! command -v curl >/dev/null 2>&1; then
+      echo "bootstrap: VSTACK_REF is not set, git ls-remote did not resolve a tag (or git is unavailable), and curl is unavailable to try the GitHub API." >&2
+      echo "           set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
+      exit 1
+    fi
+    echo "bootstrap: falling back to the GitHub API to resolve the latest release tag"
+    tok="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if [ -n "$tok" ]; then
+      latest_json="$(curl -fsSL --max-time 10 -H "Authorization: Bearer $tok" "https://api.github.com/repos/itsvedantkumar/vstack/releases/latest" 2>/dev/null || true)"
+    else
+      latest_json="$(curl -fsSL --max-time 10 "https://api.github.com/repos/itsvedantkumar/vstack/releases/latest" 2>/dev/null || true)"
+    fi
+    REF="$(printf '%s' "$latest_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+    if [ -z "$REF" ]; then
+      echo "bootstrap: could not resolve the latest release tag — tried git ls-remote and the GitHub API (api.github.com unreachable, rate limited, no git, or no releases exist)." >&2
+      echo "           refusing to fall back to main — set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
+      exit 1
+    fi
+    route="api"
   fi
-  echo "bootstrap: resolved latest release tag: $REF"
+  if [ "$route" = "ls-remote" ]; then
+    echo "bootstrap: resolved latest release tag: $REF (via ls-remote)"
+  else
+    echo "bootstrap: resolved latest release tag: $REF (via GitHub API)"
+  fi
 fi
 
 # The README calls this the lane for "a machine with nothing on it", and it used to exit here
