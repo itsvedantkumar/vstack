@@ -9,12 +9,36 @@
 #
 # Any arguments are passed straight to install.sh. Pin a different checkout location with
 # VSTACK_DIR, or a fork with VSTACK_REPO.
+#
+# VSTACK_REF pins what gets installed. Set it explicitly (a tag, e.g. VSTACK_REF=v1.64.0, or a
+# branch) to install exactly that. Leave it unset and this script resolves the latest release
+# tag from the GitHub API and installs that — never main — so `curl | bash` with no VSTACK_REF
+# does not install whatever happens to be on main at that instant with no human review. If the
+# API is unreachable (no network, rate limited, no releases), this refuses rather than silently
+# falling back to main; set VSTACK_REF yourself to proceed.
 set -euo pipefail
 
 DIR="${VSTACK_DIR:-$HOME/.vstack}"
 REPO="${VSTACK_REPO:-https://github.com/itsvedantkumar/vstack.git}"
 
-REF="${VSTACK_REF:-main}"
+if [ -n "${VSTACK_REF:-}" ]; then
+  REF="$VSTACK_REF"
+else
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "bootstrap: VSTACK_REF is not set and curl is unavailable to resolve the latest release." >&2
+    echo "           set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
+    exit 1
+  fi
+  echo "bootstrap: VSTACK_REF not set — resolving the latest release tag from the GitHub API"
+  latest_json="$(curl -fsSL --max-time 10 "https://api.github.com/repos/itsvedantkumar/vstack/releases/latest" 2>/dev/null || true)"
+  REF="$(printf '%s' "$latest_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -z "$REF" ]; then
+    echo "bootstrap: could not resolve the latest release tag (api.github.com unreachable, rate limited, or no releases exist)." >&2
+    echo "           refusing to fall back to main — set VSTACK_REF explicitly, e.g.: VSTACK_REF=v1.64.0 curl -fsSL ... | bash" >&2
+    exit 1
+  fi
+  echo "bootstrap: resolved latest release tag: $REF"
+fi
 
 # The README calls this the lane for "a machine with nothing on it", and it used to exit here
 # when git was absent — on a fresh Mac git arrives with the Xcode command line tools, which is
@@ -94,8 +118,9 @@ if command -v git >/dev/null 2>&1; then
   else
     echo "bootstrap: cloning into $DIR"
     # No fallback to the default branch. `git clone --branch` resolves a tag as readily as a
-    # branch, and $REF defaults to main, so this only ever failed when $REF genuinely did not
-    # exist -- and substituting another ref there is the one answer nobody asked for. It exited
+    # branch, and $REF is either an explicit VSTACK_REF or the resolved latest release tag, so
+    # this only ever failed when $REF genuinely did not exist -- and substituting another ref
+    # there is the one answer nobody asked for. It exited
     # 0, then planted refs/vstack/synced-$REF on a commit that is not $REF, so every later run
     # compared HEAD against a watermark that never described $REF. The tarball lane below has
     # 404'd on this same input since 1.5.0; this lane kept guessing.
