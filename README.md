@@ -345,6 +345,16 @@ null, and a survey of the published literature found no config-layer interventio
 correctness gain on frontier models. The honest case for this is safety and reversibility, not
 better code. See [docs/research/](docs/research/).
 
+Compaction is a Claude Code setting, not something this repository controls, and the number it is
+set to is not the number it fires at. `claude/settings.json` pins `autoCompactWindow` to 300000.
+Measured across 25 automatic compactions in one long session, 23 fired between 266K and 276K
+tokens; the client keeps headroom for the request about to be sent, so the trigger sits below the
+window. The other two fired at 469K and 1.0M, because the digest tells the model to batch every
+independent tool call into one message and a single batched step can jump past the window with no
+turn boundary in between for compaction to fire at. So it is regular, not guaranteed: a session
+that makes one very large step will overshoot, and nothing here can stop that. Details and the
+method are in the 1.30.0 and 1.34.0 CHANGELOG entries.
+
 Supported: macOS, Linux, and WSL and Alpine as Linux. CI runs `ubuntu-latest`, `macos-latest` and
 an `alpine:latest` container, and check 26 fails if the platforms named here are not the platforms
 CI tested. Windows is not supported. That lane could be made to pass. It could not be made to be
