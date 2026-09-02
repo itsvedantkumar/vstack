@@ -5,7 +5,7 @@ Two suites, with opposite constraints.
 `gate-falsifiability.sh` runs offline and CI runs it on every push. It proves
 `.claude/verify.sh` can actually fail. It is also the slowest thing in this repository: every row
 breaks one file, runs the WHOLE gate to see which check goes red, and restores, so the cost is
-O(rows x checks). At 107 falsifiability rows and a ~84s gate that is over two hours serially.
+O(rows x checks). At 108 falsifiability rows and a ~84s gate that is over two hours serially.
 Run `falsify-parallel.sh` instead, the same sweep across isolated clones: about 19 minutes on
 CI's seven runners, 48 minutes locally at 103 rows on an M-series Mac (measured 2026-09-01, seven
 shards contending for one machine's cores).
