@@ -111,6 +111,24 @@ if [ "$CHECK" -eq 1 ]; then
   }
   check_seeded ".github/workflows/security.yml" "$SRC/claude/security.yml.tmpl" "$DEST/.github/workflows/security.yml"
   check_seeded ".github/dependabot.yml" "$SRC/claude/dependabot.yml.tmpl" "$DEST/.github/dependabot.yml"
+  # Same seed-once contract as the two above, easy to miss because their write-path calls
+  # (~:260 for CLAUDE.md, ~:266-278 for verify.sh) aren't seed_tmpl itself — CLAUDE.md.tmpl is
+  # a plain `[ -f ] || cp`, and verify.sh's write branch adds a chmod and a "kept + hint" path
+  # instead of seed_tmpl's "kept (differs from template)" — but the seeded-once semantics are
+  # identical: never overwritten, so absent here is real missing-file drift, not a repo-owned
+  # diff, since content drift from either template is expected and deliberate.
+  check_seeded "CLAUDE.md" "$SRC/CLAUDE.md.tmpl" "$DEST/CLAUDE.md"
+  check_seeded ".claude/verify.sh" "$SRC/claude/verify.sh.tmpl" "$DEST/.claude/verify.sh"
+
+  # Legacy migration: overlay's write path (~:230-232) deletes a tracked .claude/CLAUDE.md the
+  # moment it finds one, because its existence IS the duplication policy.md was written to
+  # replace. --check has no write path, so it reports instead of removing — a repo still
+  # carrying this file has not run overlay since the migration and is drifted exactly like a
+  # stale copy, so it counts toward the same exit-code gate.
+  if [ -f "$DEST/.claude/CLAUDE.md" ]; then
+    echo "legacy   .claude/CLAUDE.md (overlay would remove it)"
+    STALE=$((STALE + 1))
+  fi
 
   # Conductor pin: same substring overlay itself rewrites, read instead of written. Compared
   # against $SRC's own current HEAD, not a fetched origin/main — that is the commit overlay
