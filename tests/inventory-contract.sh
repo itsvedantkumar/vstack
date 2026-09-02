@@ -101,7 +101,29 @@ jq empty "$INV" >/dev/null 2>&1 || { echo "FAIL  $INV does not parse as JSON" >&
 # computed from: derived_at.head names the commit payload_digest describes, and a payload file
 # with uncommitted changes means HEAD is not that commit yet -- committing first is the only way
 # to make the claim true, not something this flag can paper over.
+# `needs_repoint` mirrors the contract's own definition of stale for these two fields ONLY well
+# enough to answer "is there anything to fix" -- it is not a second implementation of the digest
+# (payload_digest_compute() is still the only place that runs) and it does not replace the real
+# checks below, which still run afterward and print the authoritative pass/fail lines. Without
+# this, --write would rewrite derived_at.head to current HEAD on every call, even one made right
+# after an unrelated non-payload commit where the file already validates clean -- which is not a
+# fix, it is churn, and it breaks the "second --write on a clean tree changes nothing" contract.
+needs_repoint(){
+  [ "$(payload_digest_compute)" != "$(jq -r '.derived_at.payload_digest' "$INV")" ] && return 0
+  h=$(jq -r '.derived_at.head // empty' "$INV")
+  [ -z "$h" ] && return 0
+  printf '%s' "$h" | grep -qE '^[0-9a-f]{40}$' || return 0
+  # Absent from a shallow checkout: the real check below SKIPs rather than fails this case, so
+  # --write must not force a rewrite it cannot justify either.
+  git cat-file -e "$h^{commit}" 2>/dev/null || return 1
+  git merge-base --is-ancestor "$h" HEAD 2>/dev/null || return 0
+  # shellcheck disable=SC2086
+  [ -n "$(git diff --name-only "$h" HEAD -- $PAYLOAD_PATHS 2>/dev/null)" ] && return 0
+  return 1
+}
+
 WRITE_MODE=0
+WROTE=0
 if [ "${1:-}" = "--write" ] || [ "${1:-}" = "--repoint" ]; then
   WRITE_MODE=1
   # shellcheck disable=SC2086
@@ -112,18 +134,23 @@ if [ "${1:-}" = "--write" ] || [ "${1:-}" = "--repoint" ]; then
     echo "commit the payload first, the head must name a commit" >&2
     exit 2
   fi
-  write_head=$(git rev-parse HEAD)
-  write_digest=$(payload_digest_compute)
-  write_tmp=$(mktemp "${INV}.XXXXXX") || { echo "FAIL  inventory-contract --write: mktemp failed" >&2; exit 1; }
-  if ! jq --arg h "$write_head" --arg d "$write_digest" \
-        '.derived_at.head = $h | .derived_at.payload_digest = $d' \
-        "$INV" > "$write_tmp"; then
-    echo "FAIL  inventory-contract --write: jq failed to write $INV" >&2
-    rm -f "$write_tmp"
-    exit 1
+  if needs_repoint; then
+    write_head=$(git rev-parse HEAD)
+    write_digest=$(payload_digest_compute)
+    write_tmp=$(mktemp "${INV}.XXXXXX") || { echo "FAIL  inventory-contract --write: mktemp failed" >&2; exit 1; }
+    if ! jq --arg h "$write_head" --arg d "$write_digest" \
+          '.derived_at.head = $h | .derived_at.payload_digest = $d' \
+          "$INV" > "$write_tmp"; then
+      echo "FAIL  inventory-contract --write: jq failed to write $INV" >&2
+      rm -f "$write_tmp"
+      exit 1
+    fi
+    mv "$write_tmp" "$INV"
+    WROTE=1
+    echo "inventory-contract --write: derived_at.head -> $write_head, derived_at.payload_digest -> $write_digest"
+  else
+    echo "inventory-contract --write: derived_at.head and derived_at.payload_digest already satisfy the contract; nothing to do"
   fi
-  mv "$write_tmp" "$INV"
-  echo "inventory-contract --write: derived_at.head -> $write_head, derived_at.payload_digest -> $write_digest"
   echo
 fi
 
@@ -352,14 +379,14 @@ if [ "$FAIL" -eq 0 ]; then
   else
     echo "inventory-contract: $RAN checks, all clean"
   fi
-  if [ "$WRITE_MODE" -eq 1 ]; then
+  if [ "$WRITE_MODE" -eq 1 ] && [ "$WROTE" -eq 1 ]; then
     echo
     echo "commit: git commit -am \"Re-point inventory at $(git rev-parse --short HEAD)\""
   fi
   exit 0
 else
   echo "inventory-contract: $RAN checks, $SKIPPED skipped, FAILURES ABOVE"
-  if [ "$WRITE_MODE" -eq 1 ]; then
+  if [ "$WRITE_MODE" -eq 1 ] && [ "$WROTE" -eq 1 ]; then
     echo "--write updated derived_at.head/payload_digest but validation still fails on the above -- not printing a commit command over a file that is not clean" >&2
   fi
   exit 1
