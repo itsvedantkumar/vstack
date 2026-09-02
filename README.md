@@ -201,6 +201,14 @@ only lane a cloud sandbox without your home directory can reach):
 | `claude/security.yml.tmpl` | `.github/workflows/security.yml` | seeded if absent |
 | `claude/dependabot.yml.tmpl` | `.github/dependabot.yml` | seeded if absent |
 
+A repo overlaid at commit X keeps that commit's hooks, agents, commands, skills and scanner
+until someone re-runs overlay — nothing else reports the staleness. `vstack overlay --check
+<repo>` (or `./overlay.sh --check <repo>`) diffs the destination against the "always
+overwritten" file list above plus the two seeded templates and the `.conductor/settings.toml`
+pin, writes nothing, and prints one line per drifted file followed by `overlay --check: N
+stale, M repo-owned diffs, K missing`. Exit 0 only when N and K are both 0; repo-owned template
+edits (M) never fail the check.
+
 ## Day to day
 
 | Command | What it does |
