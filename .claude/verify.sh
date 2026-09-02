@@ -2741,6 +2741,14 @@ p_errs=""
 # placeholder paths (claude/skills|agents|commands), third-party evidence (docs/provenance|research),
 # installed artifacts (.claude/), historical entries (CHANGELOG), and third-party test results
 # (tests/evals/RESULTS.md). This matches check 12's approach and keeps the two consistent.
+# Destinations `vstack overlay .` SEEDS into a TARGET repository, derived from overlay.sh rather
+# than listed. README's overlay table names `.github/workflows/security.yml` in its "Lands at"
+# column: that is a path in somebody else's repo after the overlay runs, the same category as the
+# `.claude/*` exemption below, and holding this tree to it would demand vstack ship every file it
+# hands to other people. Derived, so retiring a template retires its exemption with it -- a
+# hardcoded list here would outlive the thing it excuses, which is the failure check 20d exists
+# for. Leading and trailing spaces so the membership test below cannot match a prefix.
+p_seeded=" $(grep -oE '^seed_tmpl [^ ]+ [^ ]+' overlay.sh 2>/dev/null | awk '{print $3}' | tr '\n' ' ')"
 p_docs=$(git ls-files '*.md' 2>/dev/null | grep -vE '^(docs/(provenance|research)/|claude/(skills|agents|commands)/|\.claude/|CHANGELOG\.md$|tests/evals/RESULTS\.md$)')
 p_n=$(printf '%s' "$p_docs" | grep -c .)
 if [ "$p_n" -lt 8 ]; then
@@ -2760,6 +2768,7 @@ else
         # this one. Paths this repository does ship live under claude/, without the dot.
         .claude/*) continue ;;
       esac
+      case "$p_seeded" in *" $ref "*) continue ;; esac
       p_seen=$((p_seen + 1))
       [ -e "$ref" ] && continue
       [ -e "${d%/*}/$ref" ] && continue
@@ -4666,6 +4675,128 @@ else
     ok "corpus census arithmetic is proven ($c63_n assertions, empty corpus refused)"
   else
     bad "corpus census arithmetic is proven" "$(printf '%b' "$c63_errs")"
+  fi
+fi
+
+# --- 64. the security lane skips a missing scanner and still fails on a real finding -----------
+# The security toolchain shipped as three payload files and a README table, and every part of it
+# was prose. Nothing ran claude/security-scan.sh, nothing read the workflow template's action
+# pins, and nothing compared the tools README's "Prod-ready gates" table publishes against the
+# tools the script actually calls. The failure mode is not that the scan is missing -- it is that
+# the scan runs, finds no scanners installed, prints five reassuring lines and exits 0. That is a
+# fake green with a per-tool report attached, which reads stronger than no check at all.
+#
+# Measured in a throwaway git repo, never in this one: the answer here is contaminated by whichever
+# scanners this particular machine happens to have installed, so a run on the author's laptop and
+# a run in CI would be testing two different scripts.
+#
+# Lane 1 -- PATH=/usr/bin:/bin, so no scanner is reachable. Every tool must SKIP and the script
+# must exit 0. A missing scanner failing the run would make the overlay's gate red on every
+# machine that has not installed five binaries, which is how a gate gets switched off.
+# Lane 2 -- the same repo with a stub `gitleaks` that reports a finding and exits 1. The script
+# must exit 1 and name it. Lane 1 alone is satisfied by a script that can only ever skip, which
+# is precisely the shape lane 1 cannot distinguish from a working scan.
+# Lane 64b -- the half that is not executable here: the CI workflow's pins and the README table
+# that documents which tool runs where.
+c64_lbl="the security lane skips a missing scanner and fails on a finding"
+c64_sh="claude/security-scan.sh"
+c64_wf="claude/security.yml.tmpl"
+if [ ! -f "$c64_sh" ]; then
+  bad "$c64_lbl" "$c64_sh is missing, so overlay.sh ships a verify.sh template that calls a script nobody wrote"
+elif [ ! -f "$c64_wf" ]; then
+  bad "$c64_lbl" "$c64_wf is missing, so the CI half of the lane README publishes does not exist"
+else
+  c64_errs=""
+  c64_note=""
+
+  # The exec bit as GIT records it, not as this filesystem shows it. A 100644 payload script is
+  # runnable here (the author chmod'd it once) and unrunnable for everyone who clones, and the
+  # overlay's own chmod hides that from the only lane that would have caught it.
+  c64_mode=$(git ls-files -s "$c64_sh" 2>/dev/null | awk '{print $1}')
+  [ "$c64_mode" = "100755" ] \
+    || c64_errs="$c64_errs\n$c64_sh is ${c64_mode:-not tracked by git}, not mode 100755; a stranger's clone gets a file it cannot execute"
+
+  # Skip, not fail, on a host without shellcheck -- check 0 already decides whether this gate may
+  # run at all without it, and duplicating that judgement here would fail hosts check 0 passes.
+  if command -v shellcheck >/dev/null 2>&1; then
+    if ! c64_sc=$(shellcheck -S warning -f gcc "$c64_sh" 2>/dev/null); then
+      c64_errs="$c64_errs\nshellcheck -S warning on $c64_sh: $(printf '%s' "$c64_sc" | head -5 | tr '\n' ';')"
+    fi
+  else
+    c64_note=", shellcheck not on PATH"
+  fi
+
+  c64_tmp=$(mktemp -d "${TMPDIR:-/tmp}/vstack-c64.XXXXXX")
+  git -C "$c64_tmp" init -q >/dev/null 2>&1
+  cp "$c64_sh" "$c64_tmp/security-scan.sh"
+  chmod 755 "$c64_tmp/security-scan.sh"
+
+  # env -i: this shell's PATH carries whatever the developer has installed, and inheriting it is
+  # the difference between measuring the script and measuring the machine.
+  c64_out=$(cd "$c64_tmp" && env -i PATH=/usr/bin:/bin HOME="$c64_tmp" TMPDIR="$c64_tmp" \
+              bash ./security-scan.sh 2>&1); c64_rc=$?
+  c64_nskip=$(printf '%s\n' "$c64_out" | grep -c '^skip' || true)
+  [ "$c64_rc" -eq 0 ] \
+    || c64_errs="$c64_errs\n$c64_sh exited $c64_rc with no scanner on PATH; a tool that is not installed is a skip, and failing there switches the whole gate off for everyone who has not installed five binaries"
+  [ "${c64_nskip:-0}" -ge 4 ] \
+    || c64_errs="$c64_errs\n$c64_sh reported ${c64_nskip:-0} skip line(s) with no scanner on PATH; it declares five tools, and exit 0 over a report that named none of them is the fake green this check exists for"
+
+  # Lane 2. The stub is what makes lane 1 mean anything: without it, a script whose every branch
+  # is `skip` passes lane 1 perfectly.
+  c64_stub="$c64_tmp/stub"
+  mkdir -p "$c64_stub"
+  printf '#!/bin/sh\necho "leak: generic-api-key at config.yml:3"\nexit 1\n' > "$c64_stub/gitleaks"
+  chmod 755 "$c64_stub/gitleaks"
+  c64_out2=$(cd "$c64_tmp" && env -i PATH="$c64_stub:/usr/bin:/bin" HOME="$c64_tmp" TMPDIR="$c64_tmp" \
+               bash ./security-scan.sh 2>&1); c64_rc2=$?
+  rm -rf "$c64_tmp"
+  [ "$c64_rc2" -eq 1 ] \
+    || c64_errs="$c64_errs\n$c64_sh exited $c64_rc2 against a gitleaks that reported a finding and exited 1; a scanner whose findings do not reach the exit code is decoration"
+  printf '%s\n' "$c64_out2" | grep -qE '^FAIL +gitleaks' \
+    || c64_errs="$c64_errs\n$c64_sh did not print a FAIL line naming gitleaks against a scanner that found something: $(printf '%s' "$c64_out2" | tail -3 | tr '\n' ';')"
+
+  # --- 64b, in the same body: the CI half, which cannot be executed here.
+  #
+  # Every action pinned to a 40-hex commit with the human-readable tag beside it. A tag is a
+  # mutable pointer somebody else controls, and `uses: foo@v7` in a workflow with repo write
+  # gives that somebody a push into this repo's CI. The `# v` suffix is required too: a bare SHA
+  # with no tag comment is unreviewable and never gets bumped.
+  while IFS= read -r c64_u; do
+    [ -n "$c64_u" ] || continue
+    printf '%s' "$c64_u" | grep -qE '@[0-9a-f]{40} # v' \
+      || c64_errs="$c64_errs\n$c64_wf: $(printf '%s' "$c64_u" | sed 's/^[[:space:]]*//') is not pinned to a 40-hex commit with its tag beside it"
+  done <<EOF
+$(grep -E '^[[:space:]]*uses:' "$c64_wf" 2>/dev/null)
+EOF
+  grep -qE '^[[:space:]]*uses:' "$c64_wf" 2>/dev/null \
+    || c64_errs="$c64_errs\n$c64_wf declares no 'uses:' line at all, so the pinning rule above scanned nothing"
+
+  # README's "Prod-ready gates" table is the published contract; $c64_sh is the implementation.
+  # The Tool column is extracted rather than typed here, so deleting a row is as visible as
+  # deleting the tool. Which of those tools the LOCAL gate is expected to run is named, not
+  # inferred -- npm audit and nuclei are CI and post-deploy only, and inferring the list from
+  # what the script mentions would let the check read its answer off its own subject.
+  c64_local="gitleaks semgrep osv-scanner zizmor eslint"
+  c64_tools=$(awk '/^## Prod-ready gates/{s=1; next} s && /^## /{s=0} s && /^\|/{print}' README.md 2>/dev/null \
+              | sed -E 's/^\| *//; s/ *\|.*//')
+  for c64_t in $c64_local; do
+    grep -qxF "$c64_t" <<<"$c64_tools" \
+      || c64_errs="$c64_errs\nREADME's Prod-ready gates table no longer names '$c64_t' in its Tool column, so the published contract and $c64_sh have drifted apart"
+    grep -qF "$c64_t" "$c64_sh" \
+      || c64_errs="$c64_errs\n$c64_sh never mentions '$c64_t', which README's Prod-ready gates table says the local gate runs"
+  done
+
+  # A payload file the overlay does not copy ships to nobody. All three landed in this repo
+  # before overlay.sh knew about any of them.
+  for c64_p in claude/security-scan.sh claude/security.yml.tmpl claude/dependabot.yml.tmpl; do
+    grep -qF "$c64_p" overlay.sh 2>/dev/null \
+      || c64_errs="$c64_errs\noverlay.sh never names $c64_p, so it is payload this repository ships to itself"
+  done
+
+  if [ -z "$c64_errs" ]; then
+    ok "$c64_lbl (${c64_nskip} skips at exit 0, stub finding caught at exit 1, $(grep -cE '^[[:space:]]*uses:' "$c64_wf") actions pinned$c64_note)"
+  else
+    bad "$c64_lbl" "$(printf '%b' "$c64_errs")"
   fi
 fi
 

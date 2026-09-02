@@ -5,7 +5,7 @@ Two suites, with opposite constraints.
 `gate-falsifiability.sh` runs offline and CI runs it on every push. It proves
 `.claude/verify.sh` can actually fail. It is also the slowest thing in this repository: every row
 breaks one file, runs the WHOLE gate to see which check goes red, and restores, so the cost is
-O(rows x checks). At 108 falsifiability rows and a ~84s gate that is over two hours serially.
+O(rows x checks). At 110 falsifiability rows and a ~84s gate that is over two hours serially.
 Run `falsify-parallel.sh` instead, the same sweep across isolated clones: about 19 minutes on
 CI's seven runners, 48 minutes locally at 103 rows on an M-series Mac (measured 2026-09-01, seven
 shards contending for one machine's cores).
@@ -105,6 +105,18 @@ regenerate the same lists independently and diff them against what the file clai
 check-time oracle, not a source of truth `install.sh` consumes. If the installer ever reads this
 file, the question "does the inventory match what installs?" becomes unfalsifiable, because the
 two would no longer be independent derivations of the same fact.
+
+`tests/inventory-contract.sh --print-digest` is the only supported way to recompute
+`derived_at.payload_digest` by hand -- it prints the value `payload_digest_compute()` produces and
+nothing else, so checking a number against the file never means retyping the recipe.
+
+`tests/inventory-contract.sh --write` (alias `--repoint`) is the fix for the recurring failure
+this file goes stale with: a payload commit lands and `derived_at.head`/`derived_at.payload_digest`
+still name the commit before it. It refuses on a dirty payload tree (commit the payload first --
+the head must name a commit), otherwise sets `derived_at.head` to `git rev-parse HEAD` and
+`derived_at.payload_digest` to `payload_digest_compute()`, writes the file back with jq (same key
+order and indent already on disk), re-validates, and on a clean result prints the commit command to
+run. Idempotent: running it again on an already-repointed clean tree changes nothing.
 
 ## What this proves
 

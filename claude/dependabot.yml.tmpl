@@ -1,0 +1,43 @@
+# vstack overlay: seeded once into .github/dependabot.yml if absent.
+# The target repo owns this file after seeding -- vstack will not overwrite local edits.
+# Source: vstack claude/dependabot.yml.tmpl
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # cooldown: malicious versions are usually caught within days; a short wait costs little.
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # cooldown: malicious versions are usually caught within days; a short wait costs little.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Uncomment if the repo has a pyproject.toml / uv.lock (Python via uv).
+  # - package-ecosystem: "pip"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+
+  # Uncomment if the repo has a Cargo.toml (Rust).
+  # - package-ecosystem: "cargo"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"

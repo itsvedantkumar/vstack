@@ -125,8 +125,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.66.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.66.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.67.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.67.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -186,7 +186,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 64 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 65 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -244,6 +244,15 @@ normally, but hooks, the CLI wrappers, the shell lane and MCP servers only land 
 install. Take that lane if you want the Stop-hook gate, the destructive-command guard, or the
 CLI wrappers under `~/.config/agents/bin/`.
 
+**`vstack overlay .`** (a third lane — drops config into a target *repo*, not `~/.claude`; the
+only lane a cloud sandbox without your home directory can reach):
+
+| Source | Lands at | Condition |
+|---|---|---|
+| `claude/security-scan.sh` | `.claude/security-scan.sh` | always overwritten |
+| `claude/security.yml.tmpl` | `.github/workflows/security.yml` | seeded if absent |
+| `claude/dependabot.yml.tmpl` | `.github/dependabot.yml` | seeded if absent |
+
 ## Day to day
 
 | Command | What it does |
@@ -261,7 +270,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 64 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 65 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -270,13 +279,13 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 64 checks
+./.claude/verify.sh                  # 65 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 108 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 110 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.
@@ -351,6 +360,27 @@ Stated limits, none of which this fix closes:
   Closing that needs the check to run somewhere the agent cannot write — a different uid, a remote
   check, a human — which is outside a hook's reach. The gate is a guard against finishing on a red
   tree by accident, not against an adversary sharing your uid.
+
+## Prod-ready gates
+
+Mandatory for any repo that is public or serves prod traffic. `vstack overlay .` installs the
+local gate and CI; `/security` runs the post-deploy steps.
+
+| Tool | Local gate | CI | Post-deploy | Command |
+|---|---|---|---|---|
+| gitleaks | tracked files (+ `--staged` mode) | SHA-pinned action, `fetch-depth: 0` | history sweep | `gitleaks git --log-opts="--all" --no-banner --redact .` |
+| semgrep | `p/typescript` `p/nextjs` `p/owasp-top-ten` | `semgrep ci` | | `semgrep scan --config p/owasp-top-ten .` |
+| osv-scanner | `--lockfile` | `google/osv-scanner-action` | | `osv-scanner scan source --lockfile <lockfile>` |
+| zizmor | when `.github/workflows` exists | own job | | `zizmor --min-severity medium .github/workflows` |
+| eslint | when config exists | `ci.yml` lint step | | `eslint .` |
+| npm audit | | `--audit-level=high` when lockfile | | `npm audit --audit-level=high` |
+| nuclei | | | `-u <preview-url> -severity medium,high,critical` | `nuclei -u <url> -severity medium,high,critical -silent` |
+| OWASP ZAP baseline | | | docker | `docker run --rm -t zaproxy/zap-stable zap-baseline.py -t <url>` |
+| trivy | | | only if repo ships a container | `trivy fs --scanners vuln,secret,misconfig .` |
+
+Skipped on purpose: Snyk and SonarQube (commercial, redundant with the table above), husky and
+lefthook (vstack gates via the Claude Stop hook, not git hooks — see
+[What the hooks decide](#what-the-hooks-decide)).
 
 ## The team
 
