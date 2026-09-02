@@ -4528,6 +4528,41 @@ else
   bad "install trust covers what the gate executes" "$(printf '%b' "$c61_errs")"
 fi
 
+# --- 61b. a non-interactive install without opt-in leaves this repo untrusted -------------------
+# install.sh used to call `bin/vstack trust "$SRC" --yes` unconditionally (fixed alongside check
+# 61 above): bootstrap.sh's curl|bash one-liner drives install.sh with stdin as the pipe carrying
+# the script, so a stranger who never read a line of it still walked away with the Stop-hook gate
+# armed to execute .claude/verify.sh (which itself runs install.sh --dry-run and overlay.sh)
+# unattended. Every OTHER repo's gate stays off until someone runs `vstack trust` there and
+# answers its "have you read this, just now? [y/N]" prompt; a bare non-interactive install of
+# THIS repo must get the same refusal, not a free pass because it happens to be the repo that
+# ships the gate.
+#
+# PROVEN as a regression check, not a design opinion: run against `git show
+# origin/main:install.sh` (before this fix) with stdin redirected from /dev/null, the trust store
+# gets this repo's .claude/verify.sh entry anyway -- confirming the defect was real before it was
+# "fixed" by only editing prose. Run the same probe against the install.sh in this checkout and
+# the entry must be absent.
+c61b_errs=""
+if ! command -v git >/dev/null 2>&1; then
+  skip "non-interactive install without opt-in leaves the trust gate off" "git not installed"
+else
+  c61b_home=$(mktemp -d)
+  # No --trust, no VSTACK_TRUST, and stdin explicitly closed so this is deterministic regardless
+  # of whether verify.sh itself is being run at an interactive terminal or piped.
+  HOME="$c61b_home" VSTACK_DIR="$PWD" ./install.sh </dev/null >/dev/null 2>&1
+  c61b_ts="$c61b_home/.config/agents/verify-trust"
+  if [ -f "$c61b_ts" ] && grep -q "/\.claude/verify\.sh\$" "$c61b_ts"; then
+    c61b_errs="$c61b_errs\na non-interactive install with no opt-in armed the verify gate for this repo anyway"
+  fi
+  rm -rf "$c61b_home"
+  if [ -z "$c61b_errs" ]; then
+    ok "non-interactive install without opt-in leaves the trust gate off"
+  else
+    bad "non-interactive install without opt-in leaves the trust gate off" "$(printf '%b' "$c61b_errs")"
+  fi
+fi
+
 # --- 62. the pre-tag carve-out names one finding and does not leak into the tool ---------------
 # On 2026-09-01 the v1.61.0 tag was created and destroyed twice in under an hour. bin/doctor's
 # "declared release is fetchable" does a live ls-remote against origin -- the right question of
