@@ -10,6 +10,13 @@
 #
 # Not yet wired into .claude/verify.sh or CI (see tests/README.md). Run by hand:
 #   tests/inventory-contract.sh
+#
+# `--write` (alias `--repoint`) is the ONLY supported way to re-point derived_at.head and
+# derived_at.payload_digest at HEAD after a payload commit. It refuses on a dirty payload tree,
+# reuses payload_digest_compute() below rather than a second implementation, writes the file with
+# jq (stable key order, same 2-space indent already on disk), re-validates, and on a clean result
+# prints the commit command to run:
+#   tests/inventory-contract.sh --write
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
@@ -83,6 +90,43 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL  jq is required to validate $INV" 
 [ -f "$INV" ] || { echo "FAIL  $INV not found" >&2; exit 1; }
 jq empty "$INV" >/dev/null 2>&1 || { echo "FAIL  $INV does not parse as JSON" >&2; exit 1; }
 
+# --- --write / --repoint ---------------------------------------------------------------------
+# The two-step dance every stale-inventory failure below actually asks for: recompute
+# payload_digest with the one blessed implementation (payload_digest_compute(), never a hand-typed
+# recipe), set derived_at.head to the commit that recipe just ran against, write both fields back
+# with jq so key order and indent survive untouched, then re-run the validation this same script
+# does on every other invocation so `--write` cannot itself ship a stale file.
+#
+# Refuses on a dirty payload tree rather than repointing at a HEAD the digest was not actually
+# computed from: derived_at.head names the commit payload_digest describes, and a payload file
+# with uncommitted changes means HEAD is not that commit yet -- committing first is the only way
+# to make the claim true, not something this flag can paper over.
+WRITE_MODE=0
+if [ "${1:-}" = "--write" ] || [ "${1:-}" = "--repoint" ]; then
+  WRITE_MODE=1
+  # shellcheck disable=SC2086
+  dirty=$(git status --porcelain -- $PAYLOAD_PATHS)
+  if [ -n "$dirty" ]; then
+    echo "FAIL  inventory-contract --write: the payload has uncommitted changes:" >&2
+    printf '%s\n' "$dirty" >&2
+    echo "commit the payload first, the head must name a commit" >&2
+    exit 2
+  fi
+  write_head=$(git rev-parse HEAD)
+  write_digest=$(payload_digest_compute)
+  write_tmp=$(mktemp "${INV}.XXXXXX") || { echo "FAIL  inventory-contract --write: mktemp failed" >&2; exit 1; }
+  if ! jq --arg h "$write_head" --arg d "$write_digest" \
+        '.derived_at.head = $h | .derived_at.payload_digest = $d' \
+        "$INV" > "$write_tmp"; then
+    echo "FAIL  inventory-contract --write: jq failed to write $INV" >&2
+    rm -f "$write_tmp"
+    exit 1
+  fi
+  mv "$write_tmp" "$INV"
+  echo "inventory-contract --write: derived_at.head -> $write_head, derived_at.payload_digest -> $write_digest"
+  echo
+fi
+
 # --- contract_version: the hand-bumped SCHEMA version. An unknown value must fail loudly -- a
 # validator that silently accepts a schema it does not understand is worse than no validator,
 # because everything below reads fields whose meaning may have changed out from under it.
@@ -116,7 +160,7 @@ stated_digest=$(jq -r '.derived_at.payload_digest' "$INV")
 if [ "$computed_digest" = "$stated_digest" ]; then
   pass "payload_digest matches the tree ($computed_digest)"
 else
-  fail "payload_digest" "claude/inventory.json's derived_at.payload_digest is $stated_digest; the tree's is $computed_digest. The snapshot is stale."
+  fail "payload_digest" "claude/inventory.json's derived_at.payload_digest is $stated_digest; the tree's is $computed_digest. The snapshot is stale. run: tests/inventory-contract.sh --write"
 fi
 
 # The file no longer carries an executable recipe, so nothing here can be tricked into running
@@ -172,7 +216,7 @@ elif git merge-base --is-ancestor "$stated_head" HEAD 2>/dev/null; then
   # thing that is actually checkable, and which is false in exactly the case above.
   _hd_moved=$(git diff --name-only "$stated_head" HEAD -- $PAYLOAD_PATHS 2>/dev/null)
   if [ -n "$_hd_moved" ]; then
-    fail "derived_at.head" "derived_at.head is $(printf '%.12s' "$stated_head") and is an ancestor of HEAD, but payload has changed since it: $(printf '%s' "$_hd_moved" | tr '\n' ' ') -- so payload_digest was not computed from that commit, whatever this field says. Re-point head at the commit whose payload the digest describes"
+    fail "derived_at.head" "derived_at.head is $(printf '%.12s' "$stated_head") and is an ancestor of HEAD, but payload has changed since it: $(printf '%s' "$_hd_moved" | tr '\n' ' ') -- so payload_digest was not computed from that commit, whatever this field says. Re-point head at the commit whose payload the digest describes. run: tests/inventory-contract.sh --write"
   else
     pass "derived_at.head is an ancestor of HEAD with no payload change since ($(printf '%.12s' "$stated_head"), $(git rev-list --count "$stated_head..HEAD" 2>/dev/null) commit(s) ago)"
   fi
@@ -308,8 +352,15 @@ if [ "$FAIL" -eq 0 ]; then
   else
     echo "inventory-contract: $RAN checks, all clean"
   fi
+  if [ "$WRITE_MODE" -eq 1 ]; then
+    echo
+    echo "commit: git commit -am \"Re-point inventory at $(git rev-parse --short HEAD)\""
+  fi
   exit 0
 else
   echo "inventory-contract: $RAN checks, $SKIPPED skipped, FAILURES ABOVE"
+  if [ "$WRITE_MODE" -eq 1 ]; then
+    echo "--write updated derived_at.head/payload_digest but validation still fails on the above -- not printing a commit command over a file that is not clean" >&2
+  fi
   exit 1
 fi
