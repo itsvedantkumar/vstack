@@ -10,6 +10,8 @@ independent reports converged on them.
 
 ## 1. Retire the breadth trigger for fan-out; gate delegation on coupling
 
+Status: applied in 1.68.0, see `plan-breadth-retirement.md`. Measurement pending.
+
 Today: `skill-mandate.sh` forces a fan-out once a turn touches two directories or two extensions.
 Our own measurement: the two runs where it fired cost 3.6 to 4.4 times bare Claude and up to six
 times the wall time, on a three-file fix, for no correctness gain.

@@ -38,9 +38,9 @@ here. A paragraph the server injects, cached in `~/.claude.json` under experimen
 
 FAN OUT THROUGH `swarm`: call the skill before dispatching, every time, rather than hand rolling
 what you recall of it. All Agent calls go in ONE message; that is what makes them concurrent. One
-at a time is a serial loop at the wall clock of doing it yourself. Take the widest batch the work
-allows; fewer than three when it splits further is a decision, so say why. The Stop hook counts
-batches, not dispatches.
+at a time is a serial loop at the wall clock of doing it yourself. Reads, searches and reviews fan
+out as wide as they split; edits stay serial on the lead, one writer per file; a write that fans
+out is a bug, not a batch.
 
 ISOLATE THE WRITERS: whole files per agent, never sections of one; concurrent edits to a file
 clobber silently and the loser gets no diagnostic. Where the split cannot follow files, give each

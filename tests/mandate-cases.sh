@@ -12,8 +12,8 @@
 #
 # Provenance: a-q are check 27's original 17 cases, renumbered nowhere (same letters). 9b/10/11/12
 # are the container-matrix.sh cases (its 8, 9, 9c) with three collapsed into existing check-27
-# equivalents: container "8" ~= "i" (breadth, zero dispatch, both eligible-by-3-dirs/2+-ext), "9"
-# ~= "o" (breadth-eligible + swarm + a 2-agent batch + attribution, everything silent at once),
+# equivalents: container "8" ~= "i" (three dirs, zero dispatch), "9"
+# ~= "o" (three dirs + swarm + a 2-agent batch + attribution, everything silent at once),
 # "9c" ~= "q" (a dispatch with the swarm skill never called). Container's "9b" (breadth-eligible,
 # swarm called, but only ONE serial dispatch -- the exact shape that shipped broken in v1.57.0),
 # "10" (purely conversational, no tool_use at all), "11" (edit + completion claim, no verification)
@@ -73,10 +73,12 @@ _MC_ON2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Ta
 _MC_F1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"fix/test1.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test2.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test3.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test4.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"fix/test5.sh","content":""}}]}}'
 _MC_F2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"a.sh","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"lib/b.json","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"src/c.py","content":""}}]}}'
 _MC_F3='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":".editorconfig","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"home/.gitignore","content":""}},{"type":"tool_use","name":"Write","input":{"file_path":"proj/.npmrc","content":""}}]}}'
-# 9b: breadth-eligible (3 dirs, 3 extensions) + swarm called + exactly ONE serial Task dispatch,
-# with a call sign in the closing text so only the breadth mandate is left able to fire -- the
-# shape that shipped broken pre-1.57.0 (task_count alone said "delegated", fanout_batches says
-# "never together").
+# 9b: 3 dirs / 3 extensions + swarm called + exactly ONE serial Task dispatch, with a call sign
+# in the closing text. This blocked until 1.68.0, when the delegation breadth mandate was retired
+# on measured cost (tests/evals/showcase/RESULTS.md, the routing-cost table); it is kept as the
+# pin that a wide write-set with every dispatch rule satisfied now finishes in silence. Every
+# other delegation mandate is deliberately satisfied here, so a block can only be breadth coming
+# back. i and p are the same pin at two other shapes (zero dispatches; two serial ones).
 _MC_9B_A='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"brs/a/x.sh","content":""}}]}}'
 _MC_9B_B='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"brs/b/y.json","content":""}}]}}'
 _MC_9B_C='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"brs/c/z.yaml","content":""}}]}}'
@@ -149,16 +151,16 @@ mandate_case_expect() {
     f) printf '%s\n' 'SILENT' ;;
     g) printf '%s\n' 'SILENT' ;;
     h) printf '%s\n' 'SILENT' ;;
-    i) printf '%s\n' 'BLOCK:multi-directory work -- dispatch 3 agents in ONE message' ;;
+    i) printf '%s\n' 'SILENT' ;;
     j) printf '%s\n' 'SILENT' ;;
     k) printf '%s\n' 'BLOCK:agent naming' ;;
     l) printf '%s\n' 'SILENT' ;;
     m) printf '%s\n' 'SILENT' ;;
     n) printf '%s\n' 'SILENT' ;;
     o) printf '%s\n' 'SILENT' ;;
-    p) printf '%s\n' 'BLOCK:2 subagent call(s), but never 2+ in the same message' ;;
+    p) printf '%s\n' 'SILENT' ;;
     q) printf '%s\n' 'BLOCK:the swarm skill' ;;
-    9b) printf '%s\n' 'BLOCK:1 subagent call(s), but never 2+ in the same message' ;;
+    9b) printf '%s\n' 'SILENT' ;;
     9c) printf '%s\n' 'BLOCK:serial dispatch tail' ;;
     9d) printf '%s\n' 'SILENT' ;;
     9e) printf '%s\n' 'BLOCK:serial dispatch tail' ;;
@@ -190,17 +192,17 @@ mandate_case_desc() {
     e) printf '%s\n' 'blocked while stop_hook_active was already true' ;;
     f) printf '%s\n' 'ignored VSTACK_NO_MANDATE=1' ;;
     g) printf '%s\n' 'did not latch open after 2 unslop strikes in one session' ;;
-    h) printf '%s\n' 'five fixtures in one dir falsely blocked multi-dir mandate' ;;
-    i) printf '%s\n' 'three dirs with two-plus extensions did not block multi-dir mandate' ;;
-    j) printf '%s\n' 'three dotfiles across three dirs falsely blocked multi-dir mandate' ;;
+    h) printf '%s\n' 'five fixtures in one dir blocked (nothing may block on the write-set spread since 1.68.0)' ;;
+    i) printf '%s\n' 'three dirs with two-plus extensions blocked -- the retired multi-dir mandate is back' ;;
+    j) printf '%s\n' 'three dotfiles across three dirs blocked (no extensions, and no breadth rule left anyway)' ;;
     k) printf '%s\n' 'Task call with no call sign did not block on the naming rule' ;;
     l) printf '%s\n' 'Task call with call sign (BETH) blocked anyway' ;;
     m) printf '%s\n' 'zero Task calls falsely blocked on naming rule' ;;
     n) printf '%s\n' 'VSTACK_NO_MANDATE=1 did not disable agent naming block' ;;
-    o) printf '%s\n' 'two dispatches in ONE message did not satisfy the breadth mandate' ;;
-    p) printf '%s\n' 'two dispatches in SEPARATE messages satisfied breadth anyway -- a serial loop cleared the fan-out mandate' ;;
+    o) printf '%s\n' 'a swarm-routed, named, 2-in-one-message batch over a three-dir spread blocked anyway' ;;
+    p) printf '%s\n' 'two dispatches in SEPARATE messages blocked -- below the serial-tail threshold of 3, and breadth is retired' ;;
     q) printf '%s\n' 'dispatched without calling the swarm skill and it did not block' ;;
-    9b) printf '%s\n' 'breadth-eligible + swarm called + ONE serial dispatch cleared the fan-out mandate anyway' ;;
+    9b) printf '%s\n' 'a three-dir spread + swarm called + ONE named dispatch blocked -- the retired breadth mandate is back' ;;
     9c) printf '%s\n' 'three serial dispatches with no batch did not trip the serial-tail mandate' ;;
     9d) printf '%s\n' 'two serial dispatches (below the tail-3 threshold) tripped the serial-tail mandate' ;;
     9e) printf '%s\n' 'an early parallel batch amnestied three later serial dispatches' ;;

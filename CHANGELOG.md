@@ -4,6 +4,32 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.68.0 — 2026-09-03
+
+- **The delegation breadth mandate is retired.** Since 1.66.0 the Stop hook forced a fan-out once
+  a turn had written into two directories with two extensions. Measured against bare Claude on a
+  three-file fix (`tests/evals/showcase/RESULTS.md`, the routing-cost table), the runs where it
+  fired cost 3.6 to 4.4 times as much and took up to six times as long, for no correctness gain;
+  the runs where it stayed silent matched bare cost. `skill-mandate.sh` keeps counting
+  directories and extensions into its log row and no longer blocks on them. The rule that
+  replaces it is the one the `swarm` skill already states and the per-prompt digest and
+  `CLAUDE.md` now say: reads, searches and reviews fan out as wide as they split; edits stay
+  serial on the lead, one writer per file. The naming, swarm-first and serial-tail mandates are
+  unchanged; each fires only after a dispatch happened. Falsifiability row 27b goes with the
+  condition it mutated; `tests/test-breadth-mandate.sh` and `tests/mandate-cases.sh` now pin
+  silence where they pinned a block.
+- **Orchestration and planning pin to Fable 5.1.** The `planner` agent's model is `fable`, and
+  `CLAUDE.md` says the lead does phase sequencing, dispatch and synthesis on it; judgment agents
+  stay on Sonnet, mechanical ones on Haiku.
+- **A held-out benchmark against gstack and bare Claude, and its null.** `tests/evals/showcase/`
+  runs bare, vstack and gstack arms scoped by project config under `claude -p`, scores each run
+  against checks the agent never sees, and adds a bare GLM 5.3 Flash arm through OpenCode. Fifty-
+  one Opus and Haiku runs: correctness parity, zero false completions in every arm, cost within
+  noise unless vstack delegated. Seventy-five GLM runs: two of forty three-file runs said `DONE`
+  on a red check, the first non-zero count. The README carries the table and the null; the
+  literature behind the next changes sits in `docs/research/harness-effect/` with an adversarial
+  second reading beside each file.
+
 ## 1.67.0 — 2026-09-02
 
 - **A security toolchain ships with the overlay.** `claude/security-scan.sh` runs gitleaks,

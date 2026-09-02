@@ -77,7 +77,7 @@ run_ctx_bytes_(){  # <session_id> <prompt> — return byte count of raw stdout
 # When fixed to read the max of real counter files, a seeded delegate-breadth file must render
 # the MANDATE line showing the escalation counters. Direction: positive, guard against silent
 # zero-read on wrong filenames.
-printf '2\n' > "$WORK/vstack-mandate-scm1.delegate-breadth"
+printf '2\n' > "$WORK/vstack-mandate-scm1.delegate-naming"
 CTX=$(run_ctx_ scm1 "hi")
 if printf '%s' "$CTX" | grep -qF 'MANDATE skill=0/2 delegate=2/2'; then
   ok "CASE 1: seeded delegate-family counter renders the MANDATE line"
@@ -117,17 +117,18 @@ fi
 # Defect: the digest today lacks a FANOUT line re-pinning the fan-out rule on every prompt.
 # Parallel-batch rate in real sessions is 4.8%, a signal that the rule is drifting. When fixed,
 # the digest must emit a FANOUT line describing the fan-out contract, a DELEGATE line naming the
-# mechanical/judgment split, AND a line about batching in ONE message. Direction: positive,
-# guard the digest's completeness and the rule's re-pinning every turn.
+# mechanical/judgment split, AND a line naming writes as serial (the breadth mandate that used
+# to force a fan-out on any two-directory write is retired; reads/searches still fan out).
+# Direction: positive, guard the digest's completeness and the rule's re-pinning every turn.
 CTX=$(run_ctx_ scm4 "hi")
 has_fanout=$(printf '%s' "$CTX" | grep -qF 'FANOUT:' && echo 1 || echo 0)
 has_delegate=$(printf '%s' "$CTX" | grep -qF 'DELEGATE: mechanical' && echo 1 || echo 0)
-has_batch=$(printf '%s' "$CTX" | grep -qF 'ALL Agent calls in ONE message' && echo 1 || echo 0)
+has_batch=$(printf '%s' "$CTX" | grep -qF 'writes serial' && echo 1 || echo 0)
 if [ "$has_fanout" = 1 ] && [ "$has_delegate" = 1 ] && [ "$has_batch" = 1 ]; then
   ok "CASE 4: the digest pins the fan-out rule every prompt"
 else
   bad "CASE 4: the digest pins the fan-out rule every prompt" \
-      "expected FANOUT (got $has_fanout), DELEGATE (got $has_delegate), batch rule (got $has_batch) in digest: [$CTX]"
+      "expected FANOUT (got $has_fanout), DELEGATE (got $has_delegate), writes-serial rule (got $has_batch) in digest: [$CTX]"
 fi
 
 # --- CASE 5: unconditional digest stays inside the verify.sh check-18 budget ------------------
@@ -154,7 +155,7 @@ fi
 # Direction: positive boundary, guard against budget overflow under worst-case load.
 # NOTE: measure bytes on FIRST invocation when grill fires; grill marker is cached so second
 # call would see it as already-marked. Fresh session id, one invocation only.
-printf '2\n' > "$WORK/vstack-mandate-scm6.delegate-breadth"
+printf '2\n' > "$WORK/vstack-mandate-scm6.delegate-naming"
 printf '2\n' > "$WORK/vstack-mandate-scm6.unslop"
 _p=""
 _i=0

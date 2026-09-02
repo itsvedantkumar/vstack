@@ -285,7 +285,7 @@ git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiabi
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 110 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 109 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.

@@ -163,7 +163,7 @@ printf '%s' "$ckpt" > "$ckpt_file" 2>/dev/null
 #   skill family (session-persistent, no window):
 #     $cnt_file.unslop  $cnt_file.typescript  $cnt_file.proveitworks  $cnt_file.register
 #   delegation family (windowed, cnt+timestamp pair per mandate):
-#     $cnt_file.delegate-breadth(-ts)  $cnt_file.delegate-naming(-ts)  $cnt_file.delegate-swarm(-ts)
+#     $cnt_file.delegate-naming(-ts)  $cnt_file.delegate-swarm(-ts)  $cnt_file.delegate-serial(-ts)
 # $cnt_file.delegate-scan (the re-scan cooldown) and $cnt_file.lock stay singular and family-wide
 # -- neither one is a strike counter, both exist purely to bound how often the expensive
 # transcript scan itself runs, which is a family-wide cost regardless of which member mandate
@@ -207,7 +207,6 @@ _read_wcnt "$cnt_file.unslop"       "$cnt_file.unslop-ts"       "$now_d" "$SKILL
 _read_wcnt "$cnt_file.typescript"   "$cnt_file.typescript-ts"   "$now_d" "$SKILL_RESET_SECS"; cnt_typescript=$_rc
 _read_wcnt "$cnt_file.proveitworks" "$cnt_file.proveitworks-ts" "$now_d" "$SKILL_RESET_SECS"; cnt_proveitworks=$_rc
 _read_wcnt "$cnt_file.register"     "$cnt_file.register-ts"     "$now_d" "$SKILL_RESET_SECS"; cnt_register=$_rc
-_read_wcnt "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_breadth=$_rc
 _read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
 _read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
 _read_wcnt "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_serial=$_rc
@@ -216,7 +215,6 @@ eval_unslop=1;       [ "$cnt_unslop" -ge 2 ]       && eval_unslop=0
 eval_typescript=1;   [ "$cnt_typescript" -ge 2 ]   && eval_typescript=0
 eval_proveitworks=1; [ "$cnt_proveitworks" -ge 2 ] && eval_proveitworks=0
 eval_register=1;     [ "$cnt_register" -ge 2 ]     && eval_register=0
-eval_breadth=1;      [ "$cnt_breadth" -ge 2 ]      && eval_breadth=0
 eval_naming=1;       [ "$cnt_naming" -ge 2 ]       && eval_naming=0
 eval_swarm=1;        [ "$cnt_swarm" -ge 2 ]        && eval_swarm=0
 eval_serial=1;       [ "$cnt_serial" -ge 2 ]       && eval_serial=0
@@ -247,7 +245,7 @@ fi
 skill_eval=1
 [ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && [ "$eval_register" = 0 ] && skill_eval=0
 deleg_eval=1
-[ "$eval_breadth" = 0 ] && [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && [ "$eval_serial" = 0 ] && deleg_eval=0
+[ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && [ "$eval_serial" = 0 ] && deleg_eval=0
 
 # Combined latch: skip the transcript-driven evaluation entirely only when NEITHER family can
 # still act on it. skill_eval=1 alone is enough to keep paying for the scan every Stop, unchanged
@@ -282,7 +280,6 @@ hit_unslop=0
 hit_typescript=0
 hit_proveitworks=0
 hit_register=0
-hit_breadth=0
 hit_naming=0
 hit_swarm=0
 hit_serial=0
@@ -555,19 +552,16 @@ if [ "$eval_typescript" = 1 ] && [ -n "$ts" ] && ! fired typescript-best-practic
   hit_typescript=1
 fi
 
-# Multi-directory, multi-type work without delegation. Detects work that spans parts by
-# measuring breadth: distinct parent directories AND distinct file extensions. Both must be
-# present to trigger, avoiding false blocks on mechanical repetition.
+# Breadth of the write-set: distinct parent directories AND distinct file extensions. These two
+# counts gated the delegation breadth mandate until 1.68.0 retired it (see the retirement comment
+# further down, next to the serial-tail mandate); they are computed here now purely as fields of
+# the delegation-drift log row below, which check 40 requires to carry numeric dir_count and
+# ext_count, and which the deferred read_breadth analysis will read. Nothing branches on them.
 #
 # Why not count files? Because 5 test fixtures (fixtures/case1.json through case5.json) is
-# 1 directory and 1 extension — mechanical repetition, not multi-part work. But a real change
-# (hook.sh, test/hook.test.sh, doc/HOOK.md, manifest.json) spans 4 directories and 3 types —
-# that is work with parts, and is what subagents exist for.
-#
-# Edge cases that stay silent by design:
-# - 6 .md files across 6 directories: 6 dirs, 1 extension → no block (single type is focused).
-# - 10 .js files in src/: 1 directory, 1 extension → no block (single directory is cohesive).
-# - 3 dotfiles (.editorconfig, .gitignore, .npmrc) across 3 dirs: 3 dirs, 0 extensions → no block.
+# 1 directory and 1 extension — mechanical repetition; a real change (hook.sh, test/hook.test.sh,
+# doc/HOOK.md, manifest.json) spans 4 directories and 3 types. The counts are only comparable
+# across sessions if they keep measuring the same thing, so the shape below is unchanged.
 #
 # Dotfile handling: a file starting with . and containing no further . has no extension
 # (it is pure name, not name + type). .eslintrc.json yields json; .eslintrc yields nothing.
@@ -733,47 +727,22 @@ extensions=$( printf '%s\n' "$paths" | sed -E '
   /^$/d
 ' | sort -u )
 ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | grep -c . )
-# Satisfied by $fanout_batches, not by $task_count: task_count only asks "did any Task/Agent
-# calls happen anywhere in the transcript", which a single delegation, or N delegations spread
-# across N separate serial turns, both answer yes to -- neither is the parallel batch the
-# mandate exists to require. $fanout_batches (computed above, next to task_count) counts how
-# many times 2+ Task/Agent calls landed in the SAME assistant message, which is the only shape
-# Claude Code actually executes concurrently. Eligibility (dir_count/ext_count) is unchanged --
-# only what counts as having answered it changed.
-# Threshold lowered from dir>=3 to dir>=2 in 1.66.0. Measured: a two-directory, two-extension
-# edit is a cross-cutting change that fans out cleanly, and it was never gated before, first
-# offence or repeat. The AND with ext>=2 stays -- a three-file edit inside one file type is
-# often legitimately serial, and gating it would be the nag that gets a guard switched off.
-if [ "$eval_breadth" = 1 ] && [ "$dir_count" -ge 2 ] && [ "$ext_count" -ge 2 ] && [ "$fanout_batches" -eq 0 ]; then
-  # Names the actual parts (bounded to 3, same head-N precedent the prose/typescript mandates
-  # above already use for file paths) instead of only a count -- "touched 5 directories" tells
-  # the model a number it already knew; "touched claude/hooks, tests, docs, ..." tells it which
-  # subagent to dispatch at which part.
-  dirs_named=$(printf '%s\n' "$parent_dirs" | head -3 | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
-  # Distinguishes the two ways fanout_batches can be 0, because the fix is different: nothing
-  # dispatched at all vs. real delegation that never happened together. Without this split, a
-  # session that dispatched 5 subagents one after another reads the same "zero subagents" message
-  # a session that dispatched none did, which is not what happened and does not tell the model
-  # what to change (it already knows it delegated).
-  if [ "$task_count" -eq 0 ]; then
-    fanout_state="zero subagents"
-  else
-    fanout_state="$task_count subagent call(s), but never 2+ in the same message -- $task_count separate serial delegation(s), which Claude Code runs one after another, not concurrently"
-  fi
-  # Leads with the imperative and the number, not the diagnosis: "touched N directories" tells
-  # the model a fact it already knows, "dispatch 3 agents in ONE message" is the action the
-  # next turn can take. Agent count = dir_count capped at 5 (above that, aggregation cost
-  # eats the parallelism win; same reasoning as the swarm skill's own N guidance).
-  breadth_agents=$dir_count
-  [ "$breadth_agents" -gt 5 ] && breadth_agents=5
-  unmet="$unmet
-  multi-directory work -- dispatch $breadth_agents agents in ONE message via Skill swarm, one per area ($dirs_named$([ "$dir_count" -gt 3 ] && echo ', ...')), each on a disjoint file set. This Stop touched $dir_count directories with $ext_count file types, $fanout_state. One Task/Agent call followed by another later does not satisfy this."
-  hit_breadth=1
-fi
+# The delegation breadth mandate that used to sit here -- dir_count >= 2 && ext_count >= 2 &&
+# fanout_batches == 0, blocking with "multi-directory work -- dispatch N agents in ONE message
+# via Skill swarm" -- was RETIRED in 1.68.0 on measured cost. tests/evals/showcase/RESULTS.md's
+# routing-cost table: it fired on 2 of 5 headless runs of the same three-file fix, and those runs
+# cost 3.6x to 4.4x bare Claude (up to 6x wall time) for no correctness gain, while the 3 silent
+# runs matched bare cost. A Stop hook sees the write-set only after the fact, so this could only
+# ever block a finished turn to demand the same work be redone through subagents, which is the
+# defect being retired rather than a threshold to re-tune. The rule still ships as routing
+# guidance, not as a block: claude/skills/swarm/SKILL.md states it -- reads fan out, writes stay
+# serial on the lead. dir_count and ext_count above are deliberately still computed: they are
+# fields of the delegation-drift row below (check 40 requires numeric counts there) and the
+# deferred read_breadth analysis reads them.
 
-# Serial dispatch tail: the shape the breadth gate above structurally cannot see. Its
-# fanout_batches==0 condition is evaluated over the whole transcript, so ONE early batch
-# satisfies it for every remaining Stop of the session while the model degrades into a serial
+# Serial dispatch tail: the shape the retired breadth gate structurally could not see. Its
+# fanout_batches==0 condition was evaluated over the whole transcript, so ONE early batch
+# satisfied it for every remaining Stop of the session while the model degraded into a serial
 # loop -- the amnesty measured in 3ce9f899 and 8959d943 (see the fanout_calc comment). This
 # mandate reads $serial_tail instead: dispatches after the last real batch, or all of them
 # when none ever ran. Threshold 3, replayed against real sessions before choosing it: tails
@@ -1040,12 +1009,6 @@ if [ "$hit_register" = 1 ]; then
 elif [ "$eval_register" = 1 ]; then
   rm -f "$cnt_file.register" "$cnt_file.register-ts"
 fi
-if [ "$hit_breadth" = 1 ]; then
-  echo $((cnt_breadth + 1)) > "$cnt_file.delegate-breadth"
-  date +%s > "$cnt_file.delegate-breadth-ts" 2>/dev/null
-elif [ "$eval_breadth" = 1 ]; then
-  rm -f "$cnt_file.delegate-breadth" "$cnt_file.delegate-breadth-ts"
-fi
 if [ "$hit_naming" = 1 ]; then
   echo $((cnt_naming + 1)) > "$cnt_file.delegate-naming"
   date +%s > "$cnt_file.delegate-naming-ts" 2>/dev/null
@@ -1090,9 +1053,6 @@ if [ "$hit_proveitworks" = 1 ]; then
 fi
 if [ "$hit_register" = 1 ]; then
   reason="$reason$(_strike_line register "$((cnt_register + 1))"     "this session -- after 2, register alone stops being enforced for the rest of the session (self-police from here).")"
-fi
-if [ "$hit_breadth" = 1 ]; then
-  reason="$reason$(_strike_line "multi-directory work" "$((cnt_breadth + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"
 fi
 if [ "$hit_naming" = 1 ]; then
   reason="$reason$(_strike_line "agent naming" "$((cnt_naming + 1))"     "in this ${DELEGATE_RESET_SECS}s window -- after 2, this mandate alone stops being enforced until the window elapses with no further unmet Stop for it.")"

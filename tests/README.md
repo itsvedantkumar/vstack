@@ -5,7 +5,7 @@ Two suites, with opposite constraints.
 `gate-falsifiability.sh` runs offline and CI runs it on every push. It proves
 `.claude/verify.sh` can actually fail. It is also the slowest thing in this repository: every row
 breaks one file, runs the WHOLE gate to see which check goes red, and restores, so the cost is
-O(rows x checks). At 110 falsifiability rows and a ~84s gate that is over two hours serially.
+O(rows x checks). At 109 falsifiability rows and a ~84s gate that is over two hours serially.
 Run `falsify-parallel.sh` instead, the same sweep across isolated clones: about 19 minutes on
 CI's seven runners, 48 minutes locally at 103 rows on an M-series Mac (measured 2026-09-01, seven
 shards contending for one machine's cores).
@@ -147,22 +147,24 @@ measures the second one, and that cannot run in CI here by deliberate decision: 
 
 ## test-breadth-mandate.sh
 
-A standalone reproduction script for the delegation mandate in `skill-mandate.sh`: it feeds four
+A standalone reproduction script for the delegation mandates in `skill-mandate.sh`: it feeds
 hand-built transcripts straight into the hook and asserts on what the hook decided, with no gate
-scaffolding in between. Run it by hand when touching the breadth-counting logic and you want to
-see the hook's raw decision for a case, not just pass/fail:
+scaffolding in between. Run it by hand when touching the directory and extension counting and you
+want to see the hook's raw decision for a case, not just pass/fail:
 
 ```bash
 tests/test-breadth-mandate.sh
 ```
 
-The four cases it drives are one directory of same-extension fixtures, a real multi-directory
-multi-extension change, the same change after an attributed `Task` call, and a wide
-same-extension sweep. Check 27 of `.claude/verify.sh` (`skill mandate decides correctly`) covers
-overlapping ground in cases h/i/j and is what the gate enforces on every run, but the two sets are
-not the same. Check 27 has no delegation-suppression case at all, and its case `i` accepts any
-block rather than requiring the block to name the breadth mandate, so an unrelated mandate firing
-would satisfy it. This script asserts the specific `multi-directory work --` line.
+Until 1.67.0 the hook blocked a Stop whose turn had written into two directories with two
+extensions and dispatched nothing, and this script asserted the specific `multi-directory work --`
+line. 1.68.0 retired that block on measured cost (`tests/evals/showcase/RESULTS.md`, the
+routing-cost table: 3.6 to 4.4 times bare Claude when it fired, for no correctness gain). The hook
+still computes `dir_count` and `ext_count` into its log row, check 40 still requires them there,
+and this script now asserts the opposite of what it used to: the breadth cases stay silent, while
+the naming, swarm-first and serial-tail cases still block for their own reasons. Check 27 of
+`.claude/verify.sh` (`skill mandate decides correctly`) covers overlapping ground in cases h/i/j
+and is what the gate enforces on every run.
 
 This script is the harness that found the two shapes check 27 was missing before it had cases for
 them: five fixture writes to one directory that the first version of the mandate counted as five

@@ -15,6 +15,9 @@ three arms, four fixtures, the agent never sees the check.
   time. Neither bare Claude nor gstack spawned a subagent in any run.
 - Fixed overhead: vstack installs 28 skills and wires six hook events; gstack installs 54 skills
   and wires one; bare Claude none.
+- Bare GLM 5.3 Flash through OpenCode, same fixtures: 73 of 75 green; 2 of 40 three-file runs
+  said `DONE` over a red held-out check, the first non-zero false-completion count. Too few for
+  a rate; enough to place the phenomenon on the cheap-model side.
 
 ## Review benchmark
 
@@ -27,6 +30,11 @@ under any arm: a neutral prompt about a file reaches neither harness's front doo
 `../../../docs/research/do-harnesses-help.md` and the memory it cites. Three measured gaps between
 what the configuration says and what sessions did, fixed 2026-08-19: the goal gate was not armed,
 skills did not fire on situation, fan-out happened in under half of the eligible turns.
+
+## What changed because of them
+
+- 1.68.0 retires the breadth mandate (plan: `plan-breadth-retirement.md`). Acceptance is a
+  re-run of the routing-cost table with vstack at cost parity and no forced spawns.
 
 ## What the numbers say together
 

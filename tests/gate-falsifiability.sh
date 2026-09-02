@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27b 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -334,7 +334,6 @@ files_for(){ case "$1" in
   25)  printf 'claude/hooks/failure-diagnose.sh' ;;
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
-  27b) printf 'claude/hooks/skill-mandate.sh' ;;
   27c) printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
   29)  printf 'bin/cloudflare-mcp' ;;
@@ -443,7 +442,6 @@ label_for(){ case "$1" in
   25)  printf 'failure tail redacts credentials' ;;
   26)  printf 'documented platforms match CI' ;;
   27)  printf 'skill mandate decides correctly' ;;
-  27b) printf 'skill mandate decides correctly' ;;
   27c) printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
@@ -1061,13 +1059,13 @@ exit 0
       # this line is the decision itself, not bookkeeping beside it.
       sed -i.t 's/^\[ -n "\$unmet" \] || exit 0$/true || exit 0/' claude/hooks/skill-mandate.sh \
         && rm -f claude/hooks/skill-mandate.sh.t ;;
-  27b) # Put the breadth mandate back on task_count. This is the defect 1.57.0 fixed, restored
-      # exactly: task_count asks only "was anything dispatched", so ONE agent sent on its own
-      # satisfies a rule whose entire subject is doing the work concurrently. Both of check 27's
-      # new fixtures have task_count=2; only fanout_batches tells them apart, so this mutation is
-      # invisible to every assertion except the one that reads the reason text.
-      sed -i.t 's/\[ "\$fanout_batches" -eq 0 \]/[ "$task_count" -lt 2 ]/' \
-        claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.t ;;
+  # Row 27b lived here: it flipped the delegation breadth mandate's fanout_batches==0 condition
+  # back onto task_count. 1.68.0 retired that mandate on measured cost (see the retirement comment
+  # in claude/hooks/skill-mandate.sh, and tests/evals/showcase/RESULTS.md's routing-cost table),
+  # so the sed anchor it mutated no longer exists in the file -- and a row whose anchor is gone
+  # mutates nothing, then reports "did NOT fail when broken", which reads exactly like a check
+  # that cannot be broken. Deleted with the rule, id retired rather than reused. 27 and 27c still
+  # cover check 27 (unconditional block; unreachable swarm mandate).
   27c) # Make the swarm mandate unreachable without deleting it, so the code still reads as though
       # dispatch is routed through the skill. A deleted block is conspicuous in review; a
       # threshold nobody can reach is not, and it is the likelier way this rule dies.

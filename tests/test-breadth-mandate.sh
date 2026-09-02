@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# test-breadth-mandate.sh — the hand-runnable reproduction of two mandates inside
-# claude/hooks/skill-mandate.sh: the breadth mandate (multi-directory, multi-type work with
-# zero subagents, PROOFs 1-6 and 10-12) and the prove-it-works mandate (a completion claim
-# closing a turn that edited a file and produced zero verifying evidence, PROOFs 7-9). The name
-# is now narrower than the file's scope; it stayed rather than churn every call site over a
-# rename. PROOFs 10-12 cover the dispatch-tool-name defect (task_count only ever recognized
+# test-breadth-mandate.sh — the hand-runnable reproduction of several mandates inside
+# claude/hooks/skill-mandate.sh. Its original subject, the breadth mandate (multi-directory,
+# multi-type work with zero subagents, PROOFs 1-6 and 10-12), was RETIRED in 1.68.0 on measured
+# cost (tests/evals/showcase/RESULTS.md, the routing-cost table); those PROOFs are kept, flipped,
+# as the pins that it stays retired -- a "multi-directory work --" line reappearing in any of
+# them means the block came back. The prove-it-works mandate (a completion claim closing a turn
+# that edited a file and produced zero verifying evidence) is PROOFs 7-9. The file name is now
+# wider than its subject; it stayed rather than churn every call site over a rename. PROOFs 10-12 cover the dispatch-tool-name defect (task_count only ever recognized
 # "Task", never the "Agent" name the Claude Agent SDK build actually uses) and the Bash
 # write-extraction over-match defect ($VAR-containing paths and heredoc-body content read as
 # real writes) found by dogfooding this hook against a real 15MB transcript.
@@ -18,9 +20,9 @@
 #
 # The hook can report several unmet mandates in one .reason string (one line each, prefixed
 # "<mandate name> -- "). A fixture that writes a .md file alongside a multi-directory sweep
-# will legitimately trip both `unslop` and `multi-directory work` at once. This suite's
-# subject is the breadth and prove-it-works mandates specifically, so every assertion below
-# matches the literal "multi-directory work --" or "prove-it-works --" line inside .reason
+# will legitimately trip `unslop` while the assertion is about another mandate entirely. Every
+# assertion below therefore matches (or requires the absence of) one literal mandate line inside
+# .reason -- "multi-directory work --", "swarm --", "unslop --", "prove-it-works --"
 # rather than treating any block as proof -- a block from an unrelated mandate in the same
 # fixture is not evidence about the one under test. Where that confound is unavoidable
 # (PROOF 2's doc/HOOK.md also triggers `unslop`, PROOF 4's six .md files do too) the comment
@@ -42,21 +44,21 @@ skip(){ printf 'skip  %s (%s)\n' "$1" "$2"; SKIPPED=$((SKIPPED+1)); }
 
 if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 1: one dir, one extension, zero Task -> breadth mandate silent" "jq not installed"
-  skip "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate blocks" "jq not installed"
-  skip "PROOF 3: same spread as PROOF 2, attributed Task call -> breadth mandate silent" "jq not installed"
+  skip "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate silent (retired 1.68.0), unslop still blocks" "jq not installed"
+  skip "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate silent (retired), swarm still blocks" "jq not installed"
   skip "PROOF 4: six dirs, one extension, zero Task -> breadth mandate silent" "jq not installed"
-  skip "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks" "jq not installed"
+  skip "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate silent (retired 1.68.0)" "jq not installed"
   skip "PROOF 6: Bash-only reads (grep/cat/git add/find/ls) across five dirs -> breadth mandate silent" "jq not installed"
   skip "PROOF 7: edit + closing completion claim, zero evidence -> prove-it-works blocks" "jq not installed"
   skip "PROOF 8: edit + real Bash command + closing completion claim -> prove-it-works silent" "jq not installed"
   skip "PROOF 9: closing completion claim with no edit in the turn -> prove-it-works silent" "jq not installed"
-  skip "PROOF 10: three-dir/three-ext spread dispatched via the Agent tool -> breadth mandate silent" "jq not installed"
-  skip "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks" "jq not installed"
+  skip "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate silent (retired), swarm still blocks" "jq not installed"
+  skip "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate silent (retired 1.68.0)" "jq not installed"
   skip "PROOF 12: Bash write target containing an unexpanded \$VAR -> not counted as a write" "jq not installed"
   skip "PROOF 13: Task dispatch with is_error:true tool_result -> logged row's task_fail_count is 1" "jq not installed"
   skip "PROOF 14: Task dispatch with a clean (non-error) tool_result -> logged row's task_fail_count is 0" "jq not installed"
   skip "PROOF 15: three-dir/three-ext spread, two dispatches in ONE message -> breadth mandate silent (real fan-out)" "jq not installed"
-  skip "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)" "jq not installed"
+  skip "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate silent (retired), swarm still blocks" "jq not installed"
   skip "PROOF 17: Task dispatch with no swarm call -> swarm mandate blocks" "jq not installed"
   skip "PROOF 18: Task dispatch preceded by a swarm Skill call -> swarm mandate silent" "jq not installed"
   skip "PROOF 19 (setup 1/3): lone prose write trips unslop" "jq not installed"
@@ -67,7 +69,7 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" "jq not installed"
   skip "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" "jq not installed"
   skip "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" "jq not installed"
-  skip "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)" "jq not installed"
+  skip "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate silent (retired 1.68.0)" "jq not installed"
   skip "PROOF 28: one dir, two extensions, zero Task -> breadth mandate silent (dir floor holds)" "jq not installed"
   printf 'checks: %d declared, %d ran, %d skipped\n' "$TOTAL" "$RAN" "$SKIPPED"
   [ "$((RAN + SKIPPED))" -eq "$TOTAL" ] || { printf 'FAIL  check accounting\n      %d declared check(s) reported nothing\n' "$((TOTAL - RAN - SKIPPED))"; FAIL=1; }
@@ -148,38 +150,36 @@ else
 fi
 
 # --- PROOF 2: 4 files, 3 directories, 3 extensions, 0 Task calls -------------------------------
-# Positive direction. hook.sh + manifest.json share the repo root (1 dir), test/hook.test.sh
-# and doc/HOOK.md add 2 more (3 dirs total); extensions sh/json/md give 3 types. Both
-# thresholds clear, zero delegation -> the breadth mandate must name itself in .reason.
-# Confound, expected and ignored here: doc/HOOK.md also trips `unslop` (prose written,
-# unslop never ran) in the same .reason string. That is a fact about a different mandate;
-# this proof only asserts on the "multi-directory work --" line.
+# The shape the breadth mandate was built for, kept as the proof it no longer blocks: hook.sh +
+# manifest.json share the repo root (1 dir), test/hook.test.sh and doc/HOOK.md add 2 more (3 dirs
+# total); extensions sh/json/md give 3 types. Both retired thresholds clear, zero delegation.
+# Since 1.68.0 no "multi-directory work --" line may appear for it. The Stop still blocks, for a
+# different and untouched reason -- doc/HOOK.md is prose written without unslop -- which is what
+# makes this stronger than asserting empty stdout: the hook is still awake, it just has nothing
+# to say about breadth.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}}]}}'
 run_hook_ proof2
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate blocks"
+if ! names_breadth_ && [ "$HOOK_DECISION" = "block" ] && names_unslop_; then
+  ok "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate silent (retired 1.68.0), unslop still blocks"
 else
-  bad "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate blocks" \
-      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 2: three dirs, three extensions, zero Task -> breadth mandate silent (retired 1.68.0), unslop still blocks" \
+      "expected no 'multi-directory work --' line and a block naming 'unslop --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 3: same file spread as PROOF 2, plus ONE attributed Task call (serial, not fanned) ---
-# Negative direction for fan-out, positive direction for the bug this round fixes. Before the
-# fan-out contract, the original fixture here asserted that ANY task_count>=1 silenced the
-# breadth line -- which was the defect: one Task dispatch is not "work split into parts", it is
-# a single delegation, and the mandate must still block on it. The Task call carries a roster
-# call sign in assistant text (BIRDPERSON) specifically so *agent naming* is satisfied and
-# cannot confound this proof -- a block here can only be about breadth. doc/HOOK.md still trips
-# `unslop`, same as PROOF 2, ignored the same way. What must hold now: a single Task/Agent call,
-# however attributed, is a fanout_batches of 0 (one dispatch is not a batch of 2+), so the
-# breadth line still names itself.
+# The fan-out contract used to turn on this fixture: one Task dispatch is not a batch of 2+, so
+# the breadth line fired on it. With the mandate retired in 1.68.0 the fan-out shape of a single
+# dispatch is no longer a blocking fact at all, and the breadth line must be absent. The Task
+# call carries a roster call sign (BIRDPERSON) so agent naming stays satisfied, and the swarm
+# skill is never called -- so the swarm mandate is what blocks here, unchanged by the retirement.
+# This is the pair to PROOF 15: the two ends of the old fan-out condition now agree.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Task","input":{"skill":"code-reviewer"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
 run_hook_ proof3
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate still blocks (not a fan-out)"
+if ! names_breadth_ && [ "$HOOK_DECISION" = "block" ] && names_swarm_; then
+  ok "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate silent (retired), swarm still blocks"
 else
-  bad "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate still blocks (not a fan-out)" \
-      "expected decision=block naming 'multi-directory work --' (a single dispatch is not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 3: same spread as PROOF 2, ONE attributed Task call -> breadth mandate silent (retired), swarm still blocks" \
+      "expected no 'multi-directory work --' line and a block naming 'swarm --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 4: 6 writes, 6 directories, 1 extension (.md), 0 Task calls -------------------------
@@ -203,16 +203,17 @@ fi
 # `sed -i ""` (BSD empty-backup form) on lib/b.py, and a `python3 - <<PY` heredoc whose body calls
 # `open("config/c.json", "w")` -- three tool_use blocks, all name="Bash", zero name="Write" or
 # "Edit" anywhere in the transcript. 3 directories (hooks, lib, config), 3 extensions (sh, py,
-# json), 0 Task calls: both thresholds clear on Bash-extracted paths alone. No .md or .ts path is
-# produced by any rule, so there is no confound here -- an empty stdout would mean the extraction
-# found nothing, not that a different mandate ate the block.
+# json), 0 Task calls: both retired thresholds clear on Bash-extracted paths alone. Since 1.68.0
+# nothing blocks on that, and no .md or .ts path is produced by any rule, so the hook must be
+# completely silent -- the strict bar PROOF 1 and PROOF 6 hold. The Bash write extraction itself
+# is still proved: PROOF 13/14's logged rows carry the counts it feeds.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"sed -i.bak -e s/x/y/ hooks/a.sh"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"sed -i \"\" -e s/a/b/ lib/b.py"}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"python3 - <<PY\nwith open(\"config/c.json\", \"w\") as f:\n    f.write(\"{}\")\nPY"}}]}}'
 run_hook_ proof5
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks"
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate silent (retired 1.68.0)"
 else
-  bad "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate blocks" \
-      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 5: Bash-only sed/heredoc writes, three dirs, three extensions -> breadth mandate silent (retired 1.68.0)" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 6: 5 Bash-only reads (grep/cat/git add/find/ls) across five directories --------------
@@ -283,16 +284,17 @@ fi
 # Same fan-out semantics as PROOF 3, over the "Agent" dispatch-tool name (the Claude Agent SDK
 # build's name for the same tool, see the "Dispatch-tool name" comment in the hook): the
 # task_count OR-condition ("Task" or "Agent") is still exercised here, but fanout_batches is
-# what decides the outcome now -- ONE Agent call, however attributed, is not a batch of 2+, so
-# this must still block, not silence, the breadth line. Same 3-dir/3-ext spread, same roster
-# call sign (BIRDPERSON) so agent naming cannot confound the read.
+# what used to decide the outcome -- ONE Agent call is not a batch of 2+. With the breadth
+# mandate retired in 1.68.0 that no longer blocks anything, so the breadth line must be absent
+# while the swarm mandate (dispatch with no swarm skill call) still blocks. Same 3-dir/3-ext
+# spread, same roster call sign (BIRDPERSON) so agent naming cannot confound the read.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Agent","input":{"subagent_type":"code-reviewer","prompt":"review","description":"review"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}'
 run_hook_ proof10
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate still blocks (not a fan-out)"
+if ! names_breadth_ && [ "$HOOK_DECISION" = "block" ] && names_swarm_; then
+  ok "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate silent (retired), swarm still blocks"
 else
-  bad "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate still blocks (not a fan-out)" \
-      "expected decision=block naming 'multi-directory work --' (a single dispatch is not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 10: three-dir/three-ext spread, ONE Agent call -> breadth mandate silent (retired), swarm still blocks" \
+      "expected no 'multi-directory work --' line and a block naming 'swarm --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -------------------------
@@ -302,14 +304,16 @@ fi
 # transcript. A fix that special-cased one name and silently dropped the other (or that always
 # evaluated the OR as true) would pass PROOF 5 or PROOF 10 alone; this is the case where both
 # names are genuinely absent and task_count must land on exactly 0, not on a stale true/false
-# from whichever name was checked last.
+# from whichever name was checked last. Since 1.68.0 retired the breadth mandate, "task_count is
+# 0" no longer produces a block on its own: the assertion is complete silence, and a
+# "multi-directory work --" line reappearing here would mean the retirement was reverted.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Bash","input":{"command":"sed -i.bak -e s/x/y/ hooks/a.sh"}},{"type":"tool_use","id":"2","name":"Bash","input":{"command":"sed -i \"\" -e s/a/b/ lib/b.py"}},{"type":"tool_use","id":"3","name":"Bash","input":{"command":"python3 - <<PY\nwith open(\"config/c.json\", \"w\") as f:\n    f.write(\"{}\")\nPY"}}]}}'
 run_hook_ proof11
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks"
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate silent (retired 1.68.0)"
 else
-  bad "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate blocks" \
-      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 11: Bash-only breadth writes, zero Task AND zero Agent calls -> breadth mandate silent (retired 1.68.0)" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 12: a Bash write target containing an unexpanded $VAR is not counted ------------------
@@ -396,17 +400,19 @@ fi
 # set, produces for two genuinely sequential turns) instead of one. task_count is 2 either way,
 # identical to PROOF 15's total -- the only difference between "satisfied" and "unmet" here is
 # whether those 2 dispatches ever shared a message, not how many there were. Confirmed against
-# the pre-fix hook (git HEAD's committed version, before this round's changes): with the old
-# `task_count -eq 0` condition, task_count=2 made this fixture read as satisfied (silent) exactly
-# like PROOF 15, unable to tell a real batch from two serial ones. The roster call sign sits in
-# the first message so agent naming cannot confound the read.
+# the pre-fix hook: with the old `task_count -eq 0` condition, task_count=2 made this fixture read
+# as satisfied exactly like PROOF 15. 1.68.0 retired the breadth mandate outright, so serial-vs-
+# batched writes are no longer a block: the breadth line must be absent here and in PROOF 15
+# alike. What still blocks is the swarm mandate (two dispatches, swarm skill never called); the
+# serial-tail mandate does not, a tail of 2 being below its threshold of 3 (PROOF 23). The roster
+# call sign sits in the first message so agent naming cannot confound the read.
 say_ $'{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"hook.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"test/hook.test.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"3","name":"Write","input":{"file_path":"doc/HOOK.md","content":"# Hook"}},{"type":"tool_use","id":"4","name":"Write","input":{"file_path":"manifest.json","content":"{}"}},{"type":"tool_use","id":"5","name":"Task","input":{"skill":"code-reviewer"}},{"type":"text","text":"Dispatching BIRDPERSON B-1 to review."}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"6","name":"Agent","input":{"subagent_type":"qa","prompt":"verify","description":"verify"}}]}}'
 run_hook_ proof16
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)"
+if ! names_breadth_ && [ "$HOOK_DECISION" = "block" ] && names_swarm_; then
+  ok "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate silent (retired), swarm still blocks"
 else
-  bad "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate still blocks (serial, not fan-out)" \
-      "expected decision=block naming 'multi-directory work --' (2 serial dispatches are not a fan-out), got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 16: three-dir/three-ext spread, two dispatches in SEPARATE messages -> breadth mandate silent (retired), swarm still blocks" \
+      "expected no 'multi-directory work --' line and a block naming 'swarm --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 17: one Task dispatch, swarm skill never called -> swarm mandate blocks ---------------
@@ -561,17 +567,18 @@ else
 fi
 
 # --- PROOF 27: 2 files, 2 directories, 2 extensions, 0 Task calls -----------------------------
-# Positive direction for the 1.66.0 threshold. src/a.sh and lib/b.py span 2 directories and 2
-# extensions -- below the old dir>=3 floor, so this exact shape was NEVER gated before and is the
-# common cross-cutting edit the lowered threshold now catches. No .md/.ts and no Task calls, so
-# nothing else can confound the read; the breadth mandate must name itself.
+# The 1.66.0 threshold (dir>=2 && ext>=2), retired with the mandate in 1.68.0. src/a.sh and
+# lib/b.py are the common cross-cutting edit that lowering the floor started blocking, and the
+# measured cost of blocking it -- RESULTS.md's routing-cost table, 3.6x to 4.4x bare on the runs
+# that tripped -- is why the whole mandate went. No .md/.ts and no Task calls, so nothing else
+# can confound the read: this fixture must now produce no output at all.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"Write","input":{"file_path":"src/a.sh","content":"#!/bin/bash"}},{"type":"tool_use","id":"2","name":"Write","input":{"file_path":"lib/b.py","content":"x=1"}}]}}'
 run_hook_ proof27
-if [ "$HOOK_DECISION" = "block" ] && names_breadth_; then
-  ok "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)"
+if [ -z "$HOOK_OUT" ]; then
+  ok "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate silent (retired 1.68.0)"
 else
-  bad "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate blocks (1.66.0 threshold)" \
-      "expected decision=block naming 'multi-directory work --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate silent (retired 1.68.0)" \
+      "expected empty stdout, got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
 # --- PROOF 28: 2 files, 1 directory, 2 extensions, 0 Task calls --------------------------------

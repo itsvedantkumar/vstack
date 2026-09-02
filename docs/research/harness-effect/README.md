@@ -22,8 +22,8 @@ customer has been served and the measurements are preregistered.
 | file | topic | drafted | status |
 |---|---|---|---|
 | [`literature/scaffold-ablation.md`](literature/scaffold-ablation.md) | scaffold versus model on SWE-bench | GLM 5.3 Flash | 15 verified, 0 misread |
-| [`literature/false-completion.md`](literature/false-completion.md) | reward hacking, overclaimed completion | GLM 5.3 Flash | unverified |
-| [`literature/instruction-files.md`](literature/instruction-files.md) | long instruction files, context rot | GLM 5.3 Flash | unverified |
+| [`literature/false-completion.md`](literature/false-completion.md) | reward hacking, overclaimed completion | GLM 5.3 Flash | 10 verified, 4 misread |
+| [`literature/instruction-files.md`](literature/instruction-files.md) | long instruction files, context rot | GLM 5.3 Flash | 13 verified, 2 misread |
 | [`literature/multi-agent-overhead.md`](literature/multi-agent-overhead.md) | when delegation pays | GLM 5.3 Flash | 16 verified, 0 misread |
 | [`literature/model-routing.md`](literature/model-routing.md) | cascades and routers | GLM 5.3 Flash | 13 verified, 0 misread |
 | [`literature/self-verification.md`](literature/self-verification.md) | limits of self-repair | GLM 5.3 Flash | 14 verified, 1 misread |
@@ -37,7 +37,7 @@ entry. The counts above are the second reader's verdicts, run 2026-09-03 by a se
 session per file with an adversarial brief: re-fetch every source, mark VERIFIED, MISREAD or
 UNREACHABLE. A misread is an overstatement or a wrong attribution, not a missing source; every
 misread so far is listed with its correction at the foot of the matching verification file.
-Across the eight checked files: 125 entries verified, 4 misread, 0 unreachable. Nothing in
+Across all ten files: 148 entries verified, 10 misread, 0 unreachable. Nothing in
 `literature/` is quoted in the README or the paper until its file has a verification beside it.
 
 ## Earlier work this folder builds on

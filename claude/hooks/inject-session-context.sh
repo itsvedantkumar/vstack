@@ -168,7 +168,7 @@ GRILL: run the grill-me skill when no more specific skill matches.'
       [ "$_v" -gt "$_mcnt" ] && _mcnt=$_v
     done
     _mdcnt=0
-    for _sfx in delegate-breadth delegate-naming delegate-swarm delegate-serial; do
+    for _sfx in delegate-naming delegate-swarm delegate-serial; do
       _v=$(cat "$_mcnt_file.$_sfx" 2>/dev/null || echo 0)
       case "$_v" in ''|*[!0-9]*) _v=0 ;; esac
       [ "$_v" -gt "$_mdcnt" ] && _mdcnt=$_v
@@ -180,7 +180,7 @@ MANDATE skill=$_mcnt/2 delegate=$_mdcnt/2: dispatch + name a call sign now."
   fi
   emit "$event" 'TOKENS: grep/ranges, not whole files; summarize, never dump.
 DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation -- call the Skill tool.
-FANOUT: work that splits -> Skill swarm first, ALL Agent calls in ONE message.'"$grill$mandate"
+FANOUT: reads/searches split -> Skill swarm, ONE message; writes serial, one writer/file.'"$grill$mandate"
   exit 0
 fi
 

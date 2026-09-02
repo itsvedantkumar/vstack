@@ -3,7 +3,9 @@
 
 Does the rate at which breadth-eligible work actually gets delegated fall off across a
 session's own lifetime? "Breadth-eligible" is not this script's own idea of what warranted
-delegation -- it is lifted verbatim from claude/hooks/skill-mandate.sh's breadth mandate:
+delegation -- it was lifted verbatim from claude/hooks/skill-mandate.sh's breadth mandate,
+retired in 1.68.0 (the hook still logs the counts and no longer blocks on them), so from that
+version this is a historical eligibility definition, kept so the series stays comparable:
 dir_count>=3 and ext_count>=2 is the exact condition that mandate uses to decide whether to
 block Stop for "multi-directory work ... zero subagents". Reusing it here means this script
 cannot be accused of reverse-engineering a threshold from the answer it wanted -- the Stop hook
