@@ -4,6 +4,16 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.64.0 — 2026-09-02
+
+- **format.sh no longer mistakes a prettier devDependency for a prettier config.** The grep
+  for `"prettier":` matched the version pin in dependencies/devDependencies, won the
+  package.json slot ahead of a sibling .prettierrc, and cosmiconfig silently fell back to
+  built-in defaults — files reformatted to the wrong style. The hook now JSON-parses
+  package.json for a genuine top-level key, falling through to .prettierrc when node is
+  absent or the file does not parse. Repro: `tests/repro/formatter-config-devdep.sh`.
+  (PR #7)
+
 ## 1.63.0 — 2026-09-01
 
 Three branches merged in queue order: auto-enforcement, skill-autofire, register-mandate.
