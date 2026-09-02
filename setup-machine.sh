@@ -5,13 +5,18 @@
 #
 #   ./setup-machine.sh                 core + claude
 #   ./setup-machine.sh --with-deploy   also vercel and wrangler
-#   ./setup-machine.sh --with-security also trivy, gitleaks, nmap, nuclei
+#   ./setup-machine.sh --with-security also trivy, nmap, nuclei
 #   ./setup-machine.sh --with-plugins  also frontend-design, typescript-lsp (below)
 #   ./setup-machine.sh --check         report what is present, install nothing
 #   ./setup-machine.sh --dry-run       print what would be installed
 #
 # What each tier is for:
-#   core      git, jq, ripgrep, fd, gh, node, bun, uv   — the agent tooling and this installer
+#   core      git, jq, ripgrep, fd, gh, node, bun, uv,
+#             gitleaks, semgrep, osv-scanner, zizmor    — the agent tooling and this installer,
+#                                                          plus the /security scanners: cheap,
+#                                                          single-binary, and needed by every
+#                                                          repo this script sets up, not just
+#                                                          ones that opt into --with-security
 #   bundled   npm, npx, pnpm, yarn, python3              — verified, not installed: they come
 #                                                          with node or the Xcode tools
 #   claude    the Claude Code CLI itself
@@ -22,7 +27,9 @@
 #                                                          installing it by default made a
 #                                                          personal toolchain look like a
 #                                                          requirement of the product.
-#   security  trivy, gitleaks, nmap, nuclei             — the /security command
+#   security  trivy, nmap, nuclei                       — heavier / less universal /security
+#                                                          scanners: nmap and nuclei assume a
+#                                                          live target, trivy assumes a container
 #   plugins   frontend-design, typescript-lsp — opt-in. Neither is vstack's code; both come
 #                                                          from anthropics/claude-plugins-official
 #                                                          and update on their own schedule. A
@@ -216,12 +223,16 @@ note ""
 note "== core"
 apt_update_guard
 
-ensure git      git         git
-ensure jq       jq          jq
-ensure rg       ripgrep     ripgrep  rg
-ensure fd       fd          fd-find  fd
-ensure gh       gh          gh
-ensure node     node        nodejs   node
+ensure git         git         git
+ensure jq          jq          jq
+ensure rg          ripgrep     ripgrep  rg
+ensure fd          fd          fd-find  fd
+ensure gh          gh          gh
+ensure node        node        nodejs   node
+ensure gitleaks    gitleaks
+ensure semgrep     semgrep
+ensure osv-scanner osv-scanner
+ensure zizmor      zizmor
 ensure_remote bun "https://bun.sh/install.sh"
 ensure_remote uv  "https://astral.sh/uv/install.sh"
 
@@ -357,7 +368,6 @@ if [ "$WITH_SECURITY" = 1 ]; then
   note ""
   note "== security"
   ensure trivy    trivy
-  ensure gitleaks gitleaks
   ensure nmap     nmap
   ensure nuclei   nuclei
   note "   OWASP ZAP is not installed here: it is a large Java app. Get it from zaproxy.org."

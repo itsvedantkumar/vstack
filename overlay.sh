@@ -115,6 +115,12 @@ fi
 echo "wrote   .claude/hooks/policy.md"
 cp "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh" && chmod 755 "$DEST/.claude/statusline.sh"
 echo "wrote   .claude/statusline.sh"
+# Overwritten every time, unlike the two CI templates below: this is vstack's own script, called
+# by vstack's own verify.sh template, and a stale copy of it in a target repo is a scanner lane
+# that silently runs last release's rules. Nothing in a target repo is expected to edit it --
+# that is what .gitleaks.toml and the workflow file are for.
+cp "$SRC/claude/security-scan.sh" "$DEST/.claude/security-scan.sh" && chmod 755 "$DEST/.claude/security-scan.sh"
+echo "wrote   .claude/security-scan.sh"
 if command -v jq >/dev/null; then
   tmp=$(mktemp)
   jq '.statusLine = {type:"command", command:"\"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\"", padding:0, refreshInterval:3}' \
@@ -140,11 +146,44 @@ echo "wrote   .claude/{hooks,agents,commands,skills}"
 # repo's real gate matters far more than this placeholder.
 if [ -f "$DEST/.claude/verify.sh" ]; then
   echo "kept    .claude/verify.sh (already exists)"
+  # A repo that already has a real gate keeps it -- and then has .claude/security-scan.sh sitting
+  # next to a gate that never calls it, which is indistinguishable from not shipping the scanner
+  # at all. Overwriting someone's gate to wire it in costs more than it buys, so say the one line
+  # they need and let them place it. Only the template (claude/verify.sh.tmpl) calls it already.
+  if ! grep -q security-scan.sh "$DEST/.claude/verify.sh"; then
+    echo "hint    .claude/verify.sh does not call .claude/security-scan.sh — add: bash .claude/security-scan.sh || FAIL=1"
+  fi
 else
   cp "$SRC/claude/verify.sh.tmpl" "$DEST/.claude/verify.sh"
   chmod 755 "$DEST/.claude/verify.sh"
   echo "wrote   .claude/verify.sh (template — write real checks, then 'vstack trust')"
 fi
+
+# The CI half of the same lane. The local scan above catches a secret before it is committed; only
+# a workflow catches one pushed from a machine that never ran the overlay, and only dependabot
+# tracks the vulnerability that lands in a dependency next week.
+#
+# Seeded once and never overwritten: a repo's own security workflow and update policy outrank a
+# template. "kept" alone could not tell a deliberate local edit from a copy that had drifted
+# behind the template nobody re-read, so it says which -- and names the file to diff against,
+# because a report that a file differs without saying from what is not actionable.
+seed_tmpl(){ # <src path relative to vstack> <dest path relative to the target repo>
+  _st_src="$SRC/$1"; _st_dst="$DEST/$2"
+  [ -f "$_st_src" ] || { echo "error: missing $_st_src" >&2; return 1; }
+  mkdir -p "$(dirname "$_st_dst")"
+  if [ -f "$_st_dst" ]; then
+    if cmp -s "$_st_src" "$_st_dst"; then
+      echo "kept    $2 (matches template)"
+    else
+      echo "kept    $2 (differs from template — diff it against $_st_src)"
+    fi
+  else
+    cp "$_st_src" "$_st_dst"
+    echo "wrote   $2 (template — tune it for this repo)"
+  fi
+}
+seed_tmpl claude/security.yml.tmpl .github/workflows/security.yml
+seed_tmpl claude/dependabot.yml.tmpl .github/dependabot.yml
 
 # Conductor: give the repo a verify button and, for cloud workspaces, a way to pull vstack
 # into the sandbox. Never overwrite an existing file — a repo's own setup script matters more

@@ -40,6 +40,16 @@ if [ -f Cargo.toml ] && command -v cargo >/dev/null; then
   out=$(cargo test --quiet 2>&1) && ok "cargo test" || bad "cargo test" "$(printf '%s' "$out" | tail -20)"
 fi
 
+# --- 2. security scan --------------------------------------------------------------------------
+# Secrets, static analysis, and known-vulnerability checks. Lives in its own script so it can be
+# run standalone (`bash .claude/security-scan.sh`) outside the Stop-hook gate too.
+if [ -f .claude/security-scan.sh ]; then
+  ran=1
+  out=$(bash .claude/security-scan.sh 2>&1) && ok "security-scan" || bad "security-scan" "$(printf '%s' "$out" | tail -20)"
+else
+  skip "security-scan" ".claude/security-scan.sh absent — run: vstack overlay ."
+fi
+
 if [ "$ran" = 0 ]; then
   skip "project checks" "nothing detected — replace this file with checks for what this repo does"
 fi
