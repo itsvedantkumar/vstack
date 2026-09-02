@@ -41,12 +41,26 @@
 # provide.
 #
 # Usage: tests/container-matrix.sh [image ...]     (default: the three below)
-#   VSTACK_REF=v1.38.0   the tag/branch installed from https://github.com/itsvedantkumar/vstack
-#   DOCKER_CONFIG         passed through untouched; set it yourself if your docker needs it
+#   VSTACK_REF             REQUIRED, no default. The tag/branch/commit installed from
+#                           https://github.com/itsvedantkumar/vstack. This harness clones from
+#                           published GitHub inside the container -- it NEVER mounts this checkout
+#                           and can never test local or unpushed work. A hardcoded fallback here
+#                           used to silently test v1.38.0 (~26 releases stale by the time it was
+#                           caught) whenever a run forgot to set this, burning hours on misleading
+#                           FAILs during the v1.62.0 release. Unset or empty now refuses outright.
+#   DOCKER_CONFIG          passed through untouched; set it yourself if your docker needs it
 set -uo pipefail
 IMAGES=("$@")
 [ "${#IMAGES[@]}" -eq 0 ] && IMAGES=(debian:stable-slim alpine:latest ubuntu:latest)
-REF="${VSTACK_REF:-v1.38.0}"
+if [ -z "${VSTACK_REF:-}" ]; then
+  echo "container-matrix: VSTACK_REF is unset -- refusing to run" >&2
+  echo "this harness clones vstack from published GitHub, never from this checkout, so it can" >&2
+  echo "never test local or unpushed work -- there is no safe default to fall back to. Set" >&2
+  echo "VSTACK_REF to the tag/branch/commit you want installed inside the containers, e.g.:" >&2
+  echo "  VSTACK_REF=v1.64.0 tests/container-matrix.sh" >&2
+  exit 2
+fi
+REF="$VSTACK_REF"
 
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/vstack-container-matrix.XXXXXX")
 trap 'rm -rf "$ROOT"' EXIT
@@ -104,7 +118,11 @@ cat > "$ROOT/assertions.sh" <<'ASSERT_EOF'
 # Runs inside a container. Clones vstack from published GitHub at $VSTACK_REF, installs it, and
 # exercises the assertions below. Prints RESULT lines the host parses.
 set -uo pipefail
-REF="${VSTACK_REF:-v1.38.0}"
+# No fallback here either: the host script (container-matrix.sh) refuses before ever generating
+# this file's VSTACK_REF if it was unset, so this always receives a real value via `docker exec
+# -e VSTACK_REF=...`. `:?` makes that contract explicit instead of quietly re-introducing a stale
+# default if this script is ever invoked standalone.
+REF="${VSTACK_REF:?VSTACK_REF must be set (should always be passed in by container-matrix.sh)}"
 LABEL="${IMAGE_LABEL:-unknown}"
 PASS=0; FAIL=0; SKIP=0
 res(){ # <status> <name> <detail>
@@ -226,6 +244,18 @@ acct=$(printf '%s\n' "$out" | grep -E '^checks: ' | tail -1)
 tail_word=$(printf '%s\n' "$out" | tail -1)
 skipped=$(printf '%s' "$acct" | grep -oE '[0-9]+ skipped' | grep -oE '^[0-9]+')
 skip_reasons=$(printf '%s\n' "$out" | grep '^skip ' | tr '\n' ';')
+# The first `FAIL  <name>` line verify.sh's own bad() printed, plus its first detail line (bad()
+# always prints exactly name-line then detail-line -- see .claude/verify.sh), flattened to one
+# line and truncated to ~200 chars. Without this the RESULT line collapsed to counts + skip
+# reasons only, and the actual check that failed never left the container -- diagnosing it took a
+# manual `docker run` during the v1.62.0 release. Built with awk, not `grep -A`, since -A support
+# is not guaranteed on every image's grep (alpine's busybox grep in particular).
+first_fail=$(printf '%s\n' "$out" | awk '
+  /^FAIL  / && !found { name=$0; found=1; next }
+  found && !gotdetail { detail=$0; gotdetail=1; exit }
+  END { if (found) { line=name; if (gotdetail) line = line " / " detail; print line } }
+')
+first_fail=$(printf '%s' "$first_fail" | cut -c1-200)
 if [ "$tail_word" = "VERIFIED" ] && [ "${skipped:-1}" = 0 ]; then
   res PASS "3-verify-gate" "$acct / $tail_word"
 else
@@ -244,9 +274,9 @@ else
   if [ "$tail_word" = "VERIFIED" ] && [ "${n_skip:-0}" -gt 0 ] && [ "${n_skip:-0}" = "${n_cred:-0}" ]; then
     res SKIP "3-verify-gate" "UNMEASURABLE WITHOUT CREDENTIALS (all $n_skip skip(s) accounted for): $acct / $tail_word; skip reasons: $skip_reasons"
   elif [ -n "$unexplained" ]; then
-    res FAIL "3-verify-gate" "$acct / $tail_word: $n_cred of $n_skip skip(s) are credential-related; these are NOT and are therefore unmeasured for a reason nobody has stated: $unexplained"
+    res FAIL "3-verify-gate" "$acct / $tail_word: $n_cred of $n_skip skip(s) are credential-related; these are NOT and are therefore unmeasured for a reason nobody has stated: $unexplained${first_fail:+; first FAIL: $first_fail}"
   else
-    res FAIL "3-verify-gate" "$acct / $tail_word (exit=$vrc); skip reasons: $skip_reasons"
+    res FAIL "3-verify-gate" "$acct / $tail_word (exit=$vrc); skip reasons: $skip_reasons${first_fail:+; first FAIL: $first_fail}"
   fi
 fi
 
