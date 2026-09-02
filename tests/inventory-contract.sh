@@ -117,7 +117,7 @@ needs_repoint(){
   # --write must not force a rewrite it cannot justify either.
   git cat-file -e "$h^{commit}" 2>/dev/null || return 1
   git merge-base --is-ancestor "$h" HEAD 2>/dev/null || return 0
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086  # PAYLOAD_PATHS is a deliberate word list of pathspecs, same as payload_digest_compute() above
   [ -n "$(git diff --name-only "$h" HEAD -- $PAYLOAD_PATHS 2>/dev/null)" ] && return 0
   return 1
 }
@@ -126,7 +126,7 @@ WRITE_MODE=0
 WROTE=0
 if [ "${1:-}" = "--write" ] || [ "${1:-}" = "--repoint" ]; then
   WRITE_MODE=1
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086  # PAYLOAD_PATHS is a deliberate word list of pathspecs, same as payload_digest_compute() above
   dirty=$(git status --porcelain -- $PAYLOAD_PATHS)
   if [ -n "$dirty" ]; then
     echo "FAIL  inventory-contract --write: the payload has uncommitted changes:" >&2
