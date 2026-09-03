@@ -51,6 +51,15 @@ never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
 - ZEEP-C commits 2 and 3 shipped in 1.70.0 (check 65, rows 65/65b/65c/44h, admission fields).
   Assumptions taken: decide_by 2026-09-17; unmeasured blocking mechanisms are listed in the ok line
   before that date and red after it; ledger cost comes from benchmark rows only.
+- ZEEP-B commits 1 to 3 and ZEEP-C commit 4 shipped in 1.71.0 (main `8340ecf`). Decisions 1 and 2
+  taken as the plan proposed: REGISTER keeps only the banned-word list, MODEL ROUTING and DISPATCH
+  PRE-AUTHORIZED deleted; `claude/CLAUDE.md` 4332 B to 1635 B. The digest is conditional (0 B unfired,
+  215 B fired). Decision 4 is closed by the pilot (cap change unshipped). Decisions 3 and 5 stand as
+  assumed: decide_by 2026-09-17 with a warning before it, and the ZEEP-B paired run is not bought.
+- The gstack arm, unmeasured since the breadth retirement, was rerun at v1.70.0: parity with bare and
+  vstack on `multi_module` (10 of 10 green each, cost 0.93x and 0.95x of bare) and on
+  `contradictory_spec` (every Opus arm fixed to spec and withheld DONE). Numbers in
+  `tests/evals/showcase/RESULTS.md`.
 
 ## Decisions only the operator can take
 
