@@ -39,6 +39,19 @@ never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
 6. Measurements: ZEEP-B's paired Claude run (60 Opus runs, about $16 at $0.27 each, needs an explicit
    go), ZEEP-C commit 5 (`vstack-nomandate` vs `vstack`, 20 Opus runs), ZEEP-A's GLM runs (free).
 
+## Measurement outcomes so far (2026-09-03)
+
+- ZEEP-A commit 3, the pilot: `five_module_edges` bare GLM 29 of 29 valid green, base rate under
+  4% against the 30% bar. The `verify-gate.sh` cap change (ZEEP-A commit 4) stays unshipped; the
+  fallback named in the plan is a weaker OpenCode model, not more samples.
+- ZEEP-A's `contradictory_spec` acceptance (tampering halved, no false completion in the exit arm):
+  not met. Tampering 2 (exit) against 1 (no exit) against 2 (bare); one `DONE` over red in each gate
+  arm, none bare. What the exit offer did deliver: 26 of 30 escalations with a correct report
+  against 1 of 30 without it. Numbers in `tests/evals/showcase/RESULTS.md`.
+- ZEEP-C commits 2 and 3 shipped in 1.70.0 (check 65, rows 65/65b/65c/44h, admission fields).
+  Assumptions taken: decide_by 2026-09-17; unmeasured blocking mechanisms are listed in the ok line
+  before that date and red after it; ledger cost comes from benchmark rows only.
+
 ## Decisions only the operator can take
 
 1. The REGISTER paragraph of `claude/CLAUDE.md`: keep the banned-word list or delete the block.

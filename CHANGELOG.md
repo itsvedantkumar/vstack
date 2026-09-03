@@ -19,6 +19,12 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
   result as it enters the lead's context and records `verdict` and `has_evidence` in the replay
   row; a verdict with no command output or file:line behind it adds an `UNVERIFIED:` line to the
   lead's context. Check 44 gains the two lanes, row 44h falsifies the evidence extractor.
+- **Two more gate fixtures and their numbers.** `five_module_edges` (five skim-past edge rules) did
+  not raise GLM's first-pass red rate above 4%, so the planned cap change to `verify-gate.sh` is
+  not shipped. `contradictory_spec` (a visible test contradicts the spec) shows the defect-report
+  exit turning 1 in 30 correct escalations into 26 in 30, at 2.7x cost, while feeding the red test
+  back produced one `DONE` over red per gate arm that bare GLM never produced
+  (`tests/evals/showcase/RESULTS.md`).
 
 ## 1.69.0 — 2026-09-03
 
