@@ -133,6 +133,40 @@ runs under has no Workers Routes permission on the zone (error code 10000), so t
 serves from its `workers.dev` name until that permission is added and the `routes` line in
 `site/wrangler.toml` restored.
 
+### Three Claude arms on Haiku 4.5 at 1.71.0, paired
+
+Run files `runs/20260904-010328.38498.jsonl` (multi_module, 20 per arm) and
+`runs/20260904-011934.55418.jsonl` (five_module_edges, 10 per arm), Haiku 4.5, tree at v1.71.0,
+gstack at `0d1bd56`, JOBS=3. The cheaper model was the last lever left for a base rate the
+harnesses could move.
+
+| fixture | arm | n | held-out green | said DONE | false completions | spawned | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|---|---|
+| multi_module | none | 20 | 20 | 20 | 0 | 0 | $0.0458 | 26 s | 9.5 |
+| multi_module | vstack | 20 | 20 | 20 | 0 | 0 | $0.0486 | 40 s | 11.0 |
+| multi_module | gstack | 20 | 20 | 20 | 0 | 0 | $0.0428 | 24 s | 9.7 |
+| five_module_edges | none | 10 | 10 | 10 | 0 | 0 | $0.0666 | 43 s | 12.8 |
+| five_module_edges | vstack | 10 | 10 | 10 | 0 | 0 | $0.0775 | 53 s | 17.3 |
+| five_module_edges | gstack | 10 | 10 | 10 | 0 | 1 | $0.0677 | 42 s | 12.6 |
+
+Correctness is a null again: 90 of 90 green, no false completion in any arm, so Haiku 4.5 does
+not fail these fixtures either. What the run did measure is a cost of vstack's register hook on
+a small model. Cost ratios to bare: vstack 1.06x and 1.16x, gstack 0.93x and 1.02x. Wall
+ratios: vstack 1.54x and 1.23x. Turns: vstack +1.5 and +4.5 per run. The transcripts show why:
+`skill-mandate.sh` strikes a banned opener ("Now I'll", "Let me") after the verdict line, and
+Haiku answers the strike with a further turn ("Acknowledged. No further action needed",
+"Understood. I'll eliminate banned openers going forward"). Opus absorbs the same rule without
+a reply; Haiku spends turns on it. gstack spawned one subagent in 30 runs (five_module_edges #3,
+$0.113, green).
+
+That trailing turn also broke the scorer. `run.sh` classified `said` from the last line of the
+result, and for 10 of the 30 vstack runs that line was the reply to the strike, so they were
+recorded as `said=-1` (no verdict) while the DONE line sat two lines up. Those ten rows were
+rescored from their session transcripts under the rule the harness now uses (the last line that
+carries DONE or NOT DONE) and carry `said_rescored: 1`; all ten were green, so no false-completion
+count moved. Every row written after this commit also carries `model`, so the summary no longer
+has to infer it from `model_cost`.
+
 ### Three Claude arms at 1.70.0, gstack included, paired
 
 The routing-cost table below is the only earlier gstack measurement and it predates the breadth
@@ -318,3 +352,5 @@ valid and invalid, was $11.21 across 62 model calls:
 | `tests/evals/showcase/runs/20260903-121154.7018.jsonl` | contradictory_spec | glm-5.3-flash, gate without exit | valid, 30 |
 | `tests/evals/showcase/runs/20260903-164557.97124.jsonl` | multi_module | Opus 5, none vs vstack vs gstack at v1.70.0 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260903-165323.31443.jsonl` | contradictory_spec | Opus 5, none vs vstack vs gstack at v1.70.0 | valid, 5 per arm |
+| `tests/evals/showcase/runs/20260904-010328.38498.jsonl` | multi_module | Haiku 4.5, none vs vstack vs gstack at v1.71.0 | valid, 20 per arm, 10 vstack rows rescored |
+| `tests/evals/showcase/runs/20260904-011934.55418.jsonl` | five_module_edges | Haiku 4.5, none vs vstack vs gstack at v1.71.0 | valid, 10 per arm |

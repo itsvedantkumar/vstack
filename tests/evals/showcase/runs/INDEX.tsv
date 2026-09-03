@@ -17,3 +17,4 @@ file	engine	model	status	note
 20260903-164557.97124.jsonl	claude	claude-opus-5	valid	none vs vstack vs gstack at v1.70.0, paired
 20260903-165323.31443.jsonl	claude	claude-opus-5	valid	none vs vstack vs gstack at v1.70.0, paired
 20260904-010328.38498.jsonl	claude	claude-haiku-4-5-20251001	valid	none vs vstack vs gstack at v1.71.0, paired
+20260904-011934.55418.jsonl	claude	claude-haiku-4-5-20251001	valid	none vs vstack vs gstack at v1.71.0, paired
