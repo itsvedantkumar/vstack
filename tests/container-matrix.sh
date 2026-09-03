@@ -394,19 +394,27 @@ else
   res FAIL "6-skill-name-integrity" "jq unavailable"
 fi
 
-# --- 7. the hook actually emits: SessionStart and UserPromptSubmit both produce non-empty,
-#        valid JSON with a non-empty additionalContext -----------------------------------------
+# --- 7. the hook actually emits: SessionStart produces valid JSON with a non-empty
+#        additionalContext; UserPromptSubmit speaks on a prompt long enough to fire the GRILL
+#        line (1.71.0 made the per-prompt digest conditional: it is EMPTY on a short prompt, and
+#        a probe that fed "fix the flaky test" then demanded text was asserting the old
+#        unconditional block) and is silent on a short one. Both directions, so a hook that
+#        always speaks and one that never speaks both fail here. ----------------------------
 if command -v jq >/dev/null 2>&1; then
   ss_out=$(printf '{"hook_event_name":"SessionStart"}' | bash "$CDIR/hooks/inject-session-context.sh" 2>/tmp/ss.err)
   ss_ok=0
   if [ -n "$ss_out" ] && printf '%s' "$ss_out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then ss_ok=1; fi
-  ups_out=$(printf '{"hook_event_name":"UserPromptSubmit","prompt":"fix the flaky test in checkout.spec.ts","session_id":"beth-emit-%s"}' "$LABEL" | bash "$CDIR/hooks/inject-session-context.sh" 2>/tmp/ups.err)
+  long_prompt=$(printf 'rebuild the billing pipeline with retries and idempotency %.0s' 1 2 3 4 5 6 7)
+  ups_out=$(printf '{"hook_event_name":"UserPromptSubmit","prompt":"%s","session_id":"beth-emit-%s"}' "$long_prompt" "$LABEL" | bash "$CDIR/hooks/inject-session-context.sh" 2>/tmp/ups.err)
   ups_ok=0
-  if [ -n "$ups_out" ] && printf '%s' "$ups_out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then ups_ok=1; fi
-  if [ "$ss_ok" = 1 ] && [ "$ups_ok" = 1 ]; then
-    res PASS "7-hook-emits" "SessionStart and UserPromptSubmit both produced valid JSON with non-empty additionalContext"
+  if [ -n "$ups_out" ] && printf '%s' "$ups_out" | jq -e '.hookSpecificOutput.additionalContext | test("GRILL:")' >/dev/null 2>&1; then ups_ok=1; fi
+  short_out=$(printf '{"hook_event_name":"UserPromptSubmit","prompt":"fix the flaky test in checkout.spec.ts","session_id":"beth-quiet-%s"}' "$LABEL" | bash "$CDIR/hooks/inject-session-context.sh" 2>/tmp/ups2.err)
+  short_ok=0
+  if [ -z "$short_out" ] || printf '%s' "$short_out" | jq -e '(.hookSpecificOutput.additionalContext // "") | length == 0' >/dev/null 2>&1; then short_ok=1; fi
+  if [ "$ss_ok" = 1 ] && [ "$ups_ok" = 1 ] && [ "$short_ok" = 1 ]; then
+    res PASS "7-hook-emits" "SessionStart spoke; UserPromptSubmit spoke GRILL on a ${#long_prompt}-char prompt and stayed silent on a short one"
   else
-    res FAIL "7-hook-emits" "SessionStart valid=$ss_ok (raw: $(printf '%s' "$ss_out" | cut -c1-150)); UserPromptSubmit valid=$ups_ok (raw: $(printf '%s' "$ups_out" | cut -c1-150))"
+    res FAIL "7-hook-emits" "SessionStart valid=$ss_ok (raw: $(printf '%s' "$ss_out" | cut -c1-150)); UserPromptSubmit fired=$ups_ok (raw: $(printf '%s' "$ups_out" | cut -c1-150)); short prompt silent=$short_ok (raw: $(printf '%s' "$short_out" | cut -c1-150))"
   fi
 else
   res FAIL "7-hook-emits" "jq unavailable"
