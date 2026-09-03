@@ -5041,6 +5041,14 @@ if command -v jq >/dev/null && command -v git >/dev/null; then
             fi
             if [ -z "$c65_head" ]; then
               c65_errs="$c65_errs\n$c65_id: kind is measurement with no measured_head, so nothing records which version of claude/hooks/${c65_file:-?} the number was taken against"
+            elif ! git cat-file -e "$c65_head^{commit}" 2>/dev/null \
+                 && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+              # A depth-1 clone has no history to walk, so "not an ancestor" would be a verdict
+              # about the clone, not the ledger. The 1.70.0 release lane went red on exactly this:
+              # the container matrix clones at depth 1 and the first measured mechanism reddened
+              # every image. Name the real cause and how to lift it; tests/container-matrix.sh
+              # now deepens its clone before running this file.
+              c65_errs="$c65_errs\n$c65_id: measured_head $c65_head is not present in this shallow clone, so ancestry cannot be judged here -- run \`git fetch --unshallow\` (or deepen the clone) and re-run; a depth-1 checkout cannot tell a lost commit from an unfetched one"
             elif ! git merge-base --is-ancestor "$c65_head" HEAD >/dev/null 2>&1; then
               c65_errs="$c65_errs\n$c65_id: measured_head $c65_head is not an ancestor of HEAD, so the measurement was taken on a commit this branch does not contain -- an unreachable commit cannot justify what ships here"
             elif [ -n "$c65_file" ]; then

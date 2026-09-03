@@ -23,6 +23,9 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
   drops it from the installer.
 - Mechanisms ledger: `skill-load-ledger` added, `per-prompt-digest` re-justified, both
   unmeasured with decide-by 2026-09-17.
+- Check 65 in a depth-1 clone named a measured commit "not an ancestor" when the clone
+  simply had no history; the 1.70.0 container lane went red on all three images for that. It
+  now names the shallow clone, and `tests/container-matrix.sh` deepens its clone before verify.
 
 ## 1.70.0 — 2026-09-03
 

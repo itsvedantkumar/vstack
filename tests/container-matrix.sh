@@ -177,6 +177,17 @@ if [ "$CLONE_RC" -ne 0 ]; then
 fi
 GOT_SHA=$(git -C /work/repo rev-parse HEAD)
 
+# Depth 1 is enough to install, not enough to verify. Check 65 (the mechanisms ledger) walks
+# history from each measured_head to HEAD, and in a depth-1 clone every such commit is absent:
+# the 1.70.0 release lane went red on all three images for that reason alone, with the RESULT
+# line naming check 65 and nothing else. Deepen fully; the repository is a few hundred commits.
+# A failure here is reported, not fatal: check 65 then names the shallow clone itself.
+if [ "$(git -C /work/repo rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  git -C /work/repo fetch --quiet --unshallow origin 2>&1
+  UNSHALLOW_RC=$?
+  echo "=== unshallow: rc=$UNSHALLOW_RC, $(git -C /work/repo rev-list --count HEAD 2>/dev/null) commit(s) reachable ==="
+fi
+
 # A depth-1 clone of a TAG carries that tag, so the release lane has always had one to compare
 # against. A branch or a SHA carries none, and .claude/verify.sh check 24 -- the check that pins
 # the declared version to a tag that actually exists -- then skips itself with "no tags in this
