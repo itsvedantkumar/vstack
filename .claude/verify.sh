@@ -3183,6 +3183,73 @@ if command -v jq >/dev/null; then
     [ "$c44_rows5" -eq "$c44_n" ] \
       || c44_errs="$c44_errs\nVSTACK_NO_REPLAY_LOG=1: replay row count changed ($c44_n -> $c44_rows5) -- the hatch did not suppress the row"
     unset VSTACK_NO_REPLAY_LOG
+
+    # Direction 3e (admission): a dispatch that CLAIMS a verdict without showing any is the whole
+    # false-completion failure mode this repository's own research section is about, and until
+    # this lane existed the replay log recorded the claim's byte count and nothing about whether
+    # it was backed by anything. dispatch-counter.sh classifies the tool_response into `verdict`
+    # (PASS/ISSUES/BLOCKED/DONE, else null) and `has_evidence` (a `path:NN` reference, a line
+    # opening with `$ `, or an `exit <digit>`), and when a verdict arrives with no evidence it
+    # returns hookSpecificOutput.additionalContext beginning with "UNVERIFIED:" so the claim is
+    # contradicted in the transcript rather than only in a log nobody reads.
+    #
+    # Driven both ways in one lane, because either half alone proves nothing: a classifier that
+    # answers "no evidence" to everything raises the flag on the bare claim AND on the cited one,
+    # and a classifier that answers "evidence" to everything raises it on neither. Two payloads,
+    # two isolated replay files, and the row read out of each -- the same one-drive-two-readings
+    # shape as Direction 3a above rather than a second run that could quietly disagree.
+    #
+    # Each payload gets its OWN replay destination so the assertion is on row 1 of a file with
+    # exactly one row: reusing the shared log would make these assertions depend on the dispatch
+    # count Directions 1 and 3d left behind, which is a join between two unrelated lanes.
+    c44_adm_bare="$c44_replay_dir/admission-bare.jsonl"
+    c44_adm_evid="$c44_replay_dir/admission-evid.jsonl"
+    c44_admit(){ # <replay destination> <tool_response text> -> the hook's stdout
+      # Exported, not `VAR=x cmd | cmd`-prefixed: the comment on the fixtures above records what
+      # that scoping cost the first time it was used here.
+      export VSTACK_REPLAY_LOG="$1"
+      printf '{"session_id":"%s","tool_name":"Task","tool_input":{"description":"adm","prompt":"p","subagent_type":"qa-fixture"},"tool_response":{"content":"%s"},"duration_ms":11,"tool_use_id":"tu-adm-%s"}' \
+        "$c44_sid" "$2" "$c44_sid" | "./$dc" 2>/dev/null
+    }
+    # "PASS, all good" carries no path:line, no shell prompt and no exit status. "PASS, see
+    # src/a.py:12" differs in exactly one respect: it cites a location. Anything the classifier
+    # does that is not reading for evidence treats these two identically.
+    c44_out_bare=$(c44_admit "$c44_adm_bare" "PASS, all good")
+    c44_out_evid=$(c44_admit "$c44_adm_evid" "PASS, see src/a.py:12")
+    c44_row_bare=$(sed -n '1p' "$c44_adm_bare" 2>/dev/null)
+    c44_row_evid=$(sed -n '1p' "$c44_adm_evid" 2>/dev/null)
+
+    if [ -z "$c44_row_bare" ] || [ -z "$c44_row_evid" ]; then
+      c44_errs="$c44_errs\nadmission lane: the hook wrote no replay row for one or both admission payloads (bare='${c44_row_bare:-none}', evidenced='${c44_row_evid:-none}') -- this is the writer, not the assertions below, so read it as the drive failing rather than the fields being wrong"
+    elif ! jq -e 'has("verdict") and has("has_evidence")' <<<"$c44_row_bare" >/dev/null 2>&1; then
+      # Distinguished from a wrong VALUE on purpose. "the field is absent" means
+      # claude/hooks/dispatch-counter.sh has not implemented the admission fields; "the field
+      # holds the wrong thing" means it has, and got it wrong. Reported as one message each so a
+      # reader is never left inferring which of the two they are looking at.
+      c44_errs="$c44_errs\nadmission lane NOT IMPLEMENTED: the replay row carries no verdict/has_evidence field at all -- claude/hooks/dispatch-counter.sh has not been widened yet. Row: $c44_row_bare"
+    else
+      jq -e '.verdict == "PASS" and .has_evidence == false' <<<"$c44_row_bare" >/dev/null 2>&1 \
+        || c44_errs="$c44_errs\nadmission lane: a tool_response of \"PASS, all good\" -- a verdict with no path:line, no \$ command and no exit status -- did not record verdict=PASS with has_evidence=false. Row: $c44_row_bare"
+      jq -e '.verdict == "PASS" and .has_evidence == true' <<<"$c44_row_evid" >/dev/null 2>&1 \
+        || c44_errs="$c44_errs\nadmission lane: a tool_response citing src/a.py:12 did not record verdict=PASS with has_evidence=true, so the evidence test is not reading path:line references. Row: $c44_row_evid"
+    fi
+
+    # The context the model actually sees. A field in a log file nobody reads is not an
+    # admission control; the UNVERIFIED prefix is the half that lands in the transcript, and it
+    # has to be present on the bare claim and absent on the cited one -- a hook that emits it
+    # unconditionally is a hook that has stopped discriminating, and reads identical to a working
+    # one if only the positive case is asserted.
+    c44_ctx_bare=$(jq -r '.hookSpecificOutput.additionalContext // ""' <<<"$c44_out_bare" 2>/dev/null)
+    c44_ctx_evid=$(jq -r '.hookSpecificOutput.additionalContext // ""' <<<"$c44_out_evid" 2>/dev/null)
+    case "$c44_ctx_bare" in
+      UNVERIFIED:*) ;;
+      *) c44_errs="$c44_errs\nadmission lane: a verdict with no evidence produced no hookSpecificOutput.additionalContext beginning with \"UNVERIFIED:\" -- the claim reaches the transcript uncontradicted. Hook stdout was: ${c44_out_bare:-<empty>}" ;;
+    esac
+    case "$c44_ctx_evid" in
+      UNVERIFIED:*) c44_errs="$c44_errs\nadmission lane: an evidenced verdict was still flagged UNVERIFIED, so the flag fires on every dispatch and carries no information. Hook stdout was: ${c44_out_evid:-<empty>}" ;;
+      *) ;;
+    esac
+
     unset VSTACK_REPLAY_LOG VSTACK_DELEGATION_LOG
 
     c44_rreplay_after=0; [ -f "$c44_real_replay" ] && c44_rreplay_after=$(wc -l < "$c44_real_replay" 2>/dev/null | tr -d ' ')
@@ -4798,6 +4865,208 @@ EOF
   else
     bad "$c64_lbl" "$(printf '%b' "$c64_errs")"
   fi
+fi
+
+# --- 65. every shipped mechanism records what justifies it, and the record has not expired -----
+# Every hook in claude/hooks/ ships because somebody believed it does something. Nothing in this
+# tree ever held that belief to an artefact. docs/what-this-actually-does.md exists precisely
+# because the honest answer to "does this help" is mostly "unmeasured", and a document that says
+# so goes stale the same way every other prose count in this repo has: the mechanism changes, the
+# row does not, and the disclosure quietly becomes a claim.
+#
+# So the justification is a ledger entry, not prose, and this check joins the three things that
+# have to agree: what is WIRED (claude/settings.json + claude/hooks/hooks.json), what is RECORDED
+# (claude/inventory.json .components.hooks.mechanisms[]), and what is PUBLISHED
+# (docs/what-this-actually-does.md sections 1 and 2). A hook wired with no entry ships with
+# nothing recorded about why. An entry with no published row is a mechanism the document does not
+# disclose. Both are the same defect from opposite ends.
+#
+# The three justification kinds are checked against their own evidence, not against their own
+# say-so:
+#   measurement -- the cited artefact must exist AND the hook must not have changed since. A
+#                  measurement names a commit; if the file has moved on in any non-comment line,
+#                  the number is about code that no longer ships. Comment-only edits are excluded
+#                  deliberately: rewriting this file's own header must not invalidate a run.
+#   literature  -- the cited entry's verdict row in the matching .verification.md must read
+#                  VERIFIED. Those files already carry MISREAD verdicts for real citation errors
+#                  (see false-completion.verification.md, 4 of 14), so citing an entry is not the
+#                  same as citing a checked one, and only reading the verdict cell separates them.
+#   none        -- allowed, with an expiry. An unmeasured mechanism that can BLOCK a session is a
+#                  cost with no demonstrated benefit, so it carries a decide_by; past that date it
+#                  is a failure naming the id, and before it the ok line prints the ids and dates
+#                  so the debt is on screen every run rather than in a backlog.
+#
+# Every anchor is required. A missing settings file, an empty mechanisms array, a missing section
+# heading and an unparseable entry string are all failures here, never silence -- this file's
+# founding defect is a check that reports success having read nothing, and a ledger reader is the
+# easiest possible place to commit it again.
+c65_lbl="every shipped mechanism records what justifies it"
+if command -v jq >/dev/null && command -v git >/dev/null; then
+  c65_inv="claude/inventory.json"
+  c65_doc="docs/what-this-actually-does.md"
+  if [ ! -f "$c65_inv" ] || [ ! -f "$c65_doc" ]; then
+    bad "$c65_lbl" \
+      "$c65_inv or $c65_doc is missing -- both are tracked files in this repository, not an environment dependency, so their absence is a failure and not a skip"
+  else
+    c65_n=$(jq -r '(.components.hooks.mechanisms // []) | length' "$c65_inv" 2>/dev/null)
+    case "$c65_n" in ''|*[!0-9]*) c65_n=0 ;; esac
+    if [ "$c65_n" -eq 0 ]; then
+      bad "$c65_lbl" \
+        "$c65_inv carries no .components.hooks.mechanisms[] entries, so nothing in this tree records why any shipped hook exists -- and with nothing to read, every assertion below would pass over an empty set, which is the exact shape of a green that measured nothing"
+    else
+      c65_errs=""
+      c65_today=$(date +%F 2>/dev/null)
+      [ -n "$c65_today" ] \
+        || c65_errs="$c65_errs\ndate +%F produced nothing, so no decide_by can be compared and the expiry half of this check is not running"
+
+      # WIRED: every command under the five events that actually run a shipped hook, from both
+      # install lanes, reduced to script basenames. Both files, not one: the plugin lane wires a
+      # different (smaller) subset, and a mechanism recorded only for the settings lane would
+      # leave the plugin lane's hooks unaccounted for -- the same one-lane blindness check 11 and
+      # check 47 exist for, one artefact over.
+      c65_files=$(jq -r '(.components.hooks.mechanisms // [])[] | .file // ""' "$c65_inv" 2>/dev/null \
+                  | grep -v '^$' | sort -u)
+      c65_wired=""
+      for c65_f in claude/settings.json claude/hooks/hooks.json; do
+        if [ ! -f "$c65_f" ]; then
+          c65_errs="$c65_errs\n$c65_f is missing, so the set of wired hook commands cannot be enumerated and the mapping below would be checked against a short list"
+          continue
+        fi
+        c65_w=$(jq -r '(.hooks // {}) | to_entries[]
+                       | select(.key == "Stop" or .key == "PostToolUse" or .key == "PreToolUse"
+                                or .key == "UserPromptSubmit" or .key == "SessionStart")
+                       | .value[]? | .hooks[]? | .command // ""' "$c65_f" 2>/dev/null \
+                | grep -oE '[A-Za-z0-9_.-]+\.sh' | sort -u)
+        if [ -z "$c65_w" ]; then
+          c65_errs="$c65_errs\n$c65_f declares no hook command under any of Stop/PostToolUse/PreToolUse/UserPromptSubmit/SessionStart -- the extractor found nothing, which is a missing anchor and not a clean bill"
+        else
+          c65_wired=$(printf '%s\n%s\n' "$c65_wired" "$c65_w")
+        fi
+      done
+      c65_wired=$(printf '%s\n' "$c65_wired" | grep -v '^$' | sort -u)
+      c65_nw=0
+      for c65_b in $c65_wired; do
+        c65_nw=$((c65_nw+1))
+        grep -qxF "$c65_b" <<<"$c65_files" \
+          || c65_errs="$c65_errs\n$c65_b is wired as a hook but no .components.hooks.mechanisms[] entry in $c65_inv names it in .file, so it ships with nothing recorded about why it is there"
+      done
+
+      # PUBLISHED: the two sections that are allowed to carry a mechanism row. The flag flips off
+      # on any other `## ` heading, so section 3 ("Unproven, and named as such") cannot satisfy a
+      # mechanism's disclosure -- a mechanism listed only there is exactly the row this check
+      # would otherwise let pass by matching anywhere in the file.
+      c65_h1='^## 1\. Measured'
+      c65_h2='^## 2\. Mechanism works, effect unmeasured'
+      grep -qE "$c65_h1" "$c65_doc" \
+        || c65_errs="$c65_errs\n$c65_doc has no heading matching /$c65_h1/, so the section this check reads mechanism rows out of cannot be located"
+      grep -qE "$c65_h2" "$c65_doc" \
+        || c65_errs="$c65_errs\n$c65_doc has no heading matching /$c65_h2/, so the section this check reads mechanism rows out of cannot be located"
+      c65_docrows=$(awk '/^## /{ s = ($0 ~ /^## 1\. Measured/ || $0 ~ /^## 2\. Mechanism works, effect unmeasured/) ? 1 : 0; next } s' "$c65_doc" 2>/dev/null)
+
+      c65_nmeas=0; c65_nlit=0; c65_nnone=0; c65_pend=""
+      # Unit separator, not @tsv. Tab is IFS *whitespace*, so `read` collapses a run of them
+      # into one delimiter and every empty field silently disappears -- an entry with a null
+      # justified_by.file shifted run_id into its slot and measured_head out of the record
+      # entirely, and the check then reported a missing head that was right there in the file.
+      # \x1f is not IFS whitespace, so empty fields hold their position.
+      while IFS=$'\x1f' read -r c65_id c65_file c65_blk c65_kind c65_jfile c65_run c65_entry c65_head c65_by; do
+        [ -n "$c65_id" ] || continue
+        case "$c65_kind" in
+          measurement)
+            c65_nmeas=$((c65_nmeas+1))
+            if [ -n "$c65_jfile" ] && [ -e "$c65_jfile" ]; then :
+            elif [ -n "$c65_run" ] && [ -e "runs/$c65_run" ]; then :
+            else
+              c65_errs="$c65_errs\n$c65_id: kind is measurement but neither justified_by.file (${c65_jfile:-unset}) nor runs/${c65_run:-unset} exists in this tree, so the measurement it cites is not here to re-read"
+            fi
+            if [ -z "$c65_head" ]; then
+              c65_errs="$c65_errs\n$c65_id: kind is measurement with no measured_head, so nothing records which version of claude/hooks/${c65_file:-?} the number was taken against"
+            elif ! git merge-base --is-ancestor "$c65_head" HEAD >/dev/null 2>&1; then
+              c65_errs="$c65_errs\n$c65_id: measured_head $c65_head is not an ancestor of HEAD, so the measurement was taken on a commit this branch does not contain -- an unreachable commit cannot justify what ships here"
+            elif [ -n "$c65_file" ]; then
+              # -U0 and a +/- filter, not --stat: a comment-only edit must not invalidate a
+              # measurement, and only reading the changed lines themselves can tell the two
+              # apart. +++/--- headers are dropped before the leading sign is stripped, or the
+              # file header itself would read as a changed line on every diff.
+              c65_drift=$(git diff -U0 "$c65_head..HEAD" -- "claude/hooks/$c65_file" 2>/dev/null \
+                          | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | sed -E 's/^[+-]//' \
+                          | grep -vE '^[[:space:]]*(#|$)')
+              [ -z "$c65_drift" ] \
+                || c65_errs="$c65_errs\n$c65_id: claude/hooks/$c65_file has $(printf '%s\n' "$c65_drift" | grep -c '') non-comment line(s) changed since measured_head $c65_head, so the recorded measurement describes code that no longer ships -- re-measure or move the head deliberately"
+            fi
+            ;;
+          literature)
+            c65_nlit=$((c65_nlit+1))
+            c65_lname=${c65_entry%%#*}
+            c65_lnum=${c65_entry##*#}
+            if [ -z "$c65_entry" ] || [ "$c65_lname" = "$c65_entry" ] || [ -z "$c65_lnum" ] \
+               || case "$c65_lnum" in ''|*[!0-9]*) true ;; *) false ;; esac; then
+              c65_errs="$c65_errs\n$c65_id: kind is literature but justified_by.entry ('${c65_entry:-unset}') is not <report>#<entry number>, so no verdict row can be located for it"
+            else
+              c65_lfile="docs/research/harness-effect/literature/$c65_lname.verification.md"
+              if [ ! -f "$c65_lfile" ]; then
+                c65_errs="$c65_errs\n$c65_id: cites $c65_entry but $c65_lfile does not exist, so the citation was never checked against the source in this tree"
+              else
+                # The verdict CELL, not the line. The evidence cell of a MISREAD row routinely
+                # contains the word VERIFIED in prose; a line-wide grep would read those rows as
+                # verified, which is the one distinction this whole kind turns on.
+                c65_verdict=$(awk -F'|' -v n="$c65_lnum" '
+                  /^\|/ { k = $2; v = $3;
+                          gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v);
+                          if (k == n) { print v; exit } }' "$c65_lfile" 2>/dev/null)
+                if [ -z "$c65_verdict" ]; then
+                  c65_errs="$c65_errs\n$c65_id: $c65_lfile has no verdict row for entry $c65_lnum, so the citation points at nothing that was checked"
+                elif [ "$c65_verdict" != VERIFIED ]; then
+                  c65_errs="$c65_errs\n$c65_id: $c65_lfile records entry $c65_lnum as '$c65_verdict', not VERIFIED -- a mechanism justified by a citation its own verification marked wrong"
+                fi
+              fi
+            fi
+            ;;
+          none)
+            c65_nnone=$((c65_nnone+1))
+            if [ "$c65_blk" != true ]; then
+              :
+            elif [ -z "$c65_by" ]; then
+              c65_errs="$c65_errs\n$c65_id: blocking, kind none, and no decide_by -- a mechanism that can stop a session with nothing measured about it and no date by which that has to change is permanent by default"
+            elif [ -n "$c65_today" ] && [[ "$c65_today" > "$c65_by" ]]; then
+              c65_errs="$c65_errs\n$c65_id: blocking, still unmeasured, and its decide_by ($c65_by) passed on $c65_today -- measure it, stop it blocking, or move the date on purpose"
+            else
+              c65_pend="$c65_pend $c65_id(by ${c65_by:-?})"
+            fi
+            ;;
+          *)
+            c65_errs="$c65_errs\n$c65_id: justified_by.kind is '${c65_kind:-missing}', not one of measurement/literature/none -- an entry whose kind this check cannot recognise is an entry it is not checking"
+            ;;
+        esac
+
+        # Third cell non-empty, not merely present: a disclosure row whose "what is not measured"
+        # cell is blank publishes a mechanism name and nothing else, which reads as coverage.
+        c65_cell=$(printf '%s\n' "$c65_docrows" \
+          | awk -F'|' -v id="$c65_id" '
+              /^\|/ && index($2, "`" id "`") {
+                c = $4; gsub(/^[ \t]+|[ \t]+$/, "", c);
+                print (c == "" ? "@EMPTY@" : "@OK@"); exit }')
+        case "$c65_cell" in
+          '@OK@')    ;;
+          '@EMPTY@') c65_errs="$c65_errs\n$c65_id: has a row in $c65_doc but its third cell is empty, so the document names the mechanism without saying what is or is not shown about it" ;;
+          *)         c65_errs="$c65_errs\n$c65_id: no table row in section 1 or 2 of $c65_doc carries \`$c65_id\` in its first cell, so a shipped mechanism is disclosed nowhere" ;;
+        esac
+      done <<< "$(jq -r '(.components.hooks.mechanisms // [])[]
+                         | [ (.id // ""), (.file // ""), ((.blocking // false) | tostring),
+                             (.justified_by.kind // ""), (.justified_by.file // ""),
+                             (.justified_by.run_id // ""), (.justified_by.entry // ""),
+                             (.justified_by.measured_head // ""), (.justified_by.decide_by // "") ]
+                         | map(tostring | gsub("[\\n\\t]"; " ")) | join("\u001f")' "$c65_inv" 2>/dev/null)"
+
+      if [ -z "$c65_errs" ]; then
+        ok "$c65_lbl ($c65_n mechanisms covering $c65_nw wired hook script(s): $c65_nmeas measurement, $c65_nlit literature, $c65_nnone unmeasured${c65_pend:+; blocking and still unmeasured:$c65_pend})"
+      else
+        bad "$c65_lbl" "$(printf '%b' "$c65_errs")"
+      fi
+    fi
+  fi
+else
+  skip "$c65_lbl" "jq or git not installed"
 fi
 
 # Accounting. Every declared check must have reported either a result or a skip. A check

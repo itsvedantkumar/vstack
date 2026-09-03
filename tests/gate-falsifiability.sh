@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -256,6 +256,44 @@ creates_for(){ case "$1" in
   31)  printf '%s' "$ORPHAN_PROBE" ;;
 esac }
 
+# Row 65b flips the VERIFIED verdict on the literature entry the ledger actually cites, so its
+# target is data, not a constant. files_for() and break_it() both call this, once each, so the
+# file that gets backed up is by construction the file that gets mutated -- naming it twice is how
+# a row ends up restoring something it never touched.
+#
+# The fallback exists because this row has to say something honest while
+# claude/inventory.json carries no literature-kind mechanism at all: it names inventory.json
+# instead, and break_it() then rewinds a measured_head there. That is a DIFFERENT anchor of check
+# 65 than the one this row is named for, and the row's own output says so.
+c65b_target(){
+  _t65_e=$(jq -r 'first((.components.hooks.mechanisms // [])[]
+                        | select((.justified_by.kind // "") == "literature")
+                        | (.justified_by.entry // "")) // ""' claude/inventory.json 2>/dev/null)
+  case "$_t65_e" in
+    *'#'*)
+      _t65_f="docs/research/harness-effect/literature/${_t65_e%%#*}.verification.md"
+      if [ -f "$_t65_f" ]; then printf '%s' "$_t65_f"; return; fi ;;
+  esac
+  printf '%s' 'claude/inventory.json'
+}
+
+# The commit to rewind a measurement to: walking the hook's own history newest-first, the first
+# commit whose diff to HEAD still contains a non-comment line is by construction the parent of the
+# last non-comment edit. Reading `git log -n 2` and taking the second entry gets this right only
+# when the most recent edit touched code; when it was a comment sweep -- which this repository
+# does constantly -- it hands back a commit check 65 accepts, and the row reports the check
+# unfalsifiable while the mutation worked perfectly.
+c65c_stale_head(){ # <hook basename> -> a commit sha, or empty
+  for _s65_c in $(git log --format=%H -- "claude/hooks/$1" 2>/dev/null); do
+    if [ -n "$(git diff -U0 "$_s65_c..HEAD" -- "claude/hooks/$1" 2>/dev/null \
+               | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | sed -E 's/^[+-]//' \
+               | grep -vE '^[[:space:]]*(#|$)')" ]; then
+      printf '%s' "$_s65_c"; return
+    fi
+  done
+  git rev-parse HEAD~1 2>/dev/null
+}
+
 # Files each row edits, so it can be put back byte for byte. Backing up beats `git checkout`
 # here: this has to be safe to run on a dirty tree.
 files_for(){ case "$1" in
@@ -355,8 +393,15 @@ files_for(){ case "$1" in
   39)  printf 'CHANGELOG.md' ;;
   40)  printf 'claude/hooks/skill-mandate.sh' ;;
   44)  printf 'install.sh' ;;
-  44b|44c|44d|44e|44f) printf 'claude/hooks/dispatch-counter.sh' ;;
+  44b|44c|44d|44e|44f|44h) printf 'claude/hooks/dispatch-counter.sh' ;;
   44g) printf 'claude/settings.json' ;;
+  65|65c) printf 'claude/inventory.json' ;;
+  # Resolved from the ledger rather than typed, because which file row 65b mutates depends on
+  # which literature report the first literature-kind mechanism cites -- and the stale-mutation
+  # detector in the loop below requires EVERY file named here to change, so a fixed list of all
+  # ten verification files would report the row unfalsifiable on nine of them every run.
+  # c65b_target() is the single resolver both this and break_it() call, so they cannot disagree.
+  65b) c65b_target ;;
   45)  printf 'uninstall.sh' ;;
   46)  printf 'overlay.sh' ;;
 esac }
@@ -470,6 +515,10 @@ label_for(){ case "$1" in
   44e) printf 'dispatch counter join, both directions' ;;
   44f) printf 'dispatch counter join, both directions' ;;
   44g) printf 'dispatch counter join, both directions' ;;
+  44h) printf 'dispatch counter join, both directions' ;;
+  65)  printf 'every shipped mechanism records what justifies it' ;;
+  65b) printf 'every shipped mechanism records what justifies it' ;;
+  65c) printf 'every shipped mechanism records what justifies it' ;;
   45)  printf 'uninstall keeps foreign settings, drops its own' ;;
   46)  printf 'no accidental agents under claude/agents' ;;
 esac }
@@ -1149,6 +1198,120 @@ exit 0
         && jq '.hooks.PostToolUseFailure[0].hooks += [{"type":"command","command":"\"$CLAUDE_PROJECT_DIR/.claude/hooks/dispatch-counter.sh\""}]' \
              claude/settings.json.t44g > claude/settings.json \
         && rm -f claude/settings.json.t44g ;;
+  44h) # The admission lane (Direction 3e): make has_evidence true unconditionally. This is the
+      # shape a classifier rots into -- a dispatch that claims PASS and shows nothing gets the
+      # same field value as one that cites a file and a line, and the UNVERIFIED context stops
+      # firing for anybody. Nothing about the row's schema changes, so a check that only asserts
+      # the field is PRESENT stays green through it; only the negative case catches it.
+      #
+      # Anchored on the field assignment inside the jq program rather than on the evidence regex
+      # itself, and the regex is the thing that will be rewritten: a row keyed to the pattern text
+      # stops matching the first time the pattern is tuned and then reports the check
+      # unfalsifiable while proving nothing. Comment lines are excluded so the row cannot satisfy
+      # its own change detector by editing prose about the field. If a later rewrite spells
+      # has_evidence inline instead of on its own line, re-anchor this row rather than deleting
+      # it.
+      perl -pi -e 's/^(\s+has_evidence:\s*).*?(,?)$/${1}true${2}/ unless /^\s*#/' \
+        claude/hooks/dispatch-counter.sh ;;
+
+  65) # An entry with no justification at all. This is the state every hook in this repository was
+      # in before the ledger existed -- shipped, wired, blocking in three cases, and recorded
+      # nowhere -- so the row restores it for exactly one mechanism. jq writes to a temp file and
+      # moves it into place rather than redirecting over its own input: a jq program that errors
+      # mid-parse truncates the file it was reading, and the restore path cannot put back bytes it
+      # never had a chance to back up.
+      #
+      # The else branch covers the window where MORTY-3's ledger has not landed: with no entries
+      # to strip, the deletion changes nothing and the loop reports "mutation changed nothing",
+      # which reads as a rotted pattern rather than an absent ledger. Planting one entry with no
+      # justified_by says the same thing check 65 exists to say, and always moves the file.
+      jq '(.components.hooks.mechanisms // []) as $ms
+          | if ($ms | length) > 0
+            then del(.components.hooks.mechanisms[0].justified_by)
+            else .components.hooks.mechanisms =
+                 [{id: "falsify-65-probe", file: "dispatch-counter.sh",
+                   event: "PostToolUse", blocking: false}]
+            end' claude/inventory.json > claude/inventory.json.t65 \
+        && mv claude/inventory.json.t65 claude/inventory.json \
+        || rm -f claude/inventory.json.t65 ;;
+
+  65b) # Citing an entry is not citing a checked one. The .verification.md files already carry
+      # MISREAD verdicts for real citation errors -- 4 of 14 in false-completion.verification.md,
+      # 1 of 15 in self-verification.verification.md -- so a mechanism can name a real entry in a
+      # real report whose own verification says the claim was misread. Flip the cited entry's
+      # verdict cell and check 65 must stop accepting the citation.
+      #
+      # awk on the verdict CELL, not sed on the word: the evidence cell of these rows routinely
+      # contains "VERIFIED" in prose, so a line-wide substitution would rewrite the wrong text and
+      # a line-wide grep in the check would never have noticed the difference. Fields are rejoined
+      # with OFS="|", which is lossless even for an evidence cell containing a pipe, and only the
+      # matched record is rebuilt at all.
+      #
+      # The claude/inventory.json branch is the documented fallback for a ledger with no
+      # literature-kind entry: it rewinds a measured_head instead, which falsifies a DIFFERENT
+      # anchor of check 65 (measurement freshness, the same one row 65c is named for). Read a pass
+      # from that branch as "check 65 can fail", not as "the literature lane was proven".
+      _f65b=$(c65b_target)
+      case "$_f65b" in
+        */literature/*)
+          _e65b=$(jq -r 'first((.components.hooks.mechanisms // [])[]
+                               | select((.justified_by.kind // "") == "literature")
+                               | (.justified_by.entry // "")) // ""' claude/inventory.json 2>/dev/null)
+          awk -F'|' -v n="${_e65b##*#}" 'BEGIN{OFS="|"}
+            /^\|/ { k = $2; v = $3;
+                    gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v);
+                    if (k == n && v == "VERIFIED") { $3 = " MISREAD " } }
+            { print }' "$_f65b" > "$_f65b.t65b" \
+            && mv "$_f65b.t65b" "$_f65b" ;;
+        *)
+          jq --arg h "$(c65c_stale_head dispatch-counter.sh)" '
+              (.components.hooks.mechanisms // []) as $ms
+              | if ($ms | length) > 0
+                then .components.hooks.mechanisms[0].justified_by =
+                     ((.components.hooks.mechanisms[0].justified_by // {})
+                      + {kind: "measurement", measured_head: $h})
+                else .components.hooks.mechanisms =
+                     [{id: "falsify-65b-probe", file: "dispatch-counter.sh",
+                       event: "PostToolUse", blocking: false,
+                       justified_by: {kind: "measurement", file: null, run_id: null,
+                                      entry: null, measured_head: $h, decide_by: null}}]
+                end' claude/inventory.json > claude/inventory.json.t65b \
+            && mv claude/inventory.json.t65b claude/inventory.json \
+            || rm -f claude/inventory.json.t65b ;;
+      esac ;;
+
+  65c) # A measurement that is still cited after the code it measured moved on. This is the defect
+      # the measured_head field exists for and the one a ledger rots into first: nobody deletes a
+      # number when they edit a hook, they just stop it being about the hook that ships. Rewind
+      # the first measurement-kind entry's head to the parent of the last non-comment edit of its
+      # own hook file (see c65c_stale_head() for why "the last edit" is the wrong commit to take),
+      # so exactly one non-comment change sits between the recorded head and HEAD.
+      #
+      # Comment-only edits are deliberately NOT enough to trip check 65 -- rewriting a hook's
+      # header must not invalidate a run -- which is precisely why this row has to select its
+      # commit by content rather than by position.
+      #
+      # The else branch is the pre-ledger fallback: it plants the same stale-measurement state on
+      # a mechanism entry of its own, using a hook with real history so the head it records is
+      # genuinely stale rather than merely wrong-looking.
+      _f65c=$(jq -r 'first((.components.hooks.mechanisms // [])[]
+                           | select((.justified_by.kind // "") == "measurement")
+                           | (.file // "")) // ""' claude/inventory.json 2>/dev/null)
+      [ -n "$_f65c" ] || _f65c=dispatch-counter.sh
+      jq --arg h "$(c65c_stale_head "$_f65c")" --arg f "$_f65c" '
+          (.components.hooks.mechanisms // []) as $ms
+          | ([ $ms | to_entries[]
+               | select((.value.justified_by.kind // "") == "measurement") | .key ] | first) as $i
+          | if $i == null
+            then .components.hooks.mechanisms =
+                 ([{id: "falsify-65c-probe", file: $f, event: "PostToolUse", blocking: false,
+                    justified_by: {kind: "measurement", file: null, run_id: null, entry: null,
+                                   measured_head: $h, decide_by: null}}] + $ms)
+            else .components.hooks.mechanisms[$i].justified_by.measured_head = $h
+            end' claude/inventory.json > claude/inventory.json.t65c \
+        && mv claude/inventory.json.t65c claude/inventory.json \
+        || rm -f claude/inventory.json.t65c ;;
+
   45) # Put back the directory-prefix ownership test uninstall.sh shipped with: treat every hook
       # entry whose command starts with the config dir's hooks/ path as vstack's. $h is still
       # bound, so this is a one-line revert to the real defect rather than an invented one -- the

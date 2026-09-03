@@ -268,13 +268,47 @@ input=$(cat 2>/dev/null || true)
 # commas, colons and quotes that would otherwise collide with a naive `read` split; jq's @tsv
 # escapes only tab/newline/CR/backslash, none of which JSON's own tojson output produces, so the
 # round trip through `read` below is exact.
+#
+# verdict/has_evidence (subagent self-report gate): a subagent's final report is the ONLY thing
+# that reaches the lead through this hook's tool_response, whatever shape a given build sends it
+# in -- bare string, a content-block array (each block possibly carrying .text), or an object
+# (either {text:...} directly or {content:[...]} one level down, same block-array shape
+# recursively). text_of below normalizes all three to one string without assuming which shape
+# this build uses; anything that matches none of them (an object with neither text nor content,
+# a number, null) falls through its own `else ""` to empty text rather than erroring, same
+# fail-open posture the rest of this hook already takes with jq itself. verdict is the first of
+# PASS/ISSUES/BLOCKED/DONE (in that priority order, not text position) found as a whole word;
+# has_evidence is whether that text carries anything checkable -- a path:line, a `$ ` command
+# line, or `exit <digit>` -- backing the verdict up. Computed here, in the one jq call this hook
+# already pays for per dispatch, so this costs no second fork.
 jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' --arg gph '@@VSTACK_PREV_GAP@@' '
+  def text_of:
+    if type == "string" then .
+    elif type == "array" then
+      (map(
+          if type == "object" then
+            (.text // (if has("content") then (.content | text_of) else "" end) // "")
+          elif type == "string" then .
+          else "" end
+        ) | join("\n"))
+    elif type == "object" then
+      (.text // (if has("content") then (.content | text_of) else "" end) // "")
+    else "" end;
   (now) as $nowval
   | (.tool_name // "") as $tn
   | (.session_id // "") as $sid
   | (
       if ($tn == "Agent" or $tn == "Task") then
         ((.tool_input // {}) as $ti
+         | ((if has("tool_response") then .tool_response else null end) | text_of) as $text
+         | ( if ($text | test("\\bPASS\\b")) then "PASS"
+             elif ($text | test("\\bISSUES\\b")) then "ISSUES"
+             elif ($text | test("\\bBLOCKED\\b")) then "BLOCKED"
+             elif ($text | test("\\bDONE\\b")) then "DONE"
+             else null end ) as $verdict
+         | ( ($text | test("[A-Za-z0-9_./-]+\\.[a-z]+:[0-9]+"))
+             or ($text | test("^\\$ "; "m"))
+             or ($text | test("exit [0-9]")) ) as $has_evidence
          | {
              ts: ($nowval | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
              session_id: (if $sid == "" then null else $sid end),
@@ -289,15 +323,18 @@ jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' --ar
              cwd: (.cwd // null),
              isolation: ($ti.isolation // null),
              run_in_background: (if ($ti | has("run_in_background")) then $ti.run_in_background else null end),
-             derived_prev_dispatch_gap_s: $gph
-           }
-         | tojson)
-      else "" end
-    ) as $row
-  | [$tn, $sid, $row, ($nowval | floor | tostring)] | @tsv
+             derived_prev_dispatch_gap_s: $gph,
+             verdict: $verdict,
+             has_evidence: $has_evidence
+           } as $rowobj
+         | [($rowobj | tojson), (if ($verdict != null and $has_evidence == false) then "1" else "0" end)])
+      else ["", "0"] end
+    ) as $rowpair
+  | [$tn, $sid, $rowpair[0], ($nowval | floor | tostring), $rowpair[1]] | @tsv
 ' 2>/dev/null)
-IFS=$'\t' read -r tool_name sid encoded_row now_epoch <<< "$jq_out"
+IFS=$'\t' read -r tool_name sid encoded_row now_epoch emit_unverified <<< "$jq_out"
 case "$now_epoch" in ''|*[!0-9]*) now_epoch=0 ;; esac
+case "$emit_unverified" in 1) emit_unverified=1 ;; *) emit_unverified=0 ;; esac
 
 # Defense in depth: the settings.json matcher is what actually restricts which PostToolUse
 # events reach this script, but a hook that trusts its own wiring to be the only thing standing
@@ -406,6 +443,17 @@ if [ "${VSTACK_NO_REPLAY_LOG:-0}" != "1" ] && [ -n "$encoded_row" ]; then
 ) 2>/dev/null
 fi
 
-# Hook contract: JSON-on-stdout-or-nothing, same as every other hook in this directory. This one
-# has nothing to tell the model -- it is pure plumbing for the statusline -- so it says nothing.
+# Hook contract: JSON-on-stdout-or-nothing, same as every other hook in this directory. Usually
+# this one has nothing to tell the model -- pure plumbing for the statusline -- so it says
+# nothing. The one exception: $emit_unverified, set above in the same jq pass that built the
+# replay row, is "1" only when this dispatch's own tool_response text carried a verdict word
+# (PASS/ISSUES/BLOCKED/DONE) with no path:line / `$ ` line / `exit <digit>` anywhere in that same
+# text to back it up -- a subagent grading its own work with nothing the lead can check, on the
+# one payload this hook exists to see. The literal below is fixed (verdict/has_evidence already
+# decided in jq; nothing here is interpolated), so no escaping and no second process are needed
+# to emit it. The "UNVERIFIED:" prefix is a contract asserted verbatim elsewhere -- not
+# paraphrased.
+if [ "$emit_unverified" = 1 ]; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"UNVERIFIED: subagent verdict without command output or file:line; re-run its test or grep before using it."}}'
+fi
 exit 0

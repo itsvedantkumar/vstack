@@ -4,6 +4,22 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.70.0 — 2026-09-03
+
+- **Every shipped mechanism records what justifies it, and the record expires.**
+  `claude/inventory.json` gains `components.hooks.mechanisms`: one entry per hook mechanism with
+  `justified_by` (a measurement run, a VERIFIED literature entry, or `none` with a decide-by date).
+  Check 65 reads it: every wired hook command maps to an entry, literature citations must still read
+  VERIFIED, a measurement expires when the hook's logic changes after the measured commit, and an
+  unmeasured blocking mechanism goes red past its date. Rows 65, 65b and 65c falsify the three
+  lanes. Why: the breadth mandate was retired on a measurement in 1.69.0; the naming, swarm-first
+  and serial-tail mandates had nothing behind them and no date by which that would be noticed
+  (`docs/research/harness-effect/findings/plan-next-mechanisms.md`).
+- **Subagent verdicts are checked at admission.** `dispatch-counter.sh` reads the Agent or Task
+  result as it enters the lead's context and records `verdict` and `has_evidence` in the replay
+  row; a verdict with no command output or file:line behind it adds an `UNVERIFIED:` line to the
+  lead's context. Check 44 gains the two lanes, row 44h falsifies the evidence extractor.
+
 ## 1.69.0 — 2026-09-03
 
 - **The breadth retirement was measured, and held.** Paired rerun on the three-file fixture,

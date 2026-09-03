@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.69.0",
+    "version": "1.70.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -410,7 +410,192 @@
       },
       "shell_scripts_in_repo": 53,
       "user_lane_exempt": [],
-      "user_lane_exempt_rule": "A hook that ships to the plugin lane only must be named here with a one-line reason. Empty today: installing vstack for real use is what install.sh does, so every shipped hook belongs in the user lane. Mirrors USER_LANE_EXEMPT in .claude/verify.sh check 11."
+      "user_lane_exempt_rule": "A hook that ships to the plugin lane only must be named here with a one-line reason. Empty today: installing vstack for real use is what install.sh does, so every shipped hook belongs in the user lane. Mirrors USER_LANE_EXEMPT in .claude/verify.sh check 11.",
+      "mechanisms": [
+        {
+          "id": "guard-destructive",
+          "file": "guard-destructive.sh",
+          "event": "PreToolUse",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "verify-gate",
+          "file": "verify-gate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "session-skill-routing",
+          "file": "inject-session-context.sh",
+          "event": "SessionStart",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "trust-hash-pinning",
+          "file": "verify-gate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "agent-naming",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "swarm-first",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "serial-tail",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "delegation-log-row",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "breadth-retired",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": false,
+          "justified_by": {
+            "kind": "measurement",
+            "file": "tests/evals/showcase/runs/20260903-022953.55428.jsonl",
+            "run_id": "20260903-022953.55428.jsonl",
+            "entry": null,
+            "measured_head": "773f3d4b6fd38f7c23771d7ed7b15e38cfca0e5b",
+            "decide_by": null
+          }
+        },
+        {
+          "id": "dispatch-counter",
+          "file": "dispatch-counter.sh",
+          "event": "PostToolUse",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "per-prompt-digest",
+          "file": "inject-session-context.sh",
+          "event": "UserPromptSubmit",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          },
+          "note": "the 9 of 9 vs 7 of 9 routing ablation in docs/what-this-actually-does.md predates the current hook logic (FANOUT and MANDATE lines rewritten in 1.68.0 and 1.69.0), so it does not justify today's digest; re-measure by 2026-09-17"
+        },
+        {
+          "id": "goal-gate",
+          "file": "goal-gate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        },
+        {
+          "id": "format",
+          "file": "format.sh",
+          "event": "PostToolUse",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          }
+        }
+      ]
     },
     "wrappers": {
       "dir": "bin",
@@ -557,7 +742,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 65,
+      "declared_checks": 66,
       "check_ids": [
         "0",
         "1",
@@ -623,7 +808,8 @@
         "61b",
         "62",
         "63",
-        "64"
+        "64",
+        "65"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
@@ -644,7 +830,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 109,
+        "rows": 113,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way.",
         "cost_model": {
           "seconds_per_row": 65,

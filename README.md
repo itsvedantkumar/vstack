@@ -188,7 +188,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 65 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 66 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -280,7 +280,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 65 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 66 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -289,13 +289,13 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 65 checks
+./.claude/verify.sh                  # 66 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 109 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 113 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.
