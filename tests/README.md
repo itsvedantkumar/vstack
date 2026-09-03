@@ -42,6 +42,11 @@ output of each recorded in `releases/<tag>.md` and `--publish` creating the GitH
 through the API. Written for the day GitHub Actions stopped starting jobs; see
 `docs/releasing-this-repo.md`, "Without GitHub Actions", for what it does and does not prove.
 
+The falsify lane runs with `FALSIFY_TIMEOUT_S=7200` unless the environment sets it. The
+harness default of 3600 s was measured on an idle machine; the first v1.71.0 lane ran the sweep
+beside a benchmark and a container build and hit that limit with 0 of 7 shards finished, which
+the lane recorded as a red row. The idle rerun took 4389 s. Run the lane on an idle machine, or raise the variable.
+
 ## falsify-parallel.sh
 
 `gate-falsifiability.sh` scoped to a subset of rows via `VSTACK_FALSIFY_ROWS`, run across N

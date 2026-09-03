@@ -89,7 +89,7 @@ lane require-checks     rc   ./tests/require-checks-green.sh
 lane bin-scripts        rc   ./tests/bin-scripts.sh
 lane tree-restored      rc   git diff --exit-code
 lane install-matrix     rc   ./tests/install-matrix.sh
-lane falsify            "last:FALSIFIABLE (" ./tests/falsify-parallel.sh
+lane falsify            "last:FALSIFIABLE (" env FALSIFY_TIMEOUT_S="${FALSIFY_TIMEOUT_S:-7200}" ./tests/falsify-parallel.sh
 lane container-matrix   rc   env VSTACK_REF="$TAG" ./tests/container-matrix.sh
 
 if [ "$RED" -eq 0 ]; then
