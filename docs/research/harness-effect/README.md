@@ -16,7 +16,8 @@ customer has been served and the measurements are preregistered.
   the provisional change list the literature implies
   ([`findings/recommendations-draft.md`](findings/recommendations-draft.md)), and whether
   OpenCode can host a Stop gate at all
-  ([`findings/opencode-stop-gate-feasibility.md`](findings/opencode-stop-gate-feasibility.md)). These are the facts
+  ([`findings/opencode-stop-gate-feasibility.md`](findings/opencode-stop-gate-feasibility.md)), and the merged plan for
+  items 2 to 7 ([`findings/plan-next-mechanisms.md`](findings/plan-next-mechanisms.md)). These are the facts
   the literature has to explain or contradict.
 
 ## Literature files and their verification status
