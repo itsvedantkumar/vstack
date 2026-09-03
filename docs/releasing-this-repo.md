@@ -69,3 +69,23 @@ floor on its own; re-derive the recorded numbers when you re-derive the ceiling,
 When `resolve` times out it exits 2 and the caller withholds publication **without deleting the
 tag**. The tag survives, nothing is published, and a re-dispatch of the release workflow finishes
 the job once the required checks are green. A red verdict deletes; an undecided one does not.
+
+## Without GitHub Actions
+
+On 2026-09-04 GitHub stopped starting jobs for this account ("locked due to a billing issue",
+every job, three seconds in). The gates are scripts, so the workflows are not the only place
+they can run. `tests/release-lane.sh <tag>` runs every lane both workflows run, in the same
+order, in a worktree checked out at the tag: the gate with no skips allowed, compare-baseline,
+the breadth and dispatch reproductions, require-checks-green, bin-scripts, tree restored, the
+install matrix with its network lanes, the falsifiability sweep across seven clones, and the
+container matrix on three images. What each lane printed goes verbatim into
+`releases/<tag>.md` with the commit and tree hashes, indexed in [`releases/README.md`](../releases/README.md).
+`--publish` then creates the GitHub Release through the API with the CHANGELOG section as
+notes and the evidence file attached, which is what release.yml's publish job did.
+
+What this cannot give you: an independent recorder. The verdict is written by the machine that
+produced it, which is the shape `docs/checks-that-inherit-their-answer.md` warns about. The
+lane refuses a tag that is not on origin, refuses to publish on any red lane, and copies
+accounting lines rather than summarising them, so a reader can re-run the same scripts on the
+same tree hash. Treat a green `releases/<tag>.md` as a claim with its evidence attached, not as
+a check-run.

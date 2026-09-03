@@ -35,6 +35,13 @@ intended check, and a mutation that lands somewhere unreachable proves nothing a
 looking like it passed — appending `exit 3` to the end of `install.sh` did exactly that, because
 the dry-run path exits before reaching it.
 
+## release-lane.sh
+
+Every lane verify.yml and release.yml run, on this machine, against a pushed tag, with the
+output of each recorded in `releases/<tag>.md` and `--publish` creating the GitHub Release
+through the API. Written for the day GitHub Actions stopped starting jobs; see
+`docs/releasing-this-repo.md`, "Without GitHub Actions", for what it does and does not prove.
+
 ## falsify-parallel.sh
 
 `gate-falsifiability.sh` scoped to a subset of rows via `VSTACK_FALSIFY_ROWS`, run across N
