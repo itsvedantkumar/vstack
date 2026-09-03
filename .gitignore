@@ -15,3 +15,4 @@ __pycache__/
 # objects to, and which are not ours to redistribute.
 tests/evals/swebench/*.json
 tests/evals/showcase/.work.*
+tests/evals/showcase/runs/*-red/

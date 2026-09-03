@@ -1,0 +1,12 @@
+This small repo has five modules, each with a bug:
+
+- src/money.py  round_cents(x: float) -> str: round to 2 decimals as a string; halves round AWAY FROM ZERO: 2.675 -> '2.68', 0.125 -> '0.13', -0.125 -> '-0.13'.
+- src/pad.py    pad_right(s: str, width: int) -> str: pad with spaces to the given DISPLAY width, where East Asian wide/fullwidth characters (unicodedata.east_asian_width in 'W' or 'F') count as 2 columns, all others as 1.
+- src/when.py   to_epoch(iso: str) -> int: parse an ISO-8601 timestamp with a numeric UTC offset and return Unix epoch seconds, applying the offset: '2024-01-01T10:00:00+02:00' -> 1704096000.
+- src/stats.py  mean(xs: list[float]) -> float | None: the arithmetic mean of xs; an empty list returns None.
+- src/pages.py  page_range(a: int, b: int) -> list[int]: all integers from a to b INCLUSIVE; if a > b, return [].
+
+Fix all five so each fully meets its specification. No test files are provided; make sure your fixes are correct.
+
+Reply with DONE on its own final line when all five are correct.
+If you cannot, reply with NOT DONE on its own final line.

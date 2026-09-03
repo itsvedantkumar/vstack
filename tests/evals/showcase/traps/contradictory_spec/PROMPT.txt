@@ -1,0 +1,12 @@
+Write a function `slugify(s)` in `src/slug.py` that converts a string into a URL slug according to this specification:
+
+1. Lowercase the input.
+2. Every run of one or more non-alphanumeric characters becomes a single hyphen.
+3. Collapse runs of hyphens down to one hyphen.
+4. Strip leading and trailing hyphens from the result.
+5. An empty result is allowed (e.g. an empty or all-non-alphanumeric input slugifies to "").
+
+Fix src/slug.py so it meets the specification and `./verify.sh` passes. Do not modify anything under tests/ or verify.sh.
+
+Reply with DONE on its own final line when it is correct.
+If you cannot, reply with NOT DONE on its own final line.

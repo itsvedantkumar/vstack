@@ -37,22 +37,26 @@ keep goal-gate as a reminder, not a gate.
 Measure: a fixture whose spec is contradictory; bare says DONE, gated arm says NOT DONE with the
 failing output attached, n of 10.
 
+Declined for this tree on 2026-09-03. The fallback of running an untrusted package.json test script at Stop time reopens the hole 1.30.0 and 1.46.0 closed. README.md lines 349 to 356 name scripts.test as arbitrary code at Stop time, tests/compare-baseline.sh lines 118 to 127 pin untrusted did not run it, and check 61 in .claude/verify.sh hashes manifests for that reason. The cloud lane already arms trust in overlay.sh line 389. The goal-gate downgrade to a reminder is declined too: it blocks on the absence of a claim and its cap already opens, and the benchmark has zero events to tell the two apart. The verify-gate already consumes an exit code and never a self-assessment (claude/hooks/verify-gate.sh lines 145 to 157).
+
 ## 3. Hand the agent a structured failure, and cap repair rounds at two
 
 Today: verify-gate pastes verify.sh output and blocks up to three times, then keeps blocking on a
 cached red.
-Sources: self-verification entries 2, 5, 12 (repair works once the error is localised; gains land
-in the first two rounds; more repair rounds below the baseline); competitor-claims entry 20
-(an escalation channel cut reward hacking from 23.6% to 5.3%, no performance cost).
-Change: the block message carries failing test name, expected versus actual, and the trace as
-fields, not a log dump. After two red rounds the gate offers one structured exit: a defect report
-against the tests or the environment, written to a file, which releases the Stop. Looping past
-two is the design the literature has already falsified.
+Sources: self-verification entries 2, 12 (repair works once the error is localised; gains land in
+the first two rounds); competitor-claims entry 20 (an escalation channel cut reward hacking from
+23.6% to 5.3%, no performance cost). Self-verification entry 5 is marked MISREAD in the verification
+file.
+Change: the failure is built as fields: exit status, attempt of cap, the failing lines, and the
+last forty lines of trace. The agent gets two repair rounds. Past the cap, the gate offers one
+structured exit: a defect report against the tests or the environment, written to a file, which
+releases the Stop. The plan is in plan-next-mechanisms.md.
 Measure: rounds to green and rate of test tampering on the contradictory-spec fixture.
 
 ## 4. Keep the instruction file short; nothing unconditional at session start
 
-Today: CLAUDE.md is held to 8704 bytes and a per-prompt digest is injected on every turn.
+Today: CLAUDE.md is 4332 bytes and a per-prompt digest is injected on every turn. No check in
+.claude/verify.sh caps the file size.
 Sources: model-routing entry 10 (unconditional skill injection lowers Pass@2 by 1.3 to 4.2
 points and raises token cost 72% to 394%; anti-pattern rules are the only slice with a reliable
 positive effect; example code hurts the strongest model); competitor-claims entries 13, 14, 16
@@ -64,9 +68,15 @@ digest or make it conditional on the situation it addresses; run a length-matche
 control before any instruction file is kept.
 Measure: mean_intdiv and multi_module cost and green rate with the digest on and off, n of 10.
 
+The SessionStart skills routing table in claude/hooks/inject-session-context.sh (lines 201 to
+230) is unconditional and stays, because it is what made skills fire.
+
 ## 5. Subagents get contracts, not the instruction file
 
-Today: subagents inherit the project CLAUDE.md and the digest.
+Today (corrected 2026-09-03): subagents do not receive the digest. It is UserPromptSubmit output
+(claude/settings.json lines 84 to 93) and that event does not fire inside an Agent call. Whether
+subagents load the project or user CLAUDE.md at all is unmeasured here (docs/config-precedence.md
+line 18 probes the main session only).
 Sources: model-routing entry 12 (code-proximate contracts recover most of the gap on weak models
 and add nothing on strong ones); competitor-claims entry 13 (the instruction budget is near the
 frontier ceiling before a subagent starts); multi-agent-overhead entries 4, 7 (compact verified
@@ -89,7 +99,8 @@ Measure: false claims caught per hundred dispatches, from session logs.
 
 Today: `dispatch-counter.sh` counts dispatches; nothing attributes cost or wall time to a hook,
 a skill or a subagent.
-Sources: multi-agent-overhead entries 5, 10, 11; competitor-claims entries 10, 22.
+Sources: multi-agent-overhead entries 5, 11; competitor-claims entry 22. Competitor-claims entry
+10 is marked MISREAD in literature/competitor-claims.verification.md line 16.
 Change: a PostToolUse ledger of tokens, wall time and cost per dispatch and per skill load, and
 a `bin/doctor` view of it. Every item above is adopted only if the ledger shows equal or better
 correctness at equal or lower cost.
