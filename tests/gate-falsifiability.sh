@@ -1181,7 +1181,7 @@ exit 0
       # see: the hook is still referenced, still under PostToolUse, so the referrer/coverage
       # loops in check 11 stay green while every session that dispatches via Agent (not Task)
       # goes uncounted. Only a check that reads the matcher value itself notices.
-      sed -i.t 's/matcher:"Agent|Task"/matcher:"Task"/' install.sh && rm -f install.sh.t ;;
+      sed -i.t 's/matcher:"Agent|Task|Skill"/matcher:"Task|Skill"/' install.sh && rm -f install.sh.t ;;
   44b) # Direction 3a (the row lands): redirect the replay-row append to a decoy file, one line,
       # nothing else touched. The row is still built, dispatch_index still substituted, the
       # counter file still advances -- it just never reaches $log_file, which is exactly the
