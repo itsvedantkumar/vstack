@@ -43,6 +43,16 @@ misread so far is listed with its correction at the foot of the matching verific
 Across all ten files: 148 entries verified, 10 misread, 0 unreachable. Nothing in
 `literature/` is quoted in the README or the paper until its file has a verification beside it.
 
+The ten files above were one batch. The standing version of that batch lives in
+[`queue/`](queue/): [`queue/run-queue.sh`](queue/run-queue.sh) drafts one report per line of
+[`queue/topics.tsv`](queue/topics.tsv) with [`queue/brief-draft.md`](queue/brief-draft.md), gives
+every landed report its second reading with [`queue/brief-verify.md`](queue/brief-verify.md), and
+when the queue is dry asks the model for six more topics with
+[`queue/brief-generate.md`](queue/brief-generate.md), drawn from the open questions in `findings/`.
+Eighteen topics are queued and none has run: the OpenCode Go weekly quota was nearly spent on
+2026-09-03, so the runner is not scheduled anywhere. `run-queue.sh --status` shows the queue and
+`--index` prints the table rows for landed files this README does not yet name.
+
 ## Earlier work this folder builds on
 
 - `../harness-value-literature-2026-08.md`, the first survey, done by hand.
