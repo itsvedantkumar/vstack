@@ -396,6 +396,127 @@ STALE_EOF
   return 0
 }
 
+# --- --ledger ------------------------------------------------------------------------------
+# claude/hooks/dispatch-counter.sh appends one JSONL row per Agent/Task dispatch AND, since the
+# matcher grew Skill, one per skill load. Both rows carry `duration_ms` straight off the
+# PostToolUse payload, and nothing read them: the log answered "what happened" only to whoever
+# opened it with jq by hand. This sums that time per session, grouped by `subagent_type` for
+# dispatch rows and by `skill` for skill_load rows -- which is the one question the log can
+# answer that a transcript cannot, because a transcript loses the durations at compaction.
+#
+# Reads the SAME path the writer writes, derived the same way ($VSTACK_REPLAY_LOG, else
+# $CDIR/vstack-replay-log.jsonl), not a second spelling of it: a reader with its own idea of
+# where the file lives is how this repository shipped a statusline reading a file no writer
+# created. $CDIR is already CLAUDE_CONFIG_DIR-or-~/.claude, which is exactly the hook's own
+# fallback.
+#
+# Rows are parsed one line at a time with `fromjson? // null` rather than slurped: the writer
+# appends without a lock, so a torn final line is a real possibility, and `jq -s` over the whole
+# file turns one bad byte into "the ledger is empty". Unparseable lines are COUNTED and printed,
+# never silently dropped -- a row this cannot read is the one it should say least about.
+#
+# Refuses to print a green-looking empty table (exit 3, "could not measure"): a ledger over zero
+# rows and a ledger over a machine that has never dispatched are the same output, and this
+# repository's own doctrine is that a gate reporting success having read nothing is the defect.
+run_ledger() {
+  _lg_json=0
+  [ "${1:-}" = "--json" ] && _lg_json=1
+  _lg_file="${VSTACK_REPLAY_LOG:-$CDIR/vstack-replay-log.jsonl}"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "doctor --ledger: requires jq, not found on PATH (brew install jq / apt install jq)" >&2
+    return 3
+  fi
+
+  if [ ! -f "$_lg_file" ]; then
+    if [ "$_lg_json" = 1 ]; then
+      jq -n --arg src "$_lg_file" \
+        '{schemaVersion:1, mode:"ledger", source:$src, available:false,
+          rowsRead:0, unparseableLines:0, groups:[]}'
+    else
+      echo "── ledger ──"
+      echo "no replay log at $_lg_file"
+      echo "nothing was read, so this is a failure rather than a pass"
+    fi
+    return 3
+  fi
+
+  # One jq pass builds the whole document, human mode included -- the table below is formatted
+  # from this same JSON so the two shapes cannot report different numbers.
+  _lg_doc=$(jq -R -n --arg src "$_lg_file" '
+    reduce inputs as $line ({rows: [], bad: 0};
+      (($line | fromjson?) // null) as $o
+      | if ($o | type) == "object" then .rows += [$o]
+        elif ($line | test("^[[:space:]]*$")) then .
+        else .bad += 1 end)
+    | .bad as $bad
+    | .rows as $rows
+    | ( $rows
+        | map(
+            ((.kind // "dispatch") == "skill_load") as $isskill
+            | { session: (.session_id // "(no session_id)"),
+                kind:    (if $isskill then "skill" else "agent" end),
+                name:    (if $isskill then (.skill // "(unnamed skill)")
+                          else (.subagent_type // .tool_name // "(untyped)") end),
+                ms:      (if (.duration_ms | type) == "number" then .duration_ms else 0 end),
+                timed:   ((.duration_ms | type) == "number") } )
+        | group_by([.session, .kind, .name])
+        | map({ session_id:  .[0].session,
+                kind:        .[0].kind,
+                name:        .[0].name,
+                calls:       length,
+                timed_calls: (map(select(.timed)) | length),
+                duration_ms: (map(.ms) | add) })
+        | sort_by(.session_id, .kind, .name) ) as $groups
+    | { schemaVersion: 1, mode: "ledger", source: $src, available: true,
+        rowsRead: ($rows | length), unparseableLines: $bad, groups: $groups }
+  ' "$_lg_file" 2>/dev/null)
+
+  if [ -z "$_lg_doc" ]; then
+    echo "doctor --ledger: could not parse $_lg_file at all (jq produced nothing)" >&2
+    return 3
+  fi
+
+  _lg_n=$(printf '%s' "$_lg_doc" | jq -r '.groups | length')
+  _lg_read=$(printf '%s' "$_lg_doc" | jq -r '.rowsRead')
+  _lg_bad=$(printf '%s' "$_lg_doc" | jq -r '.unparseableLines')
+
+  if [ "$_lg_json" = 1 ]; then
+    printf '%s\n' "$_lg_doc"
+    [ "$_lg_n" -gt 0 ] && return 0
+    return 3
+  fi
+
+  echo "── ledger ──"
+  echo "source: $_lg_file ($_lg_read row(s) read, $_lg_bad unparseable)"
+  if [ "$_lg_n" -eq 0 ]; then
+    echo "no rows to sum, so this is a failure rather than a pass"
+    return 3
+  fi
+  echo
+  # Fixed field widths for the human table only. The machine contract is --json; nothing in this
+  # repository may parse these columns back (padding is a display choice, not an interface).
+  printf '%-38s  %-5s  %-26s  %5s  %12s\n' "session" "kind" "name" "calls" "total_ms"
+  printf '%s' "$_lg_doc" | jq -r '.groups[]
+      | [.session_id, .kind, .name, (.calls|tostring), (.duration_ms|tostring)] | @tsv' \
+    | while IFS=$'\t' read -r _s _k _nm _c _ms; do
+        printf '%-38s  %-5s  %-26s  %5s  %12s\n' "$_s" "$_k" "$_nm" "$_c" "$_ms"
+      done
+  echo
+  printf '%s' "$_lg_doc" | jq -r '
+    "totals: \(.groups | length) group(s), \(.groups | map(.calls) | add) call(s), " +
+    "\(.groups | map(.duration_ms) | add) ms across " +
+    "\(.groups | map(.session_id) | unique | length) session(s)"'
+  # Timing coverage is stated, not assumed: duration_ms is null on any row whose runtime did not
+  # send it, and those rows contribute 0 ms. A total that silently includes them reads as
+  # "these calls were instant" rather than "these calls were not timed".
+  printf '%s' "$_lg_doc" | jq -r '
+    (.groups | map(.calls) | add) as $c | (.groups | map(.timed_calls) | add) as $t
+    | if $t < $c then "note: \($c - $t) of \($c) call(s) carried no duration_ms and count as 0 ms"
+      else empty end'
+  return 0
+}
+
 # --- argument dispatch -------------------------------------------------------------------
 # One recognized flag in $1, nothing after it. Unrecognized flags and stray extra arguments
 # are a usage error, not a thing to guess about and run the full audit anyway -- a typo'd
@@ -405,13 +526,17 @@ case "${1:-}" in
     # No audit: this branch exits before resolve_vstack_repo, run_drift, or any of the ok/bad/
     # note checks below ever run. `doctor --help` costs nothing but printing this text.
     cat <<'EOF'
-usage: doctor [--drift | --json | --mcp | --help]
+usage: doctor [--drift | --json | --ledger [--json] | --mcp | --help]
 
   (no flags)   full human-readable health audit of this machine's vstack install
   --drift      compare the installed state against the vstack repo checkout it came from
   --json       machine-readable audit (schemaVersion 1): version, install lane, profile,
                drift, trust state, dependencies, last verification, checks, skips, exit
                code. Requires jq; fails naming jq if jq is not on PATH.
+  --ledger     sum duration_ms from the dispatch/skill replay log
+               ($VSTACK_REPLAY_LOG, else ~/.claude/vstack-replay-log.jsonl), per session,
+               grouped by subagent_type (dispatch rows) or skill name (skill_load rows).
+               Add --json for the same numbers as a document. Requires jq.
   --mcp        (combine with no other flag) also list configured MCP servers and their
                connection state
   -h, --help   show this help and exit; performs no audit
@@ -421,26 +546,34 @@ exit codes:
   1  drift found, or one or more checks failed
   2  usage error — unknown flag or unexpected extra argument
   3  could not measure — a hard dependency for the requested mode is missing
-     (e.g. --json without jq on PATH)
+     (e.g. --json without jq on PATH), or --ledger found no rows to sum
 EOF
     exit 0
     ;;
-  ""|--drift|--json|--mcp)
+  ""|--drift|--json|--mcp|--ledger)
     ;;
   *)
     echo "doctor: unknown argument: ${1:-}" >&2
-    echo "usage: doctor [--drift | --json | --mcp | --help]" >&2
+    echo "usage: doctor [--drift | --json | --ledger [--json] | --mcp | --help]" >&2
     exit 2
     ;;
 esac
-if [ "$#" -gt 1 ]; then
+# `--ledger --json` is the ONE two-argument form, and it is spelled out rather than allowed by
+# relaxing the arity test: every other mode still takes exactly one flag, so `--drift --json`
+# (which would silently run --drift and drop --json) stays the usage error it already was.
+if [ "$#" -gt 1 ] && ! { [ "$#" -eq 2 ] && [ "${1:-}" = "--ledger" ] && [ "${2:-}" = "--json" ]; }; then
   echo "doctor: unexpected extra argument(s) after '$1'" >&2
-  echo "usage: doctor [--drift | --json | --mcp | --help]" >&2
+  echo "usage: doctor [--drift | --json | --ledger [--json] | --mcp | --help]" >&2
   exit 2
 fi
 
 if [ "${1:-}" = "--drift" ]; then
   run_drift
+  exit $?
+fi
+
+if [ "${1:-}" = "--ledger" ]; then
+  run_ledger "${2:-}"
   exit $?
 fi
 

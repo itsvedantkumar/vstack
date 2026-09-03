@@ -767,7 +767,7 @@ elif [ "$DRY" = 0 ]; then
           PostToolUse: [
             { matcher:"Edit|Write|MultiEdit",
               hooks: [ {type:"command", command:($h+"/format.sh"), statusMessage:"format"} ] },
-            { matcher:"Agent|Task",
+            { matcher:"Agent|Task|Skill",
               hooks: [ {type:"command", command:($h+"/dispatch-counter.sh"), statusMessage:"dispatch count"} ] } ],
           Stop: [
             { hooks: [ {type:"command", command:($h+"/verify-gate.sh")},

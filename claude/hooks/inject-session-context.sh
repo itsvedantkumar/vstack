@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Session-context injector. SessionStart gets the full operating-mode baseline plus
-# workspace conventions; UserPromptSubmit gets a two-line digest so the discipline
-# survives long sessions without paying the full block every turn.
+# Session-context injector. SessionStart gets the skill/agent routing baseline plus workspace
+# conventions; UserPromptSubmit gets a digest that is empty unless a condition fired (a
+# grill-worthy prompt, or an outstanding mandate strike), so a turn that tripped nothing pays
+# nothing.
 # Portable: no absolute /Users paths, so it also works from a committed repo overlay.
 #
 # VSTACK_PROFILE=skills emits ONLY the skill routing block and nothing else. The plugin
-# build sets it: routing is what makes skills fire, but the token, delegation and autonomy
-# rules are one person's operating policy and have no business being forced on someone who
-# installed a skill pack from a marketplace.
+# build sets it: routing is what makes skills fire, and the operating-policy prose that used to
+# sit above the routing block (token, delegation, autonomy and plan-mode rules) is gone from
+# both profiles now -- it was one person's policy, unmeasured, and paid on every session.
 #
 # jq is resolved rather than hardcoded to /usr/bin/jq. That path is macOS-only, and without it
 # the event lookup below failed and defaulted to SessionStart — which meant every prompt got
@@ -178,26 +179,25 @@ GRILL: run the grill-me skill when no more specific skill matches.'
 MANDATE skill=$_mcnt/2 delegate=$_mdcnt/2: dispatch + name a call sign now."
     fi
   fi
-  emit "$event" 'TOKENS: grep/ranges, not whole files; summarize, never dump.
-DELEGATE: mechanical -> worker/explorer, judgment -> sonnet agents. ACT, do not ask. Skills fire on the situation -- call the Skill tool.
-FANOUT: reads/searches split -> Skill swarm, ONE message; writes serial, one writer/file.'"$grill$mandate"
+  # The digest is now nothing but the two CONDITIONAL lines above. TOKENS, DELEGATE and FANOUT
+  # were unconditional -- paid on every turn of every session -- and bought nothing anyone
+  # measured: vstack spawned 0 of 10 subagents with DELEGATE and FANOUT present
+  # (docs/research/harness-effect/findings/plan-next-mechanisms.md:177-180, RESULTS:99-102), and
+  # no run ever attributed a token saving to TOKENS. The rules they stated survive where they are
+  # enforced rather than restated: skill-mandate.sh's delegate-swarm/-serial counters, which are
+  # what the MANDATE line reports.
+  #
+  # $grill and $mandate each carry a LEADING newline, because they used to be appended to three
+  # unconditional lines. Strip one so a fired digest does not open on a blank line; when neither
+  # fired the result is empty and emit() sends hookSpecificOutput with no additionalContext at
+  # all, which is the correct steady state for a prompt that tripped nothing.
+  digest="$grill$mandate"
+  emit "$event" "${digest#$'\n'}"
   exit 0
 fi
 
 MSG=$(cat <<'EOF'
-OPERATING MODE — SESSION BASELINE (a per-prompt digest re-pins the essentials).
-TOKENS: never read whole files (grep/glob + line ranges), never dump file contents to output
-(summarize), batch all independent tool calls in ONE message, cap context use.
-DELEGATE: the main loop is the expensive frontier model. Mechanical work (simple edits,
-boilerplate, renames, config, search, reads) -> worker/explorer (Haiku). Judgment work (code
-review, tests, debugging, security) -> Sonnet (code-reviewer/test-writer/debugger/
-security-auditor). Architecture -> planner. Keep only hard cross-cutting reasoning and final
-synthesis on the main thread. Subagents return tight summaries, never file dumps. Serialize
-edits to shared files. Skip delegation only for a truly trivial one-step ask.
-AUTONOMY: act without asking; assume + document + proceed. Still confirm irreversible
-destructive ops.
-PLAN MODE: preempts this. Forces builtin Explore/Plan agents, bars writes. MORTY and ZEEP
-unreachable, /team deferred until exit.
+OPERATING MODE — SESSION BASELINE.
 SKILLS + AGENTS: dispatch is attributed (e.g., "qa (BETH J-42) sampled X cases").
 Skills fire on the SITUATION, not a slash command. When one matches, call the Skill tool
 and follow it. Agent dispatch: each report says which agent, using roster call signs

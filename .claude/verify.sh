@@ -1102,14 +1102,49 @@ if command -v jq >/dev/null; then
   # consistency test between two things that can both be wrong -- update the README to say
   # ~0.0 KB and the whole check passes with a dead hook. Verified: that exact pair printed ok.
   #
-  # Floors are deliberately far below the measured sizes (305 / 3655 / 2178). They are not a
-  # second cap and must not fire when someone trims a sentence; they answer "did the hook say
-  # anything at all", which nothing else here asks.
+  # Floors are deliberately far below the measured sizes (215 fired digest / 3379 baseline /
+  # 2513 skills). They are not a second cap and must not fire when someone trims a sentence;
+  # they answer "did the hook say anything at all", which nothing else here asks.
   chk(){ # label value floor cap
     [ "$2" -ge "$3" ] || errs="$errs\n$1: $2 bytes is under the $3 byte floor -- the hook emitted nothing or nearly nothing"
     [ "$2" -le "$4" ] || errs="$errs\n$1: $2 bytes exceeds the $4 byte cap"
   }
-  chk "per-prompt digest"      "$(probe UserPromptSubmit '' 1)"  128  512
+  # The digest is CONDITIONAL-ONLY since the TOKENS/DELEGATE/FANOUT lines came out: a prompt
+  # that trips neither the grill trigger nor a mandate strike legitimately emits
+  # hookSpecificOutput with no additionalContext, ~60 bytes of JSON envelope. Probing that shape
+  # against a 128-byte floor would demand bytes the hook is correct not to spend, so the probe
+  # arms the FIRED form -- the one a real turn actually pays -- and the cap is applied to it.
+  #
+  # Both conditions seeded from the hook's own contract, read out of the source rather than
+  # guessed: a 400-character prompt clears the 320-char VSTACK_GRILL_CHARS threshold, and one
+  # counter file at $TMPDIR/vstack-mandate-<session_id>.unslop is exactly what skill-mandate.sh
+  # writes and what the digest's mandate block reads. Throwaway TMPDIR so this neither inherits
+  # a real session's grill marker (which would suppress the first-prompt lane) nor leaves one.
+  #
+  # The byte bounds alone cannot see one line go missing: measured here, both lines together are
+  # 215 B, grill alone 149 B and mandate alone 147 B, all three over a 128 B floor. So presence
+  # is asserted per line as well. The floor still answers "did the hook say anything at all";
+  # the two greps answer "did each conditional line arm when its condition holds", which is the
+  # only thing left in the digest and therefore the only thing left to lose.
+  _dg_tmp="${TMPDIR:-/tmp}/vstack-digest-verify.$$"
+  rm -rf "$_dg_tmp"; mkdir -p "$_dg_tmp"
+  printf '1' > "$_dg_tmp/vstack-mandate-c18digest.unslop"
+  _dg_prompt=$(awk 'BEGIN{s="";while(length(s)<400)s=s "rebuild the billing pipeline with retries and idempotency ";printf "%s", substr(s,1,400)}')
+  [ "${#_dg_prompt}" -ge 320 ] \
+    || errs="$errs\nthe digest probe built a ${#_dg_prompt}-character prompt, under the hook's 320-char grill threshold -- it would measure the unfired digest and call it the fired one"
+  _dg_json=$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"c18digest","prompt":"%s"}' "$_dg_prompt")
+  _dg_out=$(printf '%s' "$_dg_json" | TMPDIR="$_dg_tmp" bash claude/hooks/inject-session-context.sh 2>/dev/null)
+  rm -rf "$_dg_tmp"
+  _digest=$(printf '%s\n' "$_dg_out" | wc -c | tr -d ' ')
+  case "$_dg_out" in
+    *'GRILL: run the grill-me skill'*) : ;;
+    *) errs="$errs\nper-prompt digest: no GRILL line for a 400-character prompt -- the grill branch stopped firing, and the byte bounds cannot see it (mandate alone still clears the floor)" ;;
+  esac
+  case "$_dg_out" in
+    *'MANDATE skill=1/2'*) : ;;
+    *) errs="$errs\nper-prompt digest: no MANDATE skill=1/2 line with a seeded .unslop counter -- the mandate branch stopped reading skill-mandate.sh's counter files, and the byte bounds cannot see it" ;;
+  esac
+  chk "per-prompt digest"      "$_digest"                        128  512
 
   # The SessionStart baseline is the one probe that reaches the WORKSPACE CONVENTIONS block
   # (claude/hooks/inject-session-context.sh, "Repo root: $root - branch: $branch"). $root is
@@ -1168,14 +1203,17 @@ if command -v jq >/dev/null; then
   _baseline_inv=$(awk -v raw="$_baseline_raw" -v rl="${#_root_now}" -v bl="${#_branch_now}" \
     -v gl="${#_base_now}" 'BEGIN{print raw - 2*rl - bl - 3*gl}')
   _baseline_worst=$(awk -v inv="$_baseline_inv" 'BEGIN{print inv + 2*160 + 80 + 3*80}')
-  # Cap derived, not chosen: worst-case measured 4630 B on this commit (invariant text 3990 B +
+  # Cap derived, not chosen: worst-case measured 3905 B on this commit (invariant text 3265 B +
   # the hook's own 320+80+240 B worst-case root/branch/base padding), +25% headroom to match the
-  # philosophy stated at the top of this check. 5888 is that number rounded up to a clean
+  # philosophy stated at the top of this check. 4992 is that number rounded up to a clean
   # multiple of 128. Recompute _baseline_worst by hand if this ever needs re-deriving -- it is
-  # not a magic constant, it is this formula's output on the day it was set. Below this cap: the
-  # WORKSPACE CONVENTIONS block's structural text is bounded. Above it: something added prose
-  # there, on every checkout, regardless of path length or remote default branch.
-  _baseline_cap=5888
+  # not a magic constant, it is this formula's output on the day it was set. It was 5888 against
+  # a 4630 B worst case until the TOKENS/DELEGATE/AUTONOMY/PLAN MODE prose came out of the
+  # SessionStart block (989 B off the raw count); a cap left at its pre-trim value would have
+  # quietly granted 900 B of room the trim was the whole point of reclaiming. Below this cap:
+  # the WORKSPACE CONVENTIONS block's structural text is bounded. Above it: something added
+  # prose there, on every checkout, regardless of path length or remote default branch.
+  _baseline_cap=4992
   [ "$_baseline_worst" -le "$_baseline_cap" ] \
     || errs="$errs\nsession baseline: normalized $_baseline_worst bytes (raw $_baseline_raw B at this checkout) exceeds the $_baseline_cap byte worst-case cap"
 
@@ -1273,7 +1311,7 @@ if command -v jq >/dev/null; then
       || errs="$errs\nREADME quotes ~$_qs KB for the plugin session cost; live is ~$_ls KB"
   fi
   [ -z "$errs" ] \
-    && ok "injected context bounded (digest $(probe UserPromptSubmit '' 1) B, baseline $_baseline_raw B raw / $_baseline_inv B invariant / $_baseline_worst B worst-case)" \
+    && ok "injected context bounded (digest $_digest B fired / $(probe UserPromptSubmit '' 1) B unfired, baseline $_baseline_raw B raw / $_baseline_inv B invariant / $_baseline_worst B worst-case)" \
     || bad "injected context bounded" "$(printf '%b' "$errs")"
 else
   skip "injected context bounded" "jq not installed"
@@ -2305,6 +2343,9 @@ if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh 
   # unfired digest and would never see this, and the two add-ons were measured separately at 312
   # and 386 against a 512 cap -- separately fine, together 476, which is a budget nobody was
   # watching.
+  # "Every option on" needs the mandate strike too, and that reads a counter file keyed by the
+  # session id; without it this probe measured the grill line alone and called it the worst case.
+  printf '1' > "$g_dir/vstack-mandate-gv4.unslop"
   g_sz=$(TMPDIR="$g_dir" VSTACK_TERSE=1 \
          sh -c 'printf "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"gv4\",\"prompt\":\"$1\"}"' _ "$g_long" \
          | TMPDIR="$g_dir" VSTACK_TERSE=1 ./claude/hooks/inject-session-context.sh 2>/dev/null \
@@ -2337,7 +2378,15 @@ if command -v jq >/dev/null 2>&1 && [ -x claude/hooks/inject-session-context.sh 
   cp claude/hooks/inject-session-context.sh "$d_root/withglobal/.claude/hooks/"
   printf '{"hooks":{"UserPromptSubmit":[{"hooks":[{"command":"%s/.claude/hooks/inject-session-context.sh"}]}]}}' \
     "$d_root/withglobal" > "$d_root/withglobal/.claude/settings.json"
-  d_ev='{"hook_event_name":"UserPromptSubmit","session_id":"dv1","prompt":"x"}'
+  # The prompt is long on purpose. This probe reads "did the copy speak" as "is there an
+  # additionalContext key", and the per-prompt digest is conditional-only now (grill + mandate,
+  # nothing unconditional) -- so a one-character prompt makes a perfectly healthy copy emit no
+  # additionalContext, and all three must-speak cases read 0. A prompt over the hook's 320-char
+  # grill threshold puts a line in the digest whenever the copy is speaking at all, which is the
+  # signal this check has always meant to read. A suppressed copy still returns before the grill
+  # branch, so the quiet direction is unchanged.
+  d_prompt=$(awk 'BEGIN{s="";while(length(s)<400)s=s "rebuild the billing pipeline with retries and idempotency ";printf "%s", substr(s,1,400)}')
+  d_ev=$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"dv1","prompt":"%s"}' "$d_prompt")
   d_ask(){ # home, script -> 1 if any context was injected
     printf '%s' "$d_ev" | HOME="$1" "$2" 2>/dev/null | grep -c additionalContext
   }
@@ -3277,6 +3326,13 @@ if command -v jq >/dev/null; then
         *Agent*Task*|*Task*Agent*) ;;
         *) c44_errs="$c44_errs\ninstall.sh: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_im:-none found})" ;;
       esac
+      # 1.71.0: the same hook writes skill_load rows, which only exist if the matcher also names
+      # Skill. settings.json carried the new matcher first while install.sh kept the old one, and
+      # the two-name pattern above stayed green through it: an installer got no skill rows at all.
+      case $c44_im in
+        *Skill*) ;;
+        *) c44_errs="$c44_errs\ninstall.sh: dispatch-counter.sh matcher does not name Skill, so installs record no skill_load rows (matcher: ${c44_im:-none found})" ;;
+      esac
 
       # Direction 4 (pin, not fix): a failed dispatch is invisible today only because
       # dispatch-counter.sh is not wired under PostToolUseFailure -- the hook's own jq never
@@ -3294,6 +3350,10 @@ if command -v jq >/dev/null; then
     case "$c44_sm" in
       *Agent*Task*|*Task*Agent*) ;;
       *) c44_errs="$c44_errs\nclaude/settings.json: dispatch-counter.sh is not wired under a PostToolUse matcher naming both Agent and Task (matcher: ${c44_sm:-none found})" ;;
+    esac
+    case $c44_sm in
+      *Skill*) ;;
+      *) c44_errs="$c44_errs\nclaude/settings.json: dispatch-counter.sh matcher does not name Skill, so no skill_load rows land (matcher: ${c44_sm:-none found})" ;;
     esac
 
     c44_ptf=$(jq -r '.hooks.PostToolUseFailure[]? | select(any(.hooks[]?.command // ""; test("dispatch-counter\\.sh"))) | .matcher // "FOUND"' claude/settings.json 2>/dev/null)

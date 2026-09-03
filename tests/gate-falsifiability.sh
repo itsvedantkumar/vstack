@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -336,6 +336,7 @@ files_for(){ case "$1" in
   60)  printf 'docs/checks-that-inherit-their-answer.md' ;;
   12b) printf 'README.md' ;;
   20d) printf 'install.sh' ;;
+  44i) printf 'install.sh' ;;
   61)  printf 'install.sh' ;;
   61b) printf 'install.sh' ;;
   62)  printf 'tests/pretag-findings.sh' ;;
@@ -361,6 +362,7 @@ files_for(){ case "$1" in
   18b) printf 'README.md' ;;
   18c) printf 'claude/hooks/inject-session-context.sh' ;;
   18d) printf 'claude/hooks/inject-session-context.sh' ;;
+  18e) printf 'claude/hooks/inject-session-context.sh' ;;
   19)  printf 'claude/.claude-plugin/plugin.json' ;;
   20)  printf 'claude/commands/test.md' ;;
   20c) printf 'install.sh' ;;
@@ -476,6 +478,7 @@ label_for(){ case "$1" in
   18b) printf 'injected context bounded' ;;
   18c) printf 'injected context bounded' ;;
   18d) printf 'injected context bounded' ;;
+  18e) printf 'injected context bounded' ;;
   19)  printf 'plugin manifests valid' ;;
   20)  printf 'referenced install paths exist' ;;
   20b) printf 'referenced install paths exist' ;;
@@ -516,6 +519,7 @@ label_for(){ case "$1" in
   44f) printf 'dispatch counter join, both directions' ;;
   44g) printf 'dispatch counter join, both directions' ;;
   44h) printf 'dispatch counter join, both directions' ;;
+  44i) printf 'dispatch counter join, both directions' ;;
   65)  printf 'every shipped mechanism records what justifies it' ;;
   65b) printf 'every shipped mechanism records what justifies it' ;;
   65c) printf 'every shipped mechanism records what justifies it' ;;
@@ -896,7 +900,27 @@ exit 0
       # deletion as correct. The row now mutates the behaviour, not the allowlist.
       perl -0pi -e 's/\| \(\$dest \* \$ship\)/| (\$dest * \$ship)\n    | delpaths([(keys - \$A)[] | [.]])/' overlay.sh ;;
   18) # The cap lane: pad the per-prompt digest past its 512 byte ceiling.
-      perl -0pi -e 's/(DELEGATE: mechanical)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
+      #
+      # Re-anchored on `GRILL:` when the digest's three unconditional lines (TOKENS, DELEGATE,
+      # FANOUT) were deleted. The old pattern spelled `DELEGATE: mechanical`, and the moment that
+      # line went away the mutation would have landed nowhere -- the no-op detector above would
+      # have caught it, but only after the row had stopped testing the cap. The grill line is now
+      # one of the two things the digest can contain, so padding it is padding the digest.
+      perl -0pi -e 's/(GRILL: run the grill-me skill)/("padding " x 60) . $1/e' claude/hooks/inject-session-context.sh ;;
+
+  18e) # The conditional-completeness lane, and the reason check 18 does not rest on bytes alone.
+      # With TOKENS/DELEGATE/FANOUT gone the digest is exactly two conditional lines, and the
+      # byte bounds cannot tell two lines from one: measured on the commit that added this row,
+      # both together are 215 B, grill alone 149 B and mandate alone 147 B -- all three clear the
+      # 128 B floor. So a hook that silently stopped grilling would have gone on printing
+      # "ok injected context bounded", which is the same shape of green the floor itself was
+      # added to stop (see check 18's own note about a 0-byte hook satisfying three upper caps).
+      #
+      # Stub the branch rather than the trigger arithmetic: setting VSTACK_NO_GRILL inside the
+      # script takes the documented off-switch, so the mutation cannot be read as testing a
+      # threshold nobody ships. The GRILL line disappears, the mandate line still arms, the byte
+      # count stays inside both bounds, and only check 18's per-line assertion can name it.
+      perl -0pi -e 's/^  grill=""$/  grill=""; VSTACK_NO_GRILL=1/m' claude/hooks/inject-session-context.sh ;;
   18d) # The path-invariance lane. Check 18 normalizes every environment-dependent string out of
       # the WORKSPACE CONVENTIONS block before capping or publishing it -- $root twice, $branch
       # once, $base three times. Splice $base a fourth time and the correction subtracts less
@@ -1213,6 +1237,12 @@ exit 0
       # it.
       perl -pi -e 's/^(\s+has_evidence:\s*).*?(,?)$/${1}true${2}/ unless /^\s*#/' \
         claude/hooks/dispatch-counter.sh ;;
+
+  44i) # The installer matcher drops Skill while settings.json keeps it. This is the exact state the
+      # tree was in for one afternoon of 1.71.0: the hook grew skill_load rows, settings.json named
+      # Skill, install.sh did not, and the two-name pattern check 44 used stayed green because both
+      # files still named Agent and Task. Anchored on the literal installer line.
+      sed -i.bak 's/matcher:"Agent|Task|Skill"/matcher:"Agent|Task"/' install.sh && rm -f install.sh.bak ;;
 
   65) # An entry with no justification at all. This is the state every hook in this repository was
       # in before the ledger existed -- shipped, wired, blocking in three cases, and recorded

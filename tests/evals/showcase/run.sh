@@ -143,12 +143,12 @@ run_one() { # <arm> <fixture_dir> <sample>
     # from outside the workdir, and only its failure output (paths rewritten) goes back to the
     # agent. It answers "if the gate had a perfect test, how many false completions survive?"
     # on fixtures that ship no visible test, where the false completions actually occur.
-    local gate_on=0
+    local gate_on=0 sid
+    sid=$(jq -r 'select(.type=="step_finish")|.sessionID' "$ev" 2>/dev/null | tail -1)
     { [ "$arm" = gate ] && [ -x "$wd/verify.sh" ]; } && gate_on=1
     [ "$arm" = oracle ] && gate_on=1
     if [ "$gate_on" -eq 1 ]; then
-      local sid vout k st msg
-      sid=$(jq -r 'select(.type=="step_finish")|.sessionID' "$ev" 2>/dev/null | tail -1)
+      local vout k st msg
       for k in $(seq 1 $((GATE_CAP + 1))); do
         if [ "$arm" = oracle ]; then
           vout=$(oracle_verify "$wd" "$fx"); st=$?
@@ -168,9 +168,10 @@ run_one() { # <arm> <fixture_dir> <sample>
             --session "$sid" "$msg" < /dev/null 2>/dev/null ) >> "$ev"
       done
     fi
-    json=$( jq -s --arg m "$MODEL" '
+    json=$( jq -s --arg m "$MODEL" --arg sid "$sid" '
               [.[]|select(.type=="step_finish")] as $st
               | {result:([.[]|select(.type=="text")|.part.text]|join("\n")),
+                 session_id:$sid,
                  num_turns:($st|length),
                  total_cost_usd:($st|map(.part.cost//0)|add//0),
                  duration_ms:(if length>1 then (.[-1].timestamp - .[0].timestamp) else 0 end),
@@ -218,6 +219,7 @@ run_one() { # <arm> <fixture_dir> <sample>
      cache_read:(.usage.cache_read_input_tokens//0),
      cost_usd:(.total_cost_usd//0), duration_ms:(.duration_ms//0),
      turns:(.num_turns//0), spawned:(.subagent_stats.spawned//0),
+     session_id:(.session_id//""),
      gate_cap:$gcap, gate_rounds:$gr, gate_exit:$gx, tests_tampered:$tt, defect_report:$dr, escalated:$esc,
      models:(.modelUsage|keys), model_cost:(.modelUsage|map_values(.costUSD)),
      is_error:(.is_error//false)}' 2>/dev/null >> "$OUT"

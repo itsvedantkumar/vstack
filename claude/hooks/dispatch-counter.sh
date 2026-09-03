@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse (matcher: Agent|Task): increments a per-session dispatch counter that
+# PostToolUse (matcher: Agent|Task|Skill): increments a per-session dispatch counter that
 # claude/statusline.sh reads to render "RICK ·N▸". This is the WRITE side of that contract.
 # Before this hook existed there was a reader with no writer -- claude/statusline.sh was built
 # and verified against a hand-created fixture file, so its own test suite passed while the
@@ -221,6 +221,36 @@
 #    large gap despite having launched together). It is a temporal correlate, read the same
 #    causal-limit way tests/delegation-drift.sh's own header insists on for its correlational
 #    metric -- never treated as a batch identifier because it structurally cannot be one.
+#
+# 7. SKILL LOADS. This log answered "which agent ran" and nothing about "which skill was loaded",
+#    while the repository's own mandate is that skills fire. The matcher is now Agent|Task|Skill
+#    (claude/settings.json) and a Skill PostToolUse writes its own row rather than being squeezed
+#    into the dispatch shape:
+#      { ts, session_id, kind:"skill_load", dispatch_index:null, tool_name:"Skill", skill,
+#        args_bytes, result_bytes, duration_ms, tool_use_id, cwd }
+#    `kind` is now on BOTH row shapes ("dispatch" and "skill_load") rather than only on the new
+#    one: a discriminator that is present only when it is the new value is read by absence, and a
+#    reader written that way cannot tell a pre-change row from a malformed one. Fields the
+#    dispatch shape carries and this one does not are absent, not null-filled -- subagent_type,
+#    verdict, has_evidence and derived_prev_dispatch_gap_s are all statements about a subagent
+#    that did not exist here, and a null in their slot would read as "measured, came back empty".
+#
+#    THREE THINGS A SKILL ROW MUST NOT DO, each of which was a live way to get this wrong:
+#      - increment the dispatch counter. "RICK ·N▸" is a delegation count; skill loads in it turn
+#        a session that delegated nothing into a session that appears to have delegated six times.
+#      - take the counter lock. A skill load contending for $cnt_file.lock can only slow real
+#        dispatches down, and the 30s abandoned-lock sweep gives it a way to actively break one.
+#      - reach the admission/UNVERIFIED path. That path exists to contradict a SUBAGENT's
+#        unbacked verdict; a skill's tool_response is skill body text, and running the same
+#        PASS/ISSUES/BLOCKED/DONE regex over it would flag any skill whose prose contains one of
+#        those words. The jq branch returns a hard "0" in the flag slot for exactly this reason.
+#
+#    duration_ms is the SAME payload field the dispatch shape already reads -- `.duration_ms` on
+#    the PostToolUse hook input, which decision 2 above confirmed by reading the installed CLI's
+#    own hook-input constructor and which is per-tool, not per-Agent. It is not derived from a
+#    tool_use/tool_result timestamp pair, because the PostToolUse payload carries no timestamps
+#    at all (see decision 6's enumeration of that schema); when the runtime omits duration_ms the
+#    field is null and nothing else on the payload can reconstruct it.
 set -uo pipefail
 
 [ "${VSTACK_NO_DISPATCH_COUNT:-0}" = "1" ] && exit 0
@@ -312,6 +342,7 @@ jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' --ar
          | {
              ts: ($nowval | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
              session_id: (if $sid == "" then null else $sid end),
+             kind: "dispatch",
              dispatch_index: $ph,
              tool_name: $tn,
              subagent_type: ($ti.subagent_type // null),
@@ -328,6 +359,27 @@ jq_out=$(printf '%s' "$input" | "$JQ" -r --arg ph '@@VSTACK_DISPATCH_IDX@@' --ar
              has_evidence: $has_evidence
            } as $rowobj
          | [($rowobj | tojson), (if ($verdict != null and $has_evidence == false) then "1" else "0" end)])
+      elif ($tn == "Skill") then
+        # A skill load is not a dispatch (decision 7). Separate row shape, separate `kind`, and
+        # the second element of the pair is hard "0": nothing about loading a skill can raise the
+        # admission flag, because there is no subagent verdict to be unbacked. dispatch_index is
+        # null rather than the $ph placeholder -- the counter is never incremented for this
+        # branch, so there is no index to substitute and a placeholder left unsubstituted would
+        # land in the log as a literal string.
+        ((.tool_input // {}) as $ti
+         | [ ({
+               ts: ($nowval | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
+               session_id: (if $sid == "" then null else $sid end),
+               kind: "skill_load",
+               dispatch_index: null,
+               tool_name: $tn,
+               skill: (($ti.skill // $ti.name // $ti.skill_name) // null),
+               args_bytes: (if ($ti | has("args")) then ($ti.args // "" | tostring | length) else null end),
+               result_bytes: (if has("tool_response") then (.tool_response | tostring | length) else null end),
+               duration_ms: (.duration_ms // null),
+               tool_use_id: (.tool_use_id // null),
+               cwd: (.cwd // null)
+             } | tojson), "0" ])
       else ["", "0"] end
     ) as $rowpair
   | [$tn, $sid, $rowpair[0], ($nowval | floor | tostring), $rowpair[1]] | @tsv
@@ -339,8 +391,15 @@ case "$emit_unverified" in 1) emit_unverified=1 ;; *) emit_unverified=0 ;; esac
 # Defense in depth: the settings.json matcher is what actually restricts which PostToolUse
 # events reach this script, but a hook that trusts its own wiring to be the only thing standing
 # between it and a miscount is one config edit away from silently counting Writes as dispatches.
+#
+# Skill is accepted (decision 7) but is NOT a dispatch: $is_skill routes it past the counter
+# entirely. The statusline's "RICK ·N▸" is a claim about DELEGATION, and folding skill loads
+# into it would inflate that number with a different event -- a session that loaded six skills
+# and delegated nothing would read as six dispatches, which is the exact false reading the
+# counter exists to expose. Same reason the skill row carries dispatch_index: null.
 case "$tool_name" in
-  Agent|Task) ;;
+  Agent|Task) is_skill=0 ;;
+  Skill)      is_skill=1 ;;
   *) exit 0 ;;
 esac
 
@@ -366,27 +425,35 @@ mtime_of() { # <path> -> epoch seconds, or 0 when it cannot be read
   case "$_m" in ""|*[!0-9]*) _m=0 ;; esac
   printf '%s\n' "$_m"
 }
-lock_acquired=0
-i=0
-while ! mkdir "$lock_dir" 2>/dev/null; do
-  i=$((i + 1))
-  if [ "$i" -ge 300 ]; then
-    lm=$(mtime_of "$lock_dir")
-    now=$(date +%s)
-    if [ "$lm" -gt 0 ] && [ $((now - lm)) -ge 30 ]; then
-      rm -rf "$lock_dir" 2>/dev/null
+# The lock, the counter file and its .last_ts sidecar are all DISPATCH state. A skill load takes
+# none of them: no lock is taken (so a skill load can never contend with, delay, or -- via the
+# 30s abandoned-lock sweep -- steal a lock from a real dispatch), the counter is neither read nor
+# written, and $cnt stays 0 purely as an initialised value the rotation branch below no longer
+# reads on this path.
+cnt=0
+if [ "$is_skill" = 0 ]; then
+  lock_acquired=0
+  i=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 300 ]; then
+      lm=$(mtime_of "$lock_dir")
+      now=$(date +%s)
+      if [ "$lm" -gt 0 ] && [ $((now - lm)) -ge 30 ]; then
+        rm -rf "$lock_dir" 2>/dev/null
+      fi
+      i=0
     fi
-    i=0
-  fi
-  sleep 0.02 2>/dev/null || sleep 1
-done
-lock_acquired=1
-trap '[ "$lock_acquired" = 1 ] && rmdir "$lock_dir" 2>/dev/null' EXIT
+    sleep 0.02 2>/dev/null || sleep 1
+  done
+  lock_acquired=1
+  trap '[ "$lock_acquired" = 1 ] && rmdir "$lock_dir" 2>/dev/null' EXIT
 
-cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
-case "$cnt" in ''|*[!0-9]*) cnt=0 ;; esac
-cnt=$((cnt + 1))
-printf '%s' "$cnt" > "$cnt_file" 2>/dev/null
+  cnt=$(cat "$cnt_file" 2>/dev/null || echo 0)
+  case "$cnt" in ''|*[!0-9]*) cnt=0 ;; esac
+  cnt=$((cnt + 1))
+  printf '%s' "$cnt" > "$cnt_file" 2>/dev/null
+fi
 
 # --- replay logging (see the "replay logging" comment near the top of this file for the five
 # decisions this implements) -----------------------------------------------------------------
@@ -396,23 +463,38 @@ printf '%s' "$cnt" > "$cnt_file" 2>/dev/null
 # dispatch_index (unknowable until the lock above gave up $cnt) and append it.
 if [ "${VSTACK_NO_REPLAY_LOG:-0}" != "1" ] && [ -n "$encoded_row" ]; then
 (
-  row="${encoded_row/\"@@VSTACK_DISPATCH_IDX@@\"/$cnt}"
-  # derived_prev_dispatch_gap_s (see header decision 6 for exactly what this can and cannot show):
-  # read this session's own last-dispatch epoch second from a sidecar next to $cnt_file, diff
-  # against $now_epoch (already computed above, in the same jq call that built the row -- no new
-  # fork), then overwrite the sidecar for the next dispatch to read. `read` against a redirection
-  # is a bash builtin, not a fork; only the eventual append/rotation below pays process cost.
-  ts_file="$cnt_file.last_ts"
-  prev_epoch=""
-  [ -r "$ts_file" ] && IFS= read -r prev_epoch < "$ts_file" 2>/dev/null
-  case "$prev_epoch" in ''|*[!0-9]*) prev_epoch="" ;; esac
-  if [ -n "$prev_epoch" ]; then
-    gap_val=$((now_epoch - prev_epoch))
+  row="$encoded_row"
+  if [ "$is_skill" = 0 ]; then
+    row="${row/\"@@VSTACK_DISPATCH_IDX@@\"/$cnt}"
+    # derived_prev_dispatch_gap_s (see header decision 6 for exactly what this can and cannot show):
+    # read this session's own last-dispatch epoch second from a sidecar next to $cnt_file, diff
+    # against $now_epoch (already computed above, in the same jq call that built the row -- no new
+    # fork), then overwrite the sidecar for the next dispatch to read. `read` against a redirection
+    # is a bash builtin, not a fork; only the eventual append/rotation below pays process cost.
+    ts_file="$cnt_file.last_ts"
+    prev_epoch=""
+    [ -r "$ts_file" ] && IFS= read -r prev_epoch < "$ts_file" 2>/dev/null
+    case "$prev_epoch" in ''|*[!0-9]*) prev_epoch="" ;; esac
+    if [ -n "$prev_epoch" ]; then
+      gap_val=$((now_epoch - prev_epoch))
+    else
+      gap_val="null"
+    fi
+    printf '%s' "$now_epoch" > "$ts_file" 2>/dev/null
+    row="${row/\"@@VSTACK_PREV_GAP@@\"/$gap_val}"
+    # Deterministic 1-in-20 sampling off the dispatch counter, unchanged.
+    rot_tick=$((cnt % 20))
   else
-    gap_val="null"
+    # A skill row carries neither placeholder (jq emitted both slots as literal nulls on that
+    # branch) and must NOT touch $cnt_file.last_ts: that sidecar measures the gap between
+    # DISPATCHES, and stamping it on a skill load would silently shrink the next dispatch's gap
+    # to "time since the last skill load" while still being read as a dispatch-to-dispatch
+    # interval -- a derived field quietly measuring a different thing under the same name.
+    # Rotation still has to be sampled, and $cnt is 0 on this path, so `cnt % 20` would fire the
+    # `stat` fork on EVERY skill load rather than one in twenty. $RANDOM is a bash builtin (no
+    # fork) and gives the same 1-in-20 expected rate without a second counter file to keep.
+    rot_tick=$((RANDOM % 20))
   fi
-  printf '%s' "$now_epoch" > "$ts_file" 2>/dev/null
-  row="${row/\"@@VSTACK_PREV_GAP@@\"/$gap_val}"
   log_file="${VSTACK_REPLAY_LOG:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/vstack-replay-log.jsonl}"
   log_dir_="${log_file%/*}"
   [ "$log_dir_" = "$log_file" ] && log_dir_="."
@@ -433,7 +515,7 @@ if [ "${VSTACK_NO_REPLAY_LOG:-0}" != "1" ] && [ -n "$encoded_row" ]; then
   # (roughly 4-5KB at this schema's width) past 2MB before the next sampled check catches it --
   # for skipping that fork on 19 dispatches out of 20. The append itself is never skipped; only
   # the size check that decides whether to trim is sampled, so no row is ever silently dropped.
-  if [ $((cnt % 20)) -eq 0 ]; then
+  if [ "$rot_tick" -eq 0 ]; then
     sz=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
     case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
     if [ "$sz" -gt 2097152 ]; then

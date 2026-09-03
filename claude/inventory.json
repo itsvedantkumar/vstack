@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.70.0",
+    "version": "1.71.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -553,6 +553,21 @@
           }
         },
         {
+          "id": "skill-load-ledger",
+          "file": "dispatch-counter.sh",
+          "event": "PostToolUse",
+          "blocking": false,
+          "justified_by": {
+            "kind": "none",
+            "file": null,
+            "run_id": null,
+            "entry": null,
+            "measured_head": null,
+            "decide_by": "2026-09-17"
+          },
+          "note": "1.71.0: Skill tool calls append a kind=skill_load replay row with duration_ms; bin/doctor --ledger sums them per session. Records only; the effect it enables (joining skill loads to benchmark rows) is unmeasured until run.sh rows carry session_id"
+        },
+        {
           "id": "per-prompt-digest",
           "file": "inject-session-context.sh",
           "event": "UserPromptSubmit",
@@ -565,7 +580,7 @@
             "measured_head": null,
             "decide_by": "2026-09-17"
           },
-          "note": "the 9 of 9 vs 7 of 9 routing ablation in docs/what-this-actually-does.md predates the current hook logic (FANOUT and MANDATE lines rewritten in 1.68.0 and 1.69.0), so it does not justify today's digest; re-measure by 2026-09-17"
+          "note": "1.71.0 cut the unconditional TOKENS/DELEGATE/FANOUT lines (no measurement supported them; vstack spawned 0 of 10 with them present); the digest is now two conditional lines, GRILL and the mandate strike, 0 B when neither fires and 215 B fired under check 18's probe, 512 B cap. The 9 of 9 vs 7 of 9 routing ablation is about the SessionStart table, not this block; re-measure by 2026-09-17"
         },
         {
           "id": "goal-gate",
@@ -830,7 +845,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 113,
+        "rows": 115,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way.",
         "cost_model": {
           "seconds_per_row": 65,

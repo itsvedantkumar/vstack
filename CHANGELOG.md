@@ -4,6 +4,26 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.71.0 — 2026-09-03
+
+- `claude/CLAUDE.md` 4332 B to 1635 B: USE THE STACK, MODEL ROUTING, DISPATCH PRE-AUTHORIZED
+  and ISOLATE THE WRITERS deleted, FAN OUT and NAME THE AGENT cut to one line each, REGISTER
+  keeps only the banned-word list. Each cut names its evidence in
+  `docs/research/harness-effect/findings/plan-next-mechanisms.md`. DOGFOOD moves to the
+  repo-root CLAUDE.md, where it applies.
+- Per-prompt digest loses its unconditional TOKENS, DELEGATE and FANOUT lines and SessionStart
+  loses TOKENS/DELEGATE/AUTONOMY/PLAN MODE (989 B); the SKILLS routing table stays. Check 18
+  now probes the fired form (400-character prompt plus a seeded mandate marker) and requires
+  both lines; row 18e stubs the grill branch. Check 33's must-speak probe uses the fired form.
+- `swarm` briefs carry TASK, FILES, ACCEPT and REPORT; `worker` and `explorer` return BLOCKED
+  naming the missing field.
+- `dispatch-counter.sh` records `kind: skill_load` rows with `duration_ms` on Skill calls
+  (matcher `Agent|Task|Skill` in `claude/settings.json` and `install.sh`); `bin/doctor --ledger`
+  sums them per session. Check 44 requires the matcher to name Skill in both wirings; row 44i
+  drops it from the installer.
+- Mechanisms ledger: `skill-load-ledger` added, `per-prompt-digest` re-justified, both
+  unmeasured with decide-by 2026-09-17.
+
 ## 1.70.0 — 2026-09-03
 
 - **Every shipped mechanism records what justifies it, and the record expires.**

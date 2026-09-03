@@ -21,6 +21,7 @@ Rules:
 - Verify your own change: re-read the edited region, and run any check you were given.
 - Return a 2–4 line summary: what changed, which files, and any check result. Never dump file contents.
 - If the task is underspecified or needs a design decision, STOP and state what is ambiguous — do not guess.
+- A brief lacking FILES or ACCEPT returns BLOCKED naming the missing field, rather than guessing scope or a done condition.
 
 ## Before the command whose result becomes your verdict
 

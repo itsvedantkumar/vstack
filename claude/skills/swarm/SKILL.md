@@ -72,7 +72,21 @@ Send all N `Agent` calls in one message (see the rule at the top). Per call:
 - `run_in_background: true` — this is what lets them actually run concurrently. There is no cloud environment; every agent runs locally.
 - `description` — 3-5 words, distinct per arm, so the drain is readable.
 
-Every brief stands alone. The agent sees none of your conversation. Include the goal, the scope, its exact slice or race arm, how to verify, and what to report.
+Every brief stands alone. The agent sees none of your conversation. Every brief states four fields:
+
+- `TASK` — the goal, in one or two sentences: what this arm does and its exact slice or race arm.
+- `FILES` — the whole files this agent owns, one owner per file. Never a section of a file another agent also touches.
+- `ACCEPT` — a command to run plus the output that means done.
+- `REPORT` — under 200 words. Verdict `PASS`, `ISSUES`, or `BLOCKED`. Lines typed `FACT:` for what was confirmed, `FAIL:` for what broke, `PATCH_SUMMARY:` for what changed and where.
+
+Example brief:
+
+    TASK: rename getUser to fetchUser across the auth module.
+    FILES: src/auth/session.ts, src/auth/middleware.ts
+    ACCEPT: `npm run typecheck` exits 0
+    REPORT: under 200 words, PASS/ISSUES/BLOCKED, FACT:/FAIL:/PATCH_SUMMARY: lines, no file contents
+
+A brief missing `FILES` or `ACCEPT` is not well-specified — the callee returns `BLOCKED` naming the missing field instead of guessing.
 
 **Cap every brief's output.** Require a summary under ~200 words: verdict, evidence pointers as `file:line` or command output, nothing else. **Explicitly forbid pasting file contents back.** N agents each dumping files is how a swarm burns the parent's context and forces a compaction — the swarm then costs more than doing the work serially.
 

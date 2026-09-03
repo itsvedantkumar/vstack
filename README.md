@@ -57,6 +57,7 @@ The full tables, the preregistration and the raw rows are in `tests/evals/showca
 | cost per task, no delegation | baseline | within noise | within noise |
 | cost per task, when the 1.66.0 breadth mandate forced a fan-out | | 3.6 to 4.4x | |
 | cost per task, same fixture, mandate retired (1.69.0, paired n=10) | baseline | 0.89x | |
+| cost per task, three arms at 1.70.0 (paired n=10) | baseline | 0.93x | 0.95x |
 | Stop hook that refuses a red tree | no | yes, always on | no |
 | skills installed | 0 | 28 | 54 |
 
@@ -295,7 +296,7 @@ git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiabi
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 113 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 115 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.
@@ -325,7 +326,7 @@ A project that has never found one of these has not looked.
 | `git reset --hard`, uncommitted work | runs | asks |
 | `rm -rf node_modules` | runs | allowed |
 | Untrusted repository's gate on `Stop` | no gate at all | not executed |
-| Context spent per session | 0 B | ~4.1 KB full / ~2.5 KB plugin |
+| Context spent per session | 0 B | ~3.2 KB full / ~2.5 KB plugin |
 
 The last row is the price, paid every session. Check 18 reads those figures back from this table
 and fails if they drift from what the hook actually emits.
