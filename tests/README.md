@@ -406,6 +406,14 @@ in `evals/build-the-lever/PREREGISTRATION.md` before the first sample was drawn.
 hypothesis it registered was falsified; the standing answer it recorded is that the skill does
 not fire because the model already does the thing.
 
+`tests/evals/showcase/summarize.sh` turns every run file under `tests/evals/showcase/runs/`
+into one table (Markdown, `--json`, or `--write` to refresh `tests/evals/showcase/summary.json`),
+keyed by `tests/evals/showcase/runs/INDEX.tsv`, which names the engine, model and validity of
+each file and must have a row for every file or the script refuses. The committed
+`summary.json` is what `tests/evals/showcase/site/worker.js` renders at
+<https://vstack-bench.vk-work-official.workers.dev>; `tests/evals/showcase/site/wrangler.toml`
+deploys it. Summarising costs nothing and runs offline; only `run.sh` spends model calls.
+
 These cost real model calls and are not part of the gate.
 
 ## Run the tests

@@ -1,0 +1,19 @@
+file	engine	model	status	note
+20260902-220630.jsonl	claude	claude-opus-5	invalid	pre-fix scorer
+20260902-220902.jsonl	claude	claude-opus-5	invalid	pre-fix scorer
+20260902-221615.jsonl	claude	claude-opus-5	valid	vstack truncated at 6
+20260902-222204.jsonl	claude	claude-opus-5	valid	
+20260902-223522.jsonl	claude	claude-haiku-4-5-20251001	valid	
+20260903-002641.jsonl	claude	claude-opus-5	valid	first three-arm run, breadth mandate live
+20260903-010851.jsonl	opencode	glm-5.3-flash	valid	killed at 25 rows
+20260903-012232.jsonl	opencode	glm-5.3-flash	valid	two runs sharing one stamp
+20260903-012854.10023.jsonl	opencode	glm-5.3-flash	valid	30 samples, red trees kept
+20260903-022953.55428.jsonl	claude	claude-opus-5	valid	paired, breadth mandate retired
+20260903-023828.96398.jsonl	opencode	glm-5.3-flash	valid	gate never fired
+20260903-030932.25374.jsonl	opencode	glm-5.3-flash	valid	150 per arm, oracle never fired
+20260903-121154.7017.jsonl	opencode	glm-5.3-flash	valid	none vs gate with exit
+20260903-121154.7018.jsonl	opencode	glm-5.3-flash	valid	gate without exit
+20260903-121228.9102.jsonl	opencode	glm-5.3-flash	valid	30 per arm
+20260903-164557.97124.jsonl	claude	claude-opus-5	valid	none vs vstack vs gstack at v1.70.0, paired
+20260903-165323.31443.jsonl	claude	claude-opus-5	valid	none vs vstack vs gstack at v1.70.0, paired
+20260904-010328.38498.jsonl	claude	claude-haiku-4-5-20251001	valid	none vs vstack vs gstack at v1.71.0, paired

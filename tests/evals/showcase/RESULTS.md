@@ -106,6 +106,33 @@ breadth mandate firing; with it gone, vstack on the same three-file fix costs wh
 The bare arm's model list includes Haiku 4.5 on some rows (Claude Code's own background calls,
 not a delegation; `spawned` is 0), so its mean cost is not purely Opus.
 
+### One table, every valid run, and the hosted copy
+
+`summarize.sh` reads every file in `runs/` plus `runs/INDEX.tsv` (engine, model, valid or
+invalid, one row per file; it refuses to run if a run file has no index row) and writes
+`summary.json`: every valid row grouped by model, fixture and arm, plus a `head_to_head` block
+that groups by run file and arm for the files whose note says `none vs vstack vs gstack`, so a
+paired comparison is never pooled with runs from another day or vstack version. A row's model is
+the `modelUsage` entry that cost the most, because Claude Code bills its background Haiku calls
+inside an Opus run and the alphabetically first key is wrong; rows recorded before `model_cost`
+existed take the model from the index.
+
+`site/worker.js` is a Cloudflare Worker that fetches `summary.json` from this repository's main
+branch at request time and renders it, with the mechanism table beside the outcome table and a
+link from every row to its run file. It is live at
+<https://vstack-bench.vk-work-official.workers.dev>. Regenerate and publish with:
+
+```bash
+tests/evals/showcase/summarize.sh --write   # rewrites summary.json from runs/
+git add tests/evals/showcase/summary.json tests/evals/showcase/runs && git commit ... && git push
+```
+
+The page needs no redeploy for new numbers; `wrangler deploy` in `site/` only when the page
+itself changes. The custom domain `bench.vedant.to` is not attached: the API token wrangler
+runs under has no Workers Routes permission on the zone (error code 10000), so the Worker
+serves from its `workers.dev` name until that permission is added and the `routes` line in
+`site/wrangler.toml` restored.
+
 ### Three Claude arms at 1.70.0, gstack included, paired
 
 The routing-cost table below is the only earlier gstack measurement and it predates the breadth

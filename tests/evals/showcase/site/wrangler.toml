@@ -1,0 +1,11 @@
+# Hosted proof for the showcase benchmark: https://bench.vedant.to
+# The Worker holds no numbers. It fetches tests/evals/showcase/summary.json from the main
+# branch on GitHub at request time (cached 5 min) and renders it; summary.json is written by
+# summarize.sh from runs/*.jsonl and committed with them. Deploy: `wrangler deploy` in this dir.
+name = "vstack-bench"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+workers_dev = true
+[observability]
+enabled = true
+preview_urls = false
