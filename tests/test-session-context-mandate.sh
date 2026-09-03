@@ -4,20 +4,24 @@
 # (lines ~155-168) reads $TMPDIR/vstack-mandate-$sid and $TMPDIR/vstack-mandate-$sid.delegate
 # — files skill-mandate.sh never writes. skill-mandate.sh writes per-mandate suffixes only:
 # .unslop .typescript .proveitworks .delegate-breadth .delegate-naming .delegate-swarm
-# .delegate-serial. So the escalation line is dead code in production; these tests are written
-# RED against that defect and against the digest lacking a FANOUT line, and go green when the
-# hook is fixed to (a) read the max of each family's real per-mandate counter files and (b) pin
-# the fan-out rule every prompt.
+# .delegate-serial. So the escalation line was dead code in production; these tests were written
+# RED against that defect and go green once the hook reads the max of each family's real
+# per-mandate counter files (CASE 1/2/3 below).
 #
-# Real-transcript evidence: (1) MANDATE line never rendered in any real session because the
-# counters read from non-existent files always stayed 0; (2) serial under-delegation (4.8%
-# parallel-batch rate in vstack itself) that the FANOUT re-pin in the digest addresses.
+# Real-transcript evidence: the MANDATE line never rendered in any real session because the
+# counters read from non-existent files always stayed 0.
 #
-# Hook contract: on UserPromptSubmit, emits a JSON object with
-# .hookSpecificOutput.additionalContext containing the per-prompt digest (a multi-line string).
-# This digest must be kept under 512 bytes total (the grill worst-case in .claude/verify.sh's
-# check 18 budget). The tests below parse the additionalContext value via jq and grep it for
-# expected lines.
+# Hook contract, current shape: the digest is $grill$mandate, TWO independent conditional lines
+# and nothing unconditional. TOKENS/DELEGATE/FANOUT lines that used to render on every prompt are
+# gone -- unmeasured cost paid on every turn of every session (see
+# inject-session-context.sh:182-188). GRILL fires on a long prompt (>= VSTACK_GRILL_CHARS, 320)
+# or a session's first prompt (>= 120 chars); MANDATE fires on a seeded skill-mandate.sh counter
+# file. Neither firing means an empty digest: a JSON line with no additionalContext key at all
+# (CASE 5), not an empty string. On UserPromptSubmit the hook emits a JSON object whose
+# .hookSpecificOutput.additionalContext, when present, carries this digest and must stay under
+# 512 bytes total (the grill worst-case in .claude/verify.sh's check 18 budget, CASE 6). The
+# tests below parse additionalContext via jq and grep it for expected lines, except CASE 5 which
+# greps the hook's raw stdout to tell "empty string" apart from "key absent".
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -113,37 +117,50 @@ else
       "expected CTX to NOT contain MANDATE, got: [$CTX]"
 fi
 
-# --- CASE 4: the digest pins the fan-out rule every prompt -----------------------------------
-# Defect: the digest today lacks a FANOUT line re-pinning the fan-out rule on every prompt.
-# Parallel-batch rate in real sessions is 4.8%, a signal that the rule is drifting. When fixed,
-# the digest must emit a FANOUT line describing the fan-out contract, a DELEGATE line naming the
-# mechanical/judgment split, AND a line naming writes as serial (the breadth mandate that used
-# to force a fan-out on any two-directory write is retired; reads/searches still fan out).
-# Direction: positive, guard the digest's completeness and the rule's re-pinning every turn.
-CTX=$(run_ctx_ scm4 "hi")
-has_fanout=$(printf '%s' "$CTX" | grep -qF 'FANOUT:' && echo 1 || echo 0)
-has_delegate=$(printf '%s' "$CTX" | grep -qF 'DELEGATE: mechanical' && echo 1 || echo 0)
-has_batch=$(printf '%s' "$CTX" | grep -qF 'writes serial' && echo 1 || echo 0)
-if [ "$has_fanout" = 1 ] && [ "$has_delegate" = 1 ] && [ "$has_batch" = 1 ]; then
-  ok "CASE 4: the digest pins the fan-out rule every prompt"
+# --- CASE 4: the two conditional lines each fire under their own trigger, together -----------
+# Post-fix shape: TOKENS/DELEGATE/FANOUT are gone. The digest is $grill$mandate -- two
+# independent conditional lines, GRILL (a prompt >= VSTACK_GRILL_CHARS, 320, or a session's first
+# prompt >= 120 chars) and MANDATE (a seeded skill-mandate.sh counter file). CASE 1/2 already
+# prove MANDATE fires alone on a short prompt; this proves BOTH fire together when both
+# conditions hold at once, which is the realistic worst case a real long-planning prompt with an
+# outstanding mandate strike actually hits. Direction: positive, guard both triggers and their
+# co-occurrence.
+printf '1\n' > "$WORK/vstack-mandate-scm4.unslop"
+_p4=""
+_i4=0
+while [ $_i4 -lt 400 ]; do
+  _p4="${_p4}x"
+  _i4=$((_i4+1))
+done
+CTX=$(run_ctx_ scm4 "$_p4")
+has_grill=$(printf '%s' "$CTX" | grep -qF 'GRILL: run the grill-me skill' && echo 1 || echo 0)
+has_mandate=$(printf '%s' "$CTX" | grep -qF 'MANDATE skill=1/2 delegate=0/2' && echo 1 || echo 0)
+if [ "$has_grill" = 1 ] && [ "$has_mandate" = 1 ]; then
+  ok "CASE 4: the two conditional lines each fire under their own trigger, together"
 else
-  bad "CASE 4: the digest pins the fan-out rule every prompt" \
-      "expected FANOUT (got $has_fanout), DELEGATE (got $has_delegate), writes-serial rule (got $has_batch) in digest: [$CTX]"
+  bad "CASE 4: the two conditional lines each fire under their own trigger, together" \
+      "expected GRILL (got $has_grill) and MANDATE skill=1/2 delegate=0/2 (got $has_mandate) in digest: [$CTX]"
 fi
 
-# --- CASE 5: unconditional digest stays inside the verify.sh check-18 budget ------------------
-# Boundary test: the digest (grill + MANDATE + FANOUT) is pinned every prompt on every machine,
-# so it must fit within the byte cap check 18 measures (512 bytes worst-case). The hook can emit
-# empty additionalContext (0 bytes) when grill and MANDATE are both silent, or up to ~512 when
-# both are armed. This case has no counters seeded and grill disabled by short prompt, so it
-# measures the unconditional part (TOKENS + DELEGATE + FANOUT + batch rule). Direction:
-# negative, guard against budget overflow from new digest lines.
-RAW_BYTES=$(run_ctx_bytes_ scm5 "hi")
-if [ "$RAW_BYTES" -ge 128 ] && [ "$RAW_BYTES" -le 512 ]; then
-  ok "CASE 5: unconditional digest stays inside the verify.sh check-18 budget"
+# --- CASE 5: digest is empty (no additionalContext) when neither condition holds --------------
+# Boundary test, the opposite of CASE 4: TOKENS/DELEGATE/FANOUT used to render unconditionally on
+# every prompt; now the digest is $grill$mandate and legitimately renders nothing when neither
+# fires. A short prompt on a fresh session with no counter files must produce a JSON line with NO
+# additionalContext key at all -- not an empty string, the key itself absent -- so this is
+# checked on the raw hook stdout, not through run_ctx_'s jq extraction (which would report "" for
+# either shape and could not tell them apart). Direction: negative, the steady state most prompts
+# in most sessions actually hit, and the one check 18 in .claude/verify.sh relies on to floor its
+# fired-digest probe as the FIRED case rather than the default.
+RAW_5=$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"scm5","prompt":"hi"}' \
+        | TMPDIR="$WORK" bash "$hook" 2>/dev/null)
+if printf '%s' "$RAW_5" | grep -qF 'additionalContext'; then
+  bad "CASE 5: digest is empty (no additionalContext) when neither condition holds" \
+      "expected no additionalContext key in stdout, got: [$RAW_5]"
+elif ! printf '%s' "$RAW_5" | grep -qF '"hookEventName":"UserPromptSubmit"'; then
+  bad "CASE 5: digest is empty (no additionalContext) when neither condition holds" \
+      "hook produced no valid UserPromptSubmit output at all -- silence cannot be told apart from a crash: [$RAW_5]"
 else
-  bad "CASE 5: unconditional digest stays inside the verify.sh check-18 budget" \
-      "expected RAW_BYTES between 128 and 512, got: $RAW_BYTES"
+  ok "CASE 5: digest is empty (no additionalContext) when neither condition holds"
 fi
 
 # --- CASE 6: worst case (grill + both MANDATE families at cap) stays under 512 ----------------

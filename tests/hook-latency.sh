@@ -227,12 +227,22 @@ REFERENCE_MEAN_verify_gate=90;               REFERENCE_P95_verify_gate=110
 
 # Fork-cost units (hook_ms / baseline_ms per sample, meaned/p95'd). See the derivation paragraph
 # above for how these eight numbers were set.
+#
+# inject_session_context's row was RE-derived, not carried over: the payload this file feeds the
+# hook changed from a short prompt that fired neither digest branch (near-free: grill/mandate
+# both short-circuit) to a 400-char prompt with a seeded mandate marker that legitimately fires
+# BOTH -- the realistic worst case a real turn pays, per this file's own header on why that
+# change was made. The old 9.8/11.7 budget was calibrated against the cheap no-op path and the
+# heavier, legitimate payload blew through it on every run (mean ~9.3-11.9u, p95 ~11.0-21.8u
+# across seven runs on this machine). Re-derived the same way as the other seven rows: two
+# back-to-back runs (mean=9.563u/p95=10.965u, then mean=10.604u/p95=12.450u), worst observed of
+# the pair x1.3 headroom, ceil'd to one decimal.
 BUDGET_UNITS_MEAN_compat_canary=8.1;          BUDGET_UNITS_P95_compat_canary=9.8
 BUDGET_UNITS_MEAN_dispatch_counter=5.2;       BUDGET_UNITS_P95_dispatch_counter=6.2
 BUDGET_UNITS_MEAN_failure_diagnose=4.3;       BUDGET_UNITS_P95_failure_diagnose=5.3
 BUDGET_UNITS_MEAN_format=5.3;                 BUDGET_UNITS_P95_format=6.1
 BUDGET_UNITS_MEAN_guard_destructive=6.1;      BUDGET_UNITS_P95_guard_destructive=7.4
-BUDGET_UNITS_MEAN_inject_session_context=9.8; BUDGET_UNITS_P95_inject_session_context=11.7
+BUDGET_UNITS_MEAN_inject_session_context=13.8; BUDGET_UNITS_P95_inject_session_context=16.2
 BUDGET_UNITS_MEAN_skill_mandate=24.6;         BUDGET_UNITS_P95_skill_mandate=35.3
 BUDGET_UNITS_MEAN_verify_gate=6.6;            BUDGET_UNITS_P95_verify_gate=7.4
 
@@ -253,6 +263,30 @@ cat > "$WORK/sm-transcript.jsonl" <<'EOF'
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}
 EOF
 
+# inject-session-context.sh's UserPromptSubmit digest ($grill$mandate) is now conditional-only --
+# no more unconditional TOKENS/DELEGATE/FANOUT lines to probe for. A short, ordinary prompt
+# ("fix the bug in the parser") legitimately fires NEITHER condition and the hook correctly emits
+# no additionalContext at all, so timing that payload and asserting a digest line would be
+# asserting on a shape the hook is correct not to produce. This fixture instead arms the FIRED
+# form on purpose, the same way .claude/verify.sh's check 18 does: a prompt over
+# VSTACK_GRILL_CHARS (320, the hook's own default) reliably fires GRILL regardless of
+# first-prompt-of-session state, so this is deterministic across every sample.
+_isc_prompt=$(awk 'BEGIN{s="";while(length(s)<400)s=s "rebuild the billing pipeline with retries and idempotency ";printf "%s", substr(s,1,400)}')
+[ "${#_isc_prompt}" -ge 320 ] \
+  || fail_hard "hook-latency.sh's inject-session-context prompt fixture is only ${#_isc_prompt} chars, under the hook's 320-char grill threshold -- it would measure the unfired digest and call it the fired one"
+
+# Also seed a mandate counter file per sample id (isc-1 .. isc-N) so the timed payload exercises
+# the digest's OTHER conditional branch too, matching what a real worst-case turn actually pays
+# (grill + mandate both armed) rather than only ever timing half the digest. Session ids are
+# unique per sample (dispatch-counter/skill-mandate's own reason above), so one marker per
+# upcoming sample id, written before any sample is timed. $TMPDIR is already this run's private
+# directory (exported above), never a real session's.
+_isc_s=1
+while [ "$_isc_s" -le "$N" ]; do
+  printf '1\n' > "$TMPDIR/vstack-mandate-isc-$_isc_s.unslop"
+  _isc_s=$((_isc_s + 1))
+done
+
 # --- per-hook payload / env / success-signal --------------------------------------------------
 # Each function prints the JSON payload for sample $1 on stdout. Unique per-sample ids where the
 # hook keys state off session_id (dispatch-counter's counter file, skill-mandate's 2-strike latch)
@@ -268,7 +302,7 @@ _fd_kp="sk-ant-"; _fd_kv="1234567890abcdef"; FAKE_KEY="${_fd_kp}${_fd_kv}"
 payload_failure_diagnose()         { printf '{"tool_name":"Bash","tool_response":{"stderr":"api_key: %s error #%s"}}' "$FAKE_KEY" "$1"; }
 payload_format()                   { printf '{"tool_input":{"file_path":"%s/fmt-project/x.js"}}' "$WORK"; }
 payload_guard_destructive()        { printf '{"tool_input":{"command":"ls -la #%s"},"permission_mode":"default"}' "$1"; }
-payload_inject_session_context()   { printf '{"hook_event_name":"UserPromptSubmit","session_id":"isc-%s","prompt":"fix the bug in the parser"}' "$1"; }
+payload_inject_session_context()   { printf '{"hook_event_name":"UserPromptSubmit","session_id":"isc-%s","prompt":"%s"}' "$1" "$_isc_prompt"; }
 payload_skill_mandate()            { printf '{"session_id":"sm-%s","transcript_path":"%s/sm-transcript.jsonl","stop_hook_active":false}' "$1" "$WORK"; }
 payload_verify_gate()              { printf '{"session_id":"vg-%s"}' "$1"; }
 
@@ -338,9 +372,12 @@ verify_sample() {
         *) VERIFY_ERR="stdout missing an allow decision for a harmless command: $OUT" ;;
       esac ;;
     inject-session-context)
+      # TOKENS/DELEGATE/FANOUT are gone from the digest; the payload above arms the grill branch
+      # (400-char prompt, over the hook's 320-char VSTACK_GRILL_CHARS threshold) so this asserts
+      # the one line that branch is contractually supposed to emit.
       case "$OUT" in
-        *additionalContext*TOKENS:*) : ;;
-        *) VERIFY_ERR="stdout missing the per-prompt TOKENS digest: $OUT" ;;
+        *'GRILL: run the grill-me skill'*) : ;;
+        *) VERIFY_ERR="stdout missing the per-prompt GRILL line for a 400-char prompt: $OUT" ;;
       esac ;;
     skill-mandate)
       case "$OUT" in
@@ -364,6 +401,29 @@ FAIL=0
 TABLE_A=""   # raw ms, informational
 TABLE_B=""   # fork-cost units, authoritative
 DIVERGENCE=""
+
+# --- correctness pre-check: the empty-digest steady state -----------------------------------------
+# The fired-digest samples above prove GRILL renders when armed. They cannot, on their own, prove
+# the hook stays silent when nothing is armed -- a hook that always emits GRILL (a real defect: it
+# would mean the 320-char threshold or the first-prompt check broke) would pass every sample above
+# just as well as a correct one. So this asserts the OTHER side directly: a short prompt, on a
+# session with no seeded mandate counter file, must produce a JSON line carrying no
+# additionalContext key at all -- silence measured, not assumed. Not part of the timed loop or its
+# DECLARED/RAN/SKIPPED accounting (that tracks the 8 latency-budgeted hooks); this is a one-shot
+# correctness assertion, same spirit as the positive control above but for this hook's digest
+# shape rather than the timer.
+_isc_empty_out=$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"isc-empty-check","prompt":"hi"}' \
+                  | bash "$HOOKS_DIR/inject-session-context.sh" 2>/dev/null)
+case "$_isc_empty_out" in
+  *additionalContext*)
+    printf 'FAIL  inject-session-context.sh   empty-digest probe: additionalContext present for a short prompt with no marker: %s\n' "$_isc_empty_out"
+    FAIL=$((FAIL + 1)) ;;
+  *'"hookEventName":"UserPromptSubmit"'*)
+    printf 'ok    inject-session-context.sh   empty-digest probe: no additionalContext for a short prompt with no marker (silence measured, not assumed)\n' ;;
+  *)
+    printf 'FAIL  inject-session-context.sh   empty-digest probe: no valid UserPromptSubmit output at all: %s\n' "$_isc_empty_out"
+    FAIL=$((FAIL + 1)) ;;
+esac
 
 for hook in $HOOKS; do
   DECLARED=$((DECLARED + 1))
