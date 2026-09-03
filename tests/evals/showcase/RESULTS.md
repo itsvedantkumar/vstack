@@ -106,6 +106,30 @@ breadth mandate firing; with it gone, vstack on the same three-file fix costs wh
 The bare arm's model list includes Haiku 4.5 on some rows (Claude Code's own background calls,
 not a delegation; `spawned` is 0), so its mean cost is not purely Opus.
 
+### Three Claude arms at 1.70.0, gstack included, paired
+
+The routing-cost table below is the only earlier gstack measurement and it predates the breadth
+retirement. Run files `runs/20260903-164557.97124.jsonl` (multi_module, 10 per arm, JOBS=3) and
+`runs/20260903-165323.31443.jsonl` (contradictory_spec, 5 per arm), Opus 5, tree at v1.70.0
+(`1729cd5`), gstack at `0d1bd56` (2026-09-01), installed with `setup --local`.
+
+| fixture | arm | n | held-out green | said DONE | false completions | spawned | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|---|---|
+| multi_module | none | 10 | 10 | 10 | 0 | 0 | $0.242 | 30 s | 4.8 |
+| multi_module | vstack | 10 | 10 | 10 | 0 | 0 | $0.224 | 30 s | 4.5 |
+| multi_module | gstack | 10 | 10 | 10 | 0 | 0 | $0.229 | 35 s | 4.5 |
+| contradictory_spec | none | 5 | 5 | 0 | 0 | 0 | $0.187 | 38 s | 3.8 |
+| contradictory_spec | vstack | 5 | 5 | 0 | 0 | 0 | $0.193 | 32 s | 3.4 |
+| contradictory_spec | gstack | 5 | 5 | 0 | 0 | 0 | $0.222 | 38 s | 4.2 |
+
+Parity on every column that matters. Cost ratios to bare: vstack 0.93x, gstack 0.95x on
+multi_module; 1.03x and 1.19x on contradictory_spec, n=5, inside noise. On contradictory_spec
+every Opus run in every arm fixed the code to the written specification (held-out green 15 of
+15), left the contradicting test file untouched, and withheld the DONE line; none wrote a
+DEFECT.md. That is the same shape bare GLM produced (30 of 30 NOT DONE, no report): the
+escalation channel the gate arms added on GLM was never needed by Opus, and neither
+configuration layer changed what Opus did with the contradiction.
+
 ### Gate arms on GLM 5.3 Flash, harness-side driver loop
 
 OpenCode has no blocking Stop hook and `opencode run` exits at its first idle, so vstack's
@@ -265,3 +289,5 @@ valid and invalid, was $11.21 across 62 model calls:
 | `tests/evals/showcase/runs/20260903-121228.9102.jsonl` | five_module_edges | glm-5.3-flash, none vs oracle | valid, 30 per arm, base rate under 4% |
 | `tests/evals/showcase/runs/20260903-121154.7017.jsonl` | contradictory_spec | glm-5.3-flash, none vs gate with exit | valid, 30 per arm |
 | `tests/evals/showcase/runs/20260903-121154.7018.jsonl` | contradictory_spec | glm-5.3-flash, gate without exit | valid, 30 |
+| `tests/evals/showcase/runs/20260903-164557.97124.jsonl` | multi_module | Opus 5, none vs vstack vs gstack at v1.70.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260903-165323.31443.jsonl` | contradictory_spec | Opus 5, none vs vstack vs gstack at v1.70.0 | valid, 5 per arm |
