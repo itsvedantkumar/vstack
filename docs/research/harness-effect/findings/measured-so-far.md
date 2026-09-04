@@ -6,7 +6,7 @@ README, ours or anyone else's.
 ## vstack against gstack, held-out checks
 
 `tests/evals/showcase/RESULTS.md`, rows in `tests/evals/showcase/runs/`. Opus 5 and Haiku 4.5,
-three arms, four fixtures, the agent never sees the check.
+vstack and gstack, six fixtures, the agent never sees the check.
 
 - Correctness: every valid run green in every arm (46 Opus, 10 Haiku).
 - False completion: zero in every arm. The Stop gate vstack ships for this never had a case.
@@ -35,7 +35,7 @@ Removed 2026-09-04: this section compared against a bare arm; the run files rema
 
 ## Review benchmark
 
-`tests/evals/RESULTS.md`. Opus 5, three arms, four fixtures, five samples. Planted defects found
+`tests/evals/RESULTS.md`. Opus 5, vstack and gstack, four fixtures, five samples. Planted defects found
 11 and 10 of 15 for vstack and gstack. No skill was invoked in any of the sixty runs under any
 arm: a neutral prompt about a file reaches neither harness's front door.
 

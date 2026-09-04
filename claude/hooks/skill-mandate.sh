@@ -1032,7 +1032,7 @@ fi
 # The register mandate rides along with a block some other mandate earned, but never blocks on
 # its own. A Stop block cannot unsend the text it objects to; all it can buy is one more model
 # turn that says "Acknowledged" -- which is exactly what Haiku 4.5 did in 10 of 30 benchmark
-# runs on 2026-09-04 (tests/evals/showcase/RESULTS.md, "Three Claude arms on Haiku 4.5"),
+# runs on 2026-09-04 (tests/evals/showcase/RESULTS.md, "vstack and gstack on Haiku 4.5 at 1.71.0"),
 # at +1.5 to +4.5 turns and up to 1.54x wall per task, with no change in the code it left
 # behind. Opus absorbed the same strike without replying, so the cost only shows on the
 # small model. The strike still counts (2-strike latch above) and still reaches the model:

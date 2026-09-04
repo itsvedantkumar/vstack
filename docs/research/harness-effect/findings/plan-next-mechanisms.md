@@ -6,7 +6,7 @@ contradict: correctness parity on every Claude arm, cost parity once the breadth
 zero false completions on Claude, and a gate that has never fired on a live run. Item 1 (breadth)
 shipped in 1.69.0; its plan is `plan-breadth-retirement.md`.
 
-## What the three arms agree on
+## What both arms agree on
 
 - The draft's "today" is wrong in three places for this tree: item 2's fallback to an untrusted
   `package.json` test reopens a closed hole (ZEEP-A); CLAUDE.md is 4.3 KB, not 8.7 KB, and subagents
