@@ -4,6 +4,18 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.73.1 — 2026-09-05
+
+- **Two release-lane harnesses carried the same logical-path assumption 1.73.0 fixed everywhere
+  else.** `tests/compare-baseline.sh` armed the trust store with a logical fixture root, so its
+  one mechanism row ("agent claims done, tests fail") read `no decision` where the gate really
+  decides `block`. Fixed with `pwd -P`, like the readers.
+- **`tests/test-breadth-mandate.sh` PROOF 25 was stale, not the hook.** It still asserted that a
+  banned register opener blocks; 1.72.0 made a lone register strike warn instead. The proof now
+  asserts the warn (a `systemMessage` naming the phrase, no `decision`), matching
+  `tests/mandate-cases.sh`. Nothing caught the drift because the release lane, which is the only
+  caller of both harnesses, had not been run since 1.71.0.
+
 ## 1.73.0 — 2026-09-04
 
 - **The Stop-hook gate never ran in any repository reached through a symlink.** `vstack trust`

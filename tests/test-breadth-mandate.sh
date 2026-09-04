@@ -67,7 +67,7 @@ if ! command -v jq >/dev/null 2>&1; then
   skip "PROOF 22: three singleton dispatches, no batch -> serial-tail mandate blocks" "jq not installed"
   skip "PROOF 23: two singleton dispatches -> serial-tail mandate silent (below threshold)" "jq not installed"
   skip "PROOF 24: early 2-in-one-message batch, then three singletons -> serial-tail mandate still blocks (amnesty closed)" "jq not installed"
-  skip "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" "jq not installed"
+  skip "PROOF 25: turn text opening with a banned register phrase -> register mandate warns (1.72.0: warns, does not block)" "jq not installed"
   skip "PROOF 26: banned words mid-line or without a boundary char -> register mandate silent" "jq not installed"
   skip "PROOF 27: two dirs, two extensions, zero Task -> breadth mandate silent (retired 1.68.0)" "jq not installed"
   skip "PROOF 28: one dir, two extensions, zero Task -> breadth mandate silent (dir floor holds)" "jq not installed"
@@ -121,9 +121,11 @@ run_hook_(){
   if [ -z "$HOOK_OUT" ]; then
     HOOK_DECISION=""
     HOOK_REASON=""
+    HOOK_SYSMSG=""
   else
     HOOK_DECISION=$(printf '%s' "$HOOK_OUT" | jq -r '.decision // empty' 2>/dev/null)
     HOOK_REASON=$(printf '%s' "$HOOK_OUT" | jq -r '.reason // empty' 2>/dev/null)
+    HOOK_SYSMSG=$(printf '%s' "$HOOK_OUT" | jq -r '.systemMessage // empty' 2>/dev/null)
   fi
 }
 
@@ -134,6 +136,9 @@ names_unslop_(){ printf '%s' "$HOOK_REASON" | grep -qF 'unslop --'; }
 names_ts_(){ printf '%s' "$HOOK_REASON" | grep -qF 'typescript-best-practices --'; }
 names_serial_(){ printf '%s' "$HOOK_REASON" | grep -qF 'serial dispatch tail --'; }
 names_register_(){ printf '%s' "$HOOK_REASON" | grep -qF 'register -- banned opener'; }
+# 1.72.0: on its own the register strike warns instead of blocking, so its verdict is a
+# systemMessage naming the phrase, with no decision at all.
+warns_register_(){ printf '%s' "$HOOK_SYSMSG" | grep -qF 'register strike'; }
 
 # --- PROOF 1: 5 fixture writes, 1 directory, 1 extension, 0 Task calls ------------------------
 # Negative direction. Mechanical repetition (fixtures/case1.json .. case5.json) must not read
@@ -538,18 +543,20 @@ else
       "expected decision=block naming 'serial dispatch tail --', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
 fi
 
-# --- PROOF 25: turn text opening with a banned register phrase -> register blocks ---------------
+# --- PROOF 25: turn text opening with a banned register phrase -> register warns ----------------
 # Positive direction for the register mandate: an assistant text block whose line starts with a
 # banned CLAUDE.md REGISTER opener ("Let me ..."). Zero writes, zero dispatches, so no other
-# mandate can confound; the block must name the phrase it matched so the reader knows what to
-# delete, not just that something tripped.
+# mandate can confound. Since 1.72.0 a lone register strike warns rather than blocking (measured:
+# blocking it cost Haiku 1.67x the wall time of the comparison harness), so the verdict is a
+# systemMessage and NOT a block. It must still name the phrase it matched, so the reader knows
+# what to delete rather than only that something tripped.
 say_ '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me look at the failing lane before touching anything."}]}}'
 run_hook_ proof25
-if [ "$HOOK_DECISION" = "block" ] && names_register_; then
-  ok "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks"
+if [ "$HOOK_DECISION" != "block" ] && warns_register_; then
+  ok "PROOF 25: turn text opening with a banned register phrase -> register mandate warns (1.72.0: warns, does not block)"
 else
-  bad "PROOF 25: turn text opening with a banned register phrase -> register mandate blocks" \
-      "expected decision=block naming 'register -- banned opener', got: decision=$HOOK_DECISION reason=[$HOOK_REASON]"
+  bad "PROOF 25: turn text opening with a banned register phrase -> register mandate warns (1.72.0: warns, does not block)" \
+      "expected no decision and a systemMessage naming 'register strike', got: decision=$HOOK_DECISION sysmsg=[$HOOK_SYSMSG]"
 fi
 
 # --- PROOF 26: banned words mid-line or without a boundary char -> register stays silent --------

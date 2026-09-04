@@ -133,7 +133,7 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.73.0/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.73.1/bootstrap.sh -o bootstrap.sh
 VSTACK_REF=v1.73.0 bash bootstrap.sh     # installs that tag, not main
 ```
 

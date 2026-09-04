@@ -38,7 +38,9 @@ JSON=0
 # path with a double slash in it — and the verify gate resolves its own path with cd+pwd, which
 # does not. The two spellings then fail to match in the trust file and the gate skips, which
 # reads exactly like the gate being broken.
-ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/vstack-compare.XXXXXX")" && pwd)
+# pwd -P: `vstack trust` records the physical path and the Stop hook resolves one, so a logical
+# fixture root armed a record the gate could not match (1.73.0).
+ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/vstack-compare.XXXXXX")" && pwd -P)
 trap 'rm -rf "$ROOT"' EXIT
 
 ROWS=""

@@ -359,3 +359,4 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-143157.55012.jsonl` | gated_report | Opus 5, three arms at v1.72.0 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260904-143928.90069.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, harness defect: workdirs were not git repos inside this checkout, so runs escaped into the fixture source |
 | `tests/evals/showcase/runs/20260904-144621.19824.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, killed: the vstack arm's Stop gate was inert, `verify gate: skipped untrusted` in all ten runs (the 1.73.0 symlink defect) |
+| `tests/evals/showcase/runs/20260904-184059.28637.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.0 | **invalid**, two vstack runs hit the 360 s wrapper timeout and wrote no row, so the surviving eight are its faster ones |
