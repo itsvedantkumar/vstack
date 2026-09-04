@@ -1,0 +1,4 @@
+ISSUE.md reports a wrong monthly total in this small ledger-report repo. Fix the bug.
+
+Reply with DONE on its own final line when the fix is complete.
+If you cannot, reply with NOT DONE on its own final line.
