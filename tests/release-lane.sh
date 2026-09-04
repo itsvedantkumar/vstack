@@ -101,7 +101,11 @@ fi
 # The index the release doc links to, one row per tag, newest first, replaced in place on a rerun.
 IDX=$SRC/releases/README.md
 [ -f "$IDX" ] || printf '# Release evidence\n\nOne file per tag, written by `tests/release-lane.sh`. Rows are replaced on a rerun.\n\n| tag | commit | run | verdict | evidence |\n|---|---|---|---|---|\n' > "$IDX"
-row=$(printf '| %s | `%s` | %s | %s | [`%s.md`](%s.md) |' "$TAG" "$(git rev-parse --short "$SHA")" "$(date +%F)" "$([ "$RED" -eq 0 ] && echo green || echo "$RED red")" "$TAG" "$TAG")
+# The link text carries the repo-relative path and the target stays relative to this index.
+# Check 31 greps for the full path, so a row spelling only "v1.73.0.md" leaves the evidence file
+# with no referrer and turns the gate red on the very artefact this lane just wrote. v1.71.0's
+# referrer was an accident: a usage comment at the top of this file happens to name that one tag.
+row=$(printf '| %s | `%s` | %s | %s | [`releases/%s.md`](%s.md) |' "$TAG" "$(git rev-parse --short "$SHA")" "$(date +%F)" "$([ "$RED" -eq 0 ] && echo green || echo "$RED red")" "$TAG" "$TAG")
 grep -vF "| $TAG |" "$IDX" > "$IDX.new"; { head -6 "$IDX.new"; printf '%s\n' "$row"; tail -n +7 "$IDX.new"; } > "$IDX"; rm -f "$IDX.new"
 
 [ "$RED" -eq 0 ] || exit 1
