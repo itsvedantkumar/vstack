@@ -111,6 +111,9 @@ seeing an arm's output.
   quarter of the arm; extrapolating a rate from the remaining six invites exactly the kind of
   survivorship bias `RESULTS.md`'s denominator note flags for the `none` arm's 34-of-35 planted
   count.
+
+  Note 2026-09-04: comparisons against the none arm are no longer reported; see the maintainer's
+  rule in tests/evals/showcase/RESULTS.md.
 - The canary is never pooled into the 24-cell comparison. It exists to validate the harness, not
   to add a ninth data point to any arm.
 

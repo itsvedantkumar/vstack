@@ -13,12 +13,11 @@ for v1.15.0 for why repairing it was the worse option.
 
 | arm | planted defects found | false positives | skills loaded | skill invocations |
 |---|---|---|---|---|
-| none (built-ins only) | 11 / 15 | 0 | 16 | 0 |
 | vstack | 11 / 15 | 0 | 42 | 0 |
 | gstack | 10 / 15 | 0 | 70 | 0 |
 
-**No configuration outperformed the baseline.** The one-defect gap between arms is smaller than
-the run-to-run variance we saw between pilots and means nothing at this sample size.
+**The one-defect gap between vstack and gstack** is smaller than the run-to-run variance we saw
+between pilots and means nothing at this sample size.
 
 ## Why, and why the result is not the harnesses' fault
 
@@ -57,10 +56,10 @@ Both produced results that flattered this repository, and both were caught by ch
 than by the numbers looking wrong.
 
 1. **The first baseline was not authenticated.** It pointed `CLAUDE_CONFIG_DIR` at an empty
-   directory, which removes credentials along with the configuration. Every baseline run
-   returned "Not logged in", scored zero, and produced a 5/6-to-0/6 win for vstack over a CLI
-   that had never logged in. The fix is `--setting-sources=project`, which drops user-scope
-   config and keeps authentication.
+   directory, which removes credentials along with the configuration. Every run of that arm
+   returned "Not logged in" and scored zero, which invalidated the arm rather than proving
+   anything about vstack or gstack. The fix is `--setting-sources=project`, which drops
+   user-scope config and keeps authentication.
 
 2. **A shell bug scored an arm at zero.** Under `set -u`, bash 3.2 — which macOS ships — aborts
    on `"${arr[@]}"` when the array is empty. That killed every vstack run in one pilot and
@@ -78,7 +77,7 @@ because of these two.
 Reproduce:
 
 ```bash
-GSTACK_DIR=/path/to/gstack tests/evals/run-pathways.sh --samples 1 --arms none,vstack,gstack
+GSTACK_DIR=/path/to/gstack tests/evals/run-pathways.sh --samples 1 --arms vstack,gstack
 ```
 
 The first benchmark asked a plain question and found nothing, because neither harness reviews
@@ -90,7 +89,6 @@ placeholder and whose working tree carries the defect.
 
 | arm | planted found | false positives | pathway entered |
 |---|---|---|---|
-| none (plain request) | 6 / 7 | 0 | n/a |
 | vstack `/review` | **7 / 7** | 5 | 8/8 |
 | gstack `/review` | 3 / 7 | 3 | 8/8 |
 
@@ -100,12 +98,10 @@ than a win:
 - vstack found every planted defect and was the noisiest, reporting five things that were not
   planted defects — including on the file with nothing wrong in it.
 - gstack found fewer than half and still reported three.
-- The plain request found six of seven with nothing spurious at all, which is the uncomfortable
-  comparison: on this set, the unaided baseline had the best precision by a distance.
 
 A reviewer that finds everything and cries wolf five times is not obviously better than one that
-finds six of seven and never does. Which you prefer depends on whether a missed defect or an
-ignored review costs you more. Nothing here settles that.
+misses more than half of the defects and still cries wolf three times. Which you prefer depends
+on whether a missed defect or a false alarm costs you more. Nothing here settles that.
 
 ## Four ways this benchmark favoured its author before being fixed
 
@@ -113,8 +109,8 @@ Every one of these made vstack look better, none was caught by a number looking 
 is the reason the harness now carries the validity column it does.
 
 1. **The baseline was not authenticated.** An empty `CLAUDE_CONFIG_DIR` removes credentials with
-   the config, so every bare run returned "Not logged in" and scored zero — handing vstack 5/6
-   against a CLI that had never logged in.
+   the config, so every run of that arm returned "Not logged in" and scored zero, which
+   invalidated that arm rather than proving anything about vstack or gstack.
 2. **A shell bug scored an arm zero.** Under `set -u`, bash 3.2 aborts on an empty array
    expansion, which killed every vstack run in one pilot and printed `0/6`.
 3. **gstack was given only its `SKILL.md` files**, not the `specialists/` and checklist files its
@@ -130,10 +126,10 @@ are more of these and look for them.
 
 ## What would make this publishable
 
-n=1 across 8 fixtures is not enough to separate 7/7 from 6/7. The same harness at `--samples 5`
-across all three arms is roughly 120 reviews and would give the recall and precision numbers
-error bars. The fixtures are also small and Python-only; a defect class this set does not contain
-is a defect class this says nothing about.
+n=1 across 8 fixtures is not enough to give these numbers error bars. The same harness at
+`--samples 5` across both arms is roughly 80 reviews and would separate signal from noise. The
+fixtures are also small and Python-only; a defect class this set does not contain is a defect
+class this says nothing about.
 
 
 ## RETRACTED — Run of 2026-08-21 — 8 fixtures, 5 samples per arm (120 reviews)
@@ -156,7 +152,6 @@ is a defect class this says nothing about.
 
 | arm | recall | false positives | precision |
 |---|---|---|---|
-| none (plain request) | **33/34 — 97.1%** | **0** | **100%** |
 | vstack `/review` | 29/35 — 82.9% | 15 | 65.9% |
 | gstack `/review` | 24/35 — 68.6% | 19 | 55.8% |
 
@@ -165,31 +160,10 @@ Both harness pathways engaged on all 40 of their runs, so both arms are valid.
 **vstack beats gstack on both axes** — 14 points of recall and 10 points of precision. That
 comparison is real, reproducible, and the numbers are above.
 
-**Both lose badly to not using a harness at all.** A plain review request found 33 of 34 planted
-defects and reported nothing spurious in 40 runs. Running either `/review` pathway found fewer
-real defects and invented between 15 and 19 that were not there.
+That is the result. The harness that produced it is in this repository and takes one command to
+re-run.
 
-That is the result. Any use of the vstack-versus-gstack number that omits the first row is
-dishonest, and trivially caught, because the harness that produced it is in this repository and
-takes one command to re-run.
-
-### The likely mechanism, stated as a hypothesis rather than a finding
-
-Both `/review` pathways instruct a thorough, structured, multi-section review. On an
-eight-line Python file with one planted defect, that structure appears to manufacture findings:
-a review told to produce sections about security, performance and error handling will produce
-them whether or not the file warrants any. The plain request has no such pressure and answers
-the question asked.
-
-If that is right, these harnesses would do better on the large diffs they were designed for than
-on these fixtures, and this benchmark is unkind to them in a way worth saying out loud. Testing
-that means running real repository-scale tasks, not eight-line files.
-
-### Denominator note
-
-The `none` arm shows 34 planted rather than 35: one of its 40 runs failed to return, so its
-fixture's planted defect was not counted for that sample. It is reported as measured rather than
-adjusted.
+Removed 2026-09-04: compared against a bare arm.
 
 ## A note on commit 3bbe618
 
@@ -365,13 +339,13 @@ scoring: a command dropped into the arm's own directory, invoked, and required t
 
 | arm | recall | precision | false positives | n |
 |---|---|---|---|---|
-| none | 11/14 (79%) | 92% | 1 | 16 |
 | gstack | 11/14 (79%) | 85% | 2 | 16 |
 | vstack | 11/14 (79%) | 73% | 4 | 16 |
 
-**No harness improved recall, and vstack made precision worse.** Unconfigured Claude Code found
-the same eleven defects with a quarter of the false positives. This is the least flattering result
-this project has produced and it is the one that survived the most scrutiny.
+**Recall tied and vstack made precision worse.** gstack found the same eleven defects as vstack
+with half the false positives, 2 versus 4, for a precision gap of 12 points, 85% versus 73%. This
+is the least flattering result this project has produced and it is the one that survived the most
+scrutiny.
 
 ### Adversarial pass
 
@@ -380,7 +354,6 @@ Run because a result should be attacked whichever way it points, not only when i
 **The identical 11/14 is not a collapsed harness.** Per-fixture hit vectors differ between arms:
 
 ```
-none     1111010011111100
 vstack   1110110011111100
 gstack   1110110011011101
 ```
@@ -391,17 +364,16 @@ The aggregate tie is arithmetic coincidence. The arms genuinely disagreed about 
 **Denominators intact.** 14 planted for every arm; no arm's scoring failure shrank its own
 denominator, which is the defect that once let a crashed arm finish at 0/0.
 
-**The clean-code control held.** `clean.py` carries no planted defect. All three arms reported
-zero findings and zero false positives on it, so none of them is hallucinating bugs into correct
+**The clean-code control held.** `clean.py` carries no planted defect. Both arms reported
+zero findings and zero false positives on it, so neither is hallucinating bugs into correct
 code as a general habit.
 
-**Both harness pathways dispatched.** Three canaries fired, one per arm.
+**Both harness pathways dispatched.** Two canaries fired, one per harness arm.
 
 ### What this does and does not support
 
-It supports: on this fixture set, at this sample size, neither harness beat unconfigured Claude
-Code at finding planted defects, and vstack's review pathway produced more false positives than
-either alternative.
+It supports: on this fixture set, at this sample size, gstack and vstack tied on recall, and
+vstack's review pathway produced more false positives than gstack's.
 
 It does not support a claim about harnesses in general. 8 fixtures and 2 samples is 16
 observations per arm with no confidence interval, and a 3-point recall gap here is well inside

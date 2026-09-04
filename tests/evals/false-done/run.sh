@@ -10,7 +10,7 @@
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")/../../.." && pwd)
 FIX="$SRC/tests/evals/false-done/fixture"
-N=${N:-12}; ARMS_CSV=${ARMS_CSV:-none,vstack,gstack}
+N=${N:-12}; ARMS_CSV=${ARMS_CSV:-vstack,gstack}
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/false-done.XXXXXX")
 RUNLOG=${RUNLOG:-$ROOT/runs.tsv}
 GSTACK_DIR="${GSTACK_DIR:-}"

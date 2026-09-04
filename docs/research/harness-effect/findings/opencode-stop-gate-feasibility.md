@@ -4,10 +4,10 @@ Provenance: drafted 2026-09-03 by a GLM 5.3 Flash research agent (OpenCode Go) a
 `sst/opencode` dev tree and the published docs, brief at `/tmp/glm-research/opencode-gate/`.
 Read and used by RICK the same day; the "What vstack does with it" section at the end is RICK's.
 
-Why it matters here: the showcase benchmark found its only false completions on bare GLM 5.3
-Flash, not on any Claude arm (see `measured-so-far.md`). vstack's false-done gate is a Claude
-Code Stop hook. To test whether the gate itself changes that number, the gate has to run where the
-false completions happen, and vstack's hooks do not load in OpenCode.
+Why it matters here: the showcase benchmark's only false completions happened on GLM 5.3 Flash
+through OpenCode (see `measured-so-far.md`). vstack's false-done gate is a Claude Code Stop hook.
+To test whether the gate itself changes that number, the gate has to run where the false
+completions happen, and vstack's hooks do not load in OpenCode.
 
 
 Question: can an OpenCode (opencode.ai, open-source CLI coding agent, 1.18.x) plugin or configuration implement a stop gate that runs a shell command (for example a test suite) when the agent is about to finish its turn or the session goes idle, blocks completion on non-zero exit, sends the failure output back to the model as a new message so it keeps working, with a cap on retries?
@@ -401,6 +401,6 @@ verification output and the instruction to fix the code, not the tests; then sco
 checks as for every other arm. The row records `gate_rounds`, the number of red rounds the driver
 fed back, so a gate that never fired is visible as a zero and not as a green.
 
-That makes the experiment "bare GLM vs gated GLM on a fixture with visible tests", the one
-comparison every Claude arm was unable to give because Claude never produced a false completion.
+That makes `gate_rounds` the one number that shows whether the harness-side gate did anything on
+GLM, a measurement no Claude arm can supply because Claude never produced a false completion.
 The numbers are in `measured-so-far.md` once the run lands.

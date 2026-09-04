@@ -171,7 +171,7 @@ tests/test-breadth-mandate.sh
 Until 1.67.0 the hook blocked a Stop whose turn had written into two directories with two
 extensions and dispatched nothing, and this script asserted the specific `multi-directory work --`
 line. 1.68.0 retired that block on measured cost (`tests/evals/showcase/RESULTS.md`, the
-routing-cost table: 3.6 to 4.4 times bare Claude when it fired, for no correctness gain). The hook
+routing-cost table: 3.6 to 4.4 times the runs where it stayed silent, for no correctness gain). The hook
 still computes `dir_count` and `ext_count` into its log row, check 40 still requires them there,
 and this script now asserts the opposite of what it used to: the breadth cases stay silent, while
 the naming, swarm-first and serial-tail cases still block for their own reasons. Check 27 of

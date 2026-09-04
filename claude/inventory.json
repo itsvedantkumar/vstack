@@ -11,7 +11,7 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "b7c26eb8448659c49ebc2e2ef2c1a6111ec10bac",
+    "head": "6f967ec2d61cf0fa74f1ccac6b4ddcec6aa70d56",
     "payload_digest": "f95da49de835e486e6234bd7363f95738cafec0c57a4bb5d92da28e1fa9223d5",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
@@ -531,12 +531,13 @@
           "blocking": false,
           "justified_by": {
             "kind": "measurement",
-            "file": "tests/evals/showcase/runs/20260903-022953.55428.jsonl",
-            "run_id": "20260903-022953.55428.jsonl",
+            "file": "tests/evals/showcase/runs/20260904-121312.60002.jsonl",
+            "run_id": "20260904-121312.60002.jsonl",
             "entry": null,
-            "measured_head": "773f3d4b6fd38f7c23771d7ed7b15e38cfca0e5b",
+            "measured_head": "6f967ec2d61cf0fa74f1ccac6b4ddcec6aa70d56",
             "decide_by": null
-          }
+          },
+          "note": "Re-measured 2026-09-04 at 1.72.0 (Haiku 4.5, vstack vs gstack, multi_module n=10): the register block became a warning in the same file; breadth logic untouched, spawned stays 0."
         },
         {
           "id": "dispatch-counter",
@@ -609,6 +610,21 @@
             "measured_head": null,
             "decide_by": "2026-09-17"
           }
+        },
+        {
+          "id": "register-warns",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": false,
+          "justified_by": {
+            "kind": "measurement",
+            "file": "tests/evals/showcase/runs/20260904-121312.60002.jsonl",
+            "run_id": "20260904-121312.60002.jsonl",
+            "entry": null,
+            "measured_head": "6f967ec2d61cf0fa74f1ccac6b4ddcec6aa70d56",
+            "decide_by": null
+          },
+          "note": "1.72.0: the register (banned opener) strike no longer blocks Stop on its own; it counts, shows a systemMessage, and reaches the model as a REGISTER digest line. Motivated by runs/20260904-010328.38498.jsonl and 20260904-011934.55418.jsonl (Haiku 4.5 at 1.71.0: 10 of 30 vstack runs spent an extra turn answering the strike, wall up to 1.67x gstack). The cited run is the same fixture on Haiku at 1.72.0 against gstack."
         }
       ]
     },

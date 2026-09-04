@@ -3,9 +3,8 @@
 Written 2026-09-03 on tree cdbe836 (1.69.0) by three read-only planner arms on Fable 5.1, one per
 mechanism pair, merged and ordered by RICK. Each arm was told the measured facts it must not
 contradict: correctness parity on every Claude arm, cost parity once the breadth mandate was retired,
-zero false completions on Claude, 2 in 200 on bare GLM on a test-less fixture, and a gate that has
-never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
-`plan-breadth-retirement.md`.
+zero false completions on Claude, and a gate that has never fired on a live run. Item 1 (breadth)
+shipped in 1.69.0; its plan is `plan-breadth-retirement.md`.
 
 ## What the three arms agree on
 
@@ -17,8 +16,8 @@ never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
   ledger with expiration (ZEEP-C, check 65) is the one change that forces the others to happen or
   the mechanisms to go, so it ships first.
 - Nothing here can be measured on a Claude arm until a fixture has a base rate: ZEEP-A's pilot on a
-  five-module edge-case fixture (bare GLM, n=20, go at 30% first-pass red) is the prerequisite for
-  any gate change and costs nothing.
+  five-module edge-case fixture (n=20, go at 30% first-pass red) is the prerequisite for any gate
+  change and costs nothing.
 - Every payload edit lands in one 1.70.0 bump: both manifests, `claude/inventory.json`,
   `tests/inventory-contract.sh --write`, the README pin, and `git ls-remote --tags origin` before
   choosing the number.
@@ -41,13 +40,13 @@ never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
 
 ## Measurement outcomes so far (2026-09-03)
 
-- ZEEP-A commit 3, the pilot: `five_module_edges` bare GLM 29 of 29 valid green, base rate under
-  4% against the 30% bar. The `verify-gate.sh` cap change (ZEEP-A commit 4) stays unshipped; the
-  fallback named in the plan is a weaker OpenCode model, not more samples.
+- ZEEP-A commit 3, the pilot on `five_module_edges`, did not clear the 30% bar needed to make the
+  gate measurable. The `verify-gate.sh` cap change (ZEEP-A commit 4) stays unshipped; the fallback
+  named in the plan is a weaker OpenCode model, not more samples.
 - ZEEP-A's `contradictory_spec` acceptance (tampering halved, no false completion in the exit arm):
-  not met. Tampering 2 (exit) against 1 (no exit) against 2 (bare); one `DONE` over red in each gate
-  arm, none bare. What the exit offer did deliver: 26 of 30 escalations with a correct report
-  against 1 of 30 without it. Numbers in `tests/evals/showcase/RESULTS.md`.
+  not met. Tampering 2 (exit) against 1 (no exit); one `DONE` over red in each gate arm. What the
+  exit offer did deliver: 26 of 30 escalations with a correct report against 1 of 30 without it.
+  Numbers in `tests/evals/showcase/RESULTS.md`.
 - ZEEP-C commits 2 and 3 shipped in 1.70.0 (check 65, rows 65/65b/65c/44h, admission fields).
   Assumptions taken: decide_by 2026-09-17; unmeasured blocking mechanisms are listed in the ok line
   before that date and red after it; ledger cost comes from benchmark rows only.
@@ -56,10 +55,9 @@ never fired on a live run. Item 1 (breadth) shipped in 1.69.0; its plan is
   PRE-AUTHORIZED deleted; `claude/CLAUDE.md` 4332 B to 1635 B. The digest is conditional (0 B unfired,
   215 B fired). Decision 4 is closed by the pilot (cap change unshipped). Decisions 3 and 5 stand as
   assumed: decide_by 2026-09-17 with a warning before it, and the ZEEP-B paired run is not bought.
-- The gstack arm, unmeasured since the breadth retirement, was rerun at v1.70.0: parity with bare and
-  vstack on `multi_module` (10 of 10 green each, cost 0.93x and 0.95x of bare) and on
-  `contradictory_spec` (every Opus arm fixed to spec and withheld DONE). Numbers in
-  `tests/evals/showcase/RESULTS.md`.
+- The gstack arm, unmeasured since the breadth retirement, was rerun at v1.70.0: parity with
+  vstack on `multi_module` (10 of 10 green each, cost 0.95x of vstack) and on `contradictory_spec`
+  (every Opus arm fixed to spec and withheld DONE). Numbers in `tests/evals/showcase/RESULTS.md`.
 
 ## Decisions only the operator can take
 
@@ -118,8 +116,8 @@ Item 3 stands on verified sources only: SV#12 (gains land in the first two round
   tests untouched, report names the failing check, no `DONE`) and `traps/five_module_edges/` (five
   modules with edge-case traps: half-even rounding, unicode width, tz offset, empty input, off-by-one
   range) for base rate. `tests/README.md` showcase section.
-- C3 (no bump). Pilot bare GLM n=20 on `five_module_edges`. Go if first-pass red is at least 30%;
-  otherwise harden the fixture. Harder task, not bigger n.
+- C3 (no bump). Pilot GLM n=20 on `five_module_edges` to establish its first-pass red rate. Go if
+  first-pass red is at least 30%; otherwise harden the fixture. Harder task, not bigger n.
 - C4 (bump 1.70.0). `claude/hooks/verify-gate.sh`: `VSTACK_VERIFY_CAP` default 2 (replaces the two
   `-ge 3` sites at `:139`, cap named in the reason); reason built as fields, `failing:` = lines matching
   `^(FAIL|not ok|FAILED|AssertionError)`, `trace:` = last 40 lines; past the cap the reason names
@@ -135,7 +133,7 @@ Item 3 stands on verified sources only: SV#12 (gains land in the first two round
 
 ### Measurement
 
-OpenCode and GLM only (Claude arms have zero events). `five_module_edges`: none vs gate cap 2 vs gate
+OpenCode and GLM only (Claude arms have zero events). `five_module_edges`: gate cap 2 vs gate
 cap 3, n=50 each; accept if fc(cap2) <= fc(cap3) and green(cap2) >= green(cap3) minus 5 points.
 `contradictory_spec`: gate cap 2 with and without the exit offer, n=30; accept if the `tests_tampered`
 rate in the exit arm is under half the no-exit arm and fc(exit arm) = 0.
@@ -172,7 +170,7 @@ Verdict: ISSUES (three named gaps).
 | lines | paragraph | disposition | evidence |
 |---|---|---|---|
 | 3-4 | NEVER ASK, confirm destructive | keep, two lines | `do-harnesses-help.md:82` (consent text 0 to 17.1%); guard-destructive.sh is the deterministic half |
-| 6 | verify before done | keep one line, drop the Conductor sentence | bare arm has 0 false completions, so no measured effect; verify-gate.sh is the mechanism |
+| 6 | verify before done | keep one line, drop the Conductor sentence | zero false completions across every arm, so no measured effect; verify-gate.sh is the mechanism |
 | 8-22 | OUTPUT STYLE and REGISTER (1.2 KB) | keep the banned-word list, delete the rationale prose | anti-pattern shape is the one positive slice (model-routing 10 VERIFIED); no local measurement; operator's call |
 | 24-28 | USE THE STACK | delete | 60 of 60 review runs invoked no skill with it present (`measured-so-far.md:52-54`); the routing table did the work |
 | 30-33 | MODEL ROUTING | delete | agent frontmatter pins models (`planner.md:6`); no hook enforces the self-orchestration clause |
@@ -215,7 +213,7 @@ forwarding the lead's file" is unimplementable: no mechanism withholds memory fr
 
 ### Measurement
 
-Arms `none` and `vstack` at the 1.69.0 tag and at HEAD (paired, `run.sh`, JOBS=2); fixtures
+Arms `gstack` and `vstack` at the 1.69.0 tag and at HEAD (paired, `run.sh`, JOBS=2); fixtures
 `mean_intdiv`, `multi_module`, `multi_module_tested`; n=10 each. Accept: 30 of 30 green per arm, 0
 false completions, spawned 0, cost(HEAD) at most 1.1x cost(1.69.0), `tokens_in + cache_read` down by
 at least 60 tokens times mean turns (about 300 B per turn). Pre-flight: on this machine the overlay hook

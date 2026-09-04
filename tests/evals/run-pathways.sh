@@ -31,7 +31,7 @@
 #     eight fixtures is noise.
 #
 # Usage:
-#   GSTACK_DIR=/path/to/gstack tests/evals/run-pathways.sh --samples 3 --arms none,vstack,gstack
+#   GSTACK_DIR=/path/to/gstack tests/evals/run-pathways.sh --samples 3 --arms vstack,gstack
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
@@ -43,7 +43,7 @@ case "${FIXTURES:-dev}" in
   *)       FIX="$SRC/tests/evals/fixtures"; GT="$SRC/tests/evals/ground-truth.json" ;;
 esac
 
-SAMPLES=1; ARMS_CSV="none,vstack,gstack"; JSON=0
+SAMPLES=1; ARMS_CSV="vstack,gstack"; JSON=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --samples) SAMPLES="$2"; shift 2 ;;

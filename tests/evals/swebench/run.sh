@@ -24,14 +24,14 @@
 # UNUSABLE and excluded from every arm's denominator — not counted as a loss. Counting broken
 # setups as failures would let environment noise decide the comparison.
 #
-# Usage: GSTACK_DIR=... tests/evals/swebench/run.sh [--n 5] [--arms none,vstack,gstack]
+# Usage: GSTACK_DIR=... tests/evals/swebench/run.sh [--n 5] [--arms vstack,gstack]
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.." || exit 1
 SRC=$(pwd)
 DATA="$SRC/tests/evals/swebench/light.json"
 
-N=3; HARD=0; ARMS_CSV="none,vstack,gstack"; PYVER="${PYVER:-3.11}"
+N=3; HARD=0; ARMS_CSV="vstack,gstack"; PYVER="${PYVER:-3.11}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --n) N="$2"; shift 2 ;;

@@ -731,8 +731,8 @@ ext_count=$( [ -z "$extensions" ] && echo 0 || printf '%s\n' "$extensions" | gre
 # fanout_batches == 0, blocking with "multi-directory work -- dispatch N agents in ONE message
 # via Skill swarm" -- was RETIRED in 1.68.0 on measured cost. tests/evals/showcase/RESULTS.md's
 # routing-cost table: it fired on 2 of 5 headless runs of the same three-file fix, and those runs
-# cost 3.6x to 4.4x bare Claude (up to 6x wall time) for no correctness gain, while the 3 silent
-# runs matched bare cost. A Stop hook sees the write-set only after the fact, so this could only
+# cost 3.6x to 4.4x the 3 runs of the same fix where it stayed silent (up to 6x wall time) for
+# no correctness gain. A Stop hook sees the write-set only after the fact, so this could only
 # ever block a finished turn to demand the same work be redone through subagents, which is the
 # defect being retired rather than a threshold to re-tune. The rule still ships as routing
 # guidance, not as a block: claude/skills/swarm/SKILL.md states it -- reads fan out, writes stay

@@ -20,7 +20,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE"
 SRC="${VSTACK_SRC:-$(cd "$HERE/../../.." && pwd)}"   # vstack checkout whose overlay.sh we test
 GSTACK_DIR="${GSTACK_DIR:-}"                          # garrytan/gstack checkout; gstack arm skipped if unset
-ENGINE="${SHOWCASE_ENGINE:-claude}"                   # claude | opencode (bare arm only: hooks/skills do not load there)
+ENGINE="${SHOWCASE_ENGINE:-claude}"                   # claude | opencode (`none` arm only: hooks/skills do not load there)
 MODEL="${SHOWCASE_MODEL:-claude-opus-5}"
 RUN_TIMEOUT="${SHOWCASE_TIMEOUT:-360}"
 JOBS="${SHOWCASE_JOBS:-1}"
@@ -28,7 +28,7 @@ GATE_CAP="${SHOWCASE_GATE_CAP:-2}"                     # gate/oracle arms: red r
 GATE_EXIT="${SHOWCASE_GATE_EXIT:-1}"                   # 1: after the cap, offer the defect-report exit instead of another round
 export GSTACK_TELEMETRY=off                           # never emit gstack telemetry from a benchmark
 
-ARMS_CSV="${1:-none,vstack,gstack}"
+ARMS_CSV="${1:-vstack,gstack}"
 SAMPLES="${2:-5}"
 SET="${3:-traps}"                                     # traps | controls
 ONLY="${4:-}"                                          # optional exact fixture basename filter

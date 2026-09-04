@@ -13,15 +13,15 @@ independent reports converged on them.
 Status: applied in 1.68.0, see `plan-breadth-retirement.md`. Measurement pending.
 
 Today: `skill-mandate.sh` forces a fan-out once a turn touches two directories or two extensions.
-Our own measurement: the two runs where it fired cost 3.6 to 4.4 times bare Claude and up to six
-times the wall time, on a three-file fix, for no correctness gain.
+Our own measurement: the two runs where it fired cost 3.6 to 4.4 times the three runs where it
+stayed silent, and up to six times the wall time, on a three-file fix, for no correctness gain.
 Sources: multi-agent-overhead entries 2, 6, 7 (delegation pays only when subtasks are independent
 and verifiable; loss is exponential in cross-subtask coupling; coding has fewer parallelisable
 tasks than research); model-routing entries 6, 9 (no router beats always-strongest on accuracy
 across three SWE benchmarks; router gains indistinguishable from zero).
 Change: replace the breadth count with a coupling pre-flight. Fan out read-only work
 (investigation, localisation, review) freely; edits to overlapping files stay serial on the lead.
-Measure: multi_module cost and wall time, vstack against bare, n of 10 each, expecting parity.
+Measure: multi_module cost and wall time, vstack against gstack, n of 10 each, expecting parity.
 
 ## 2. The Stop gate must consume an execution result, never a self-assessment
 
@@ -34,8 +34,8 @@ inflate without fresh evidence).
 Change: on Stop, when no trusted verify.sh exists, run the repository's own test command if one is
 declared (package.json test, pytest, cargo test) in the working tree and block on its exit code;
 keep goal-gate as a reminder, not a gate.
-Measure: a fixture whose spec is contradictory; bare says DONE, gated arm says NOT DONE with the
-failing output attached, n of 10.
+Measure: a fixture whose spec is contradictory; the gated arm says NOT DONE with the failing
+output attached, n of 10.
 
 Declined for this tree on 2026-09-03. The fallback of running an untrusted package.json test script at Stop time reopens the hole 1.30.0 and 1.46.0 closed. README.md lines 349 to 356 name scripts.test as arbitrary code at Stop time, tests/compare-baseline.sh lines 118 to 127 pin untrusted did not run it, and check 61 in .claude/verify.sh hashes manifests for that reason. The cloud lane already arms trust in overlay.sh line 389. The goal-gate downgrade to a reminder is declined too: it blocks on the absence of a claim and its cap already opens, and the benchmark has zero events to tell the two apart. The verify-gate already consumes an exit code and never a self-assessment (claude/hooks/verify-gate.sh lines 145 to 157).
 

@@ -34,15 +34,17 @@ for f in runs/*.jsonl; do jq -c --arg f "${f#runs/}" '. + {file:$f}' "$f"; done 
   [ .[] | .file as $f
     | select($idx[$f].status == "valid")
     | select(.is_error != true and .is_error != 1)
+    | select(.arm == "vstack" or .arm == "gstack")
     | . + { engine: $idx[$f].engine,
             model: (((.model_cost // {}) | to_entries | max_by(.value) | .key) // $idx[$f].model) } ]
   | . as $all
   | { generated: (now | todate), commit: $commit,
       rows: ($all | group_by([.model, .fixture, .arm]) | map(agg) | sort_by(.engine, .model, .fixture, .arm)),
       # head_to_head: one group per run file and arm, only for files whose INDEX note says
-      # "none vs vstack vs gstack": the paired runs where all three Claude arms saw the same
-      # fixture, model and vstack version. Never pooled across files.
-      head_to_head: ($all | map(select($idx[.file].note | test("none vs vstack vs gstack")))
+      # "vstack vs gstack": the paired runs where both harnesses saw the same fixture, model and
+      # vstack version. Never pooled across files. The rule from Vedant (2026-09-04): the
+      # comparison is vstack against gstack; rows from any other arm are excluded everywhere.
+      head_to_head: ($all | map(select(($idx[.file].note | test("vstack vs gstack")) and .arm != "none"))
                      | group_by([.file, .arm]) | map(agg + {file: .[0].file, note: $idx[.[0].file].note})
                      | sort_by(.file, .fixture, .arm)),
       files: $idx }

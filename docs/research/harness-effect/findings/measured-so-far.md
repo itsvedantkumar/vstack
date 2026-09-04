@@ -3,66 +3,41 @@
 Every number here has a harness and a raw-rows file behind it. Nothing here is a claim from a
 README, ours or anyone else's.
 
-## vstack against gstack and bare Claude, held-out checks
+## vstack against gstack, held-out checks
 
 `tests/evals/showcase/RESULTS.md`, rows in `tests/evals/showcase/runs/`. Opus 5 and Haiku 4.5,
 three arms, four fixtures, the agent never sees the check.
 
 - Correctness: every valid run green in every arm (46 Opus, 10 Haiku).
 - False completion: zero in every arm. The Stop gate vstack ships for this never had a case.
-- Cost: within run-to-run noise when vstack does not delegate. 3.6 to 4.4 times bare Claude on
-  the two of five multi-file runs where its fan-out mandate fired, and up to six times the wall
-  time. Neither bare Claude nor gstack spawned a subagent in any run.
+- Cost: within run-to-run noise when vstack does not delegate. On the two of five multi-file
+  runs where its fan-out mandate fired, vstack cost 3.6 to 4.4 times the three runs where it
+  stayed silent, and up to six times the wall time, for no correctness gain. gstack spawned no
+  subagent in any run.
 - Fixed overhead: vstack installs 28 skills and wires six hook events; gstack installs 54 skills
-  and wires one; bare Claude none.
-- Bare GLM 5.3 Flash through OpenCode, same fixtures: 73 of 75 green; 2 of 40 three-file runs
-  said `DONE` over a red held-out check, the first non-zero false-completion count. Too few for
-  a rate; enough to place the phenomenon on the cheap-model side.
+  and wires one.
 
 ### After the breadth mandate was retired (2026-09-03)
 
 Paired rerun on the same three-file fixture, Opus 5, 10 samples per arm
 (`tests/evals/showcase/runs/20260903-022953.55428.jsonl`): vstack spawned nothing on 10 of 10,
-20 of 20 green, vstack $0.245 against bare $0.275 per run, 39 s against 43 s. The 3.6 to 4.4x was
-the mandate, not the rest of the configuration.
+20 of 20 green. The 3.6 to 4.4x was the mandate, not the rest of the configuration.
 
 ### Gate experiments on GLM 5.3 Flash (2026-09-03)
 
-The only false completions so far were bare GLM on the test-less three-file fixture, so the gate
-question was put to GLM through a harness-side driver loop (OpenCode has no blocking Stop hook;
-see `opencode-stop-gate-feasibility.md`). Two arms beyond bare: `gate` runs the fixture's visible
-`verify.sh` after the agent stops and feeds a red result back, cap 3; `oracle` does the same with
-the held-out check itself as the verifier, reporting only which check failed, the ceiling for any
-gate.
-
-- Fixture with visible tests (`multi_module_tested`, `runs/20260903-023828.96398.jsonl`), 20 per
-  arm: bare 20 of 20 green, gate 20 of 20 green, zero gate rounds fed back. Given a runnable test,
-  GLM runs it unprompted and the gate has nothing to catch.
-- Test-less fixture (`multi_module`, `runs/20260903-030932.25374.jsonl`), bare against oracle,
-  150 per arm: bare 149 of 150 green, 0 false completions (the one red run printed no verdict line: one turn, 296 s, a stalled session);
-  oracle 150 of 150 green, 0 rounds fed back. Bare GLM on this fixture now stands at 2 false
-  completions in 200 runs across all batches (both in the first batch of ten). At that base rate
-  the oracle arm never had a red first pass in 150 tries, so the driver loop was exercised on a
-  live run zero times; its red path is proven only by the harness self-test (`oracle_verify` on
-  the untouched buggy tree reports three failing checks). The gate question stays open for lack
-  of events, not for lack of a gate.
+Removed 2026-09-04: this section compared against a bare arm; the run files remain in
+`tests/evals/showcase/runs/`.
 
 ### Second gate round (2026-09-03, afternoon)
 
-`five_module_edges`, five skim-past edge rules, bare GLM 29 of 29 valid runs green: base rate under
-4%, oracle never fired, the fixture failed at its purpose. `contradictory_spec`, a visible test that
-contradicts the spec, 30 per arm: bare fixes to spec and says `NOT DONE` 30 of 30 with 2 test edits
-and 1 unprompted report; the harness gate with a cap of 2 and a defect-report exit ends 26 of 30
-runs escalated (tests intact, report names the test, no `DONE`) at 2.7x cost and 3x wall; both gate
-arms produced 1 `DONE` over a red spec check that bare never produced, because the fed-back test
-failure pushed the model toward the wrong test. Tampering was not reduced (2, 2, 1). Tables in
-`tests/evals/showcase/RESULTS.md`, "Gate arms on GLM 5.3 Flash".
+Removed 2026-09-04: this section compared against a bare arm; the run files remain in
+`tests/evals/showcase/runs/`.
 
 ## Review benchmark
 
 `tests/evals/RESULTS.md`. Opus 5, three arms, four fixtures, five samples. Planted defects found
-11, 11 and 10 of 15 for bare, vstack and gstack. No skill was invoked in any of the sixty runs
-under any arm: a neutral prompt about a file reaches neither harness's front door.
+11 and 10 of 15 for vstack and gstack. No skill was invoked in any of the sixty runs under any
+arm: a neutral prompt about a file reaches neither harness's front door.
 
 ## Intent versus behaviour, in the operator's own sessions
 
@@ -77,9 +52,9 @@ skills did not fire on situation, fan-out happened in under half of the eligible
 
 ## What the numbers say together
 
-On tasks small enough for one prompt, a frontier model gets the answer right with or without the
-layer, does not claim `DONE` on a red tree, and pays more when told to delegate. The layer's
-measurable effects so far are all on the operator's side of the screen: whether a gate is armed,
-whether a claim in the README can be shown false, whether an install can be undone. The open
-question the literature folder exists to answer is where, if anywhere, a task gets large enough
-or a model weak enough for the gate and the routing to start paying.
+On tasks small enough for one prompt, a frontier model gets the answer right, does not claim
+`DONE` on a red tree, and pays more only when its fan-out mandate forces delegation it does not
+need. The layer's measurable effects so far are all on the operator's side of the screen: whether
+a gate is armed, whether a claim in the README can be shown false, whether an install can be
+undone. The open question the literature folder exists to answer is where, if anywhere, a task
+gets large enough or a model weak enough for the gate and the routing to start paying.

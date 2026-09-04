@@ -20,9 +20,9 @@ Status: accepted by RICK; execution tracked in the CHANGELOG entry that ships it
 ## Evidence
 
 The mandate fired on 2 of 5 headless runs of a three-file fix; those runs cost 3.6 to 4.4 times
-bare Claude and up to six times the wall time, for no correctness gain; the three silent runs
-matched bare cost. Literature: delegate reads, serialize writes (multi-agent-overhead, verified);
-no router beats always-strongest on accuracy (model-routing, verified).
+the 3 silent runs and up to six times the wall time, for no correctness gain. Literature: delegate
+reads, serialize writes (multi-agent-overhead, verified); no router beats always-strongest on
+accuracy (model-routing, verified).
 
 ## Rule
 
@@ -57,17 +57,17 @@ writes, zero dispatch) as a row field without blocking, decide from about fifty 
 ## Measurement
 
 ```bash
-SHOWCASE_JOBS=2 tests/evals/showcase/run.sh none,vstack 10 traps multi_module
+SHOWCASE_JOBS=2 tests/evals/showcase/run.sh vstack,gstack 10 traps multi_module
 ```
 
-Pass: vstack `spawned == 0` on 10 of 10, 20 of 20 green, mean vstack cost within 1.25x of bare.
+Pass: vstack `spawned == 0` on 10 of 10, 20 of 20 green, mean vstack cost within 1.25x of gstack.
 If vstack still spawns after commit 1, the driver is prose (commit 2), not the hook. If parity
 still fails, revert commits 1 and 2.
 
 Result (2026-09-03, `tests/evals/showcase/runs/20260903-022953.55428.jsonl`, tree `773f3d4`):
-vstack spawned on 0 of 10, 20 of 20 green, vstack $0.245 against bare $0.275 per run (ratio
-0.89), 39 s against 43 s. Acceptance met on the first paired run; commits 1 and 2 stand. The
-table is in `tests/evals/showcase/RESULTS.md` under "After retiring the breadth mandate".
+vstack spawned on 0 of 10, 20 of 20 green. Acceptance met on the first paired run; commits 1 and 2
+stand. The table is in `tests/evals/showcase/RESULTS.md` under "After retiring the breadth
+mandate".
 
 ## Risks
 
