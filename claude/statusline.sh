@@ -106,7 +106,8 @@ fi
 # runs all three against one store and fails if any of them lands somewhere else.
 if [ -f "$cdir/.claude/verify.sh" ]; then
   _tr="$HOME/.config/agents/verify-trust"
-  _tv="$(cd "$cdir/.claude" 2>/dev/null && pwd)/verify.sh"
+  # pwd -P: same normalisation the writer and the gate use.
+  _tv="$(cd "$cdir/.claude" 2>/dev/null && pwd -P)/verify.sh"
   if command -v shasum >/dev/null 2>&1; then _th=$(shasum -a 256 "$_tv" 2>/dev/null | cut -d' ' -f1)
   else _th=$(sha256sum "$_tv" 2>/dev/null | cut -d' ' -f1); fi
   # No hasher means nothing on this machine can tell trusted from stale, and the honest render
@@ -120,7 +121,9 @@ if [ -f "$cdir/.claude/verify.sh" ]; then
   # store's own format, so grep -vxF against the store lists precisely the drifted ones.
   _tok=""
   if [ -n "$_th" ] && grep -qxF "$_th  $_tv" "$_tr" 2>/dev/null; then
-    _tk="$(cd "$cdir" 2>/dev/null && pwd)"
+    # pwd -P: the store holds physical paths, and a logical prefix matched no companion at
+    # all -- which reads as "no companion drifted" and renders the shield.
+    _tk="$(cd "$cdir" 2>/dev/null && pwd -P)"
     _tp=$(grep -F "  $_tk/" "$_tr" 2>/dev/null | cut -d' ' -f3-)
     _tl=""; _ti=$IFS; IFS='
 '

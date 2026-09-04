@@ -764,7 +764,11 @@ case "$CMD" in
     done
     d="${d:-$PWD}"
     [ -f "$d/.claude/verify.sh" ] || { echo "vstack trust: no .claude/verify.sh in $d" >&2; exit 2; }
-    v="$(cd "$d/.claude" && pwd)/verify.sh"
+    # pwd -P, not pwd: the Stop hook is handed an already-resolved CLAUDE_PROJECT_DIR, so a
+    # store keyed on the logical spelling never matched for any repo whose path crosses a
+    # symlink (/var -> /private/var on macOS is the common one). Writer and every reader
+    # normalise to the physical path so both spellings land on the same record.
+    v="$(cd "$d/.claude" && pwd -P)/verify.sh"
     if [ "$YES" -ne 1 ]; then
       if [ -t 0 ]; then
         echo "this arms the Stop-hook gate to execute $v (and whatever install.sh-shaped"
@@ -784,7 +788,7 @@ case "$CMD" in
     else h=$(sha256sum "$v" | cut -d' ' -f1); fi
     ts="$HOME/.config/agents/verify-trust"
     mkdir -p "${ts%/*}"
-    root="$(cd "$d" && pwd)"
+    root="$(cd "$d" && pwd -P)"
     # verify.sh is rarely the only thing that runs. This repo's own gate executes
     # install.sh --dry-run and overlay.sh, so hashing one file while those two float free draws
     # the trust boundary around the entry point instead of around the code. Record the scripts

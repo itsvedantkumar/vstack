@@ -27,7 +27,9 @@ v="$d/.claude/verify.sh"
 # .claude/verify.sh is arbitrary code — running it silently on every Stop would hand any
 # repository author code execution on this machine. Only run scripts the user explicitly
 # trusted (`vstack trust`), keyed by content hash so an edited script needs re-trusting.
-v=$(cd "$d/.claude" 2>/dev/null && pwd)/verify.sh
+# pwd -P: `vstack trust` records the physical path, and this hook is handed whatever spelling
+# the runtime resolved. See bin/vstack's trust arm.
+v=$(cd "$d/.claude" 2>/dev/null && pwd -P)/verify.sh
 [ -f "$v" ] || exit 0
 if command -v shasum >/dev/null 2>&1; then h=$(shasum -a 256 "$v" | cut -d' ' -f1)
 else h=$(sha256sum "$v" 2>/dev/null | cut -d' ' -f1); fi

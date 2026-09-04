@@ -133,8 +133,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.72.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.72.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.73.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.73.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -293,7 +293,7 @@ git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiabi
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 116 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 117 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.

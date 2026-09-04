@@ -200,6 +200,53 @@ verification in fewer turns than it saves, Haiku in more. Work item, open: a fix
 first-pass fix is incomplete often enough that the always-on gate, not the instruction, is what
 is measured; on the trap fixtures every arm gets there on the first pass.
 
+### A fixture with a project gate, and the defect it found
+
+`traps/gated_report` is the first fixture that ships its own `.claude/verify.sh` (unit tests plus a contract-check
+script holding the SPEC cases). The ISSUE names a one-cent total; the shallow fix makes that total
+right and leaves two sibling defects the gate catches. `run.sh` arms the gate for the vstack arm
+with `vstack trust` and removes the record afterwards, so the arm with an always-on Stop gate is
+measured on the gate rather than on an instruction.
+
+Run files `tests/evals/showcase/runs/20260904-142225.23002.jsonl` (Haiku 4.5) and
+`20260904-143157.55012.jsonl` (Opus 5), 10 per arm, tree at v1.72.0.
+
+| model | arm | n | held-out green | false completions | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|
+| Haiku 4.5 | vstack | 10 | 10 | 0 | $0.0802 | 57 s | 15.2 |
+| Haiku 4.5 | gstack | 10 | 10 | 0 | $0.0796 | 45 s | 15.3 |
+| Haiku 4.5 | pstack | 10 | 10 | 0 | $0.0861 | 45 s | 16.5 |
+| Opus 5 | vstack | 10 | 10 | 0 | $0.2821 | 36 s | 5.0 |
+| Opus 5 | gstack | 10 | 10 | 0 | $0.2855 | 36 s | 5.5 |
+| Opus 5 | pstack | 10 | 10 | 0 | $0.3485 | 44 s | 6.2 |
+
+On Opus 5 vstack is again the cheapest arm with the fewest turns. The gate did not separate the
+arms: the prompt names it, so all thirty runs of each model ran it themselves and no Stop hook
+ever had to block.
+
+`traps/gated_report_quiet` is the same repository with a prompt that names neither SPEC.md nor the
+gate, to ask whether a harness runs a project's own gate when the user did not mention it. Its
+first two attempts are not results and are recorded here because of what they found:
+
+1. **Run `20260904-143928` is indexed invalid.** Three gstack runs read and edited
+   `tests/evals/showcase/traps/gated_report_quiet/` in this checkout instead of their own
+   workdir, then said DONE against a red held-out check. Their workdirs were not git
+   repositories and sat inside this checkout, so Claude Code resolved the project to *this*
+   repository and put its git status, which listed the staged fixture, into the session. Every
+   arm's workdir is now `git init`-ed and `WORKROOT` is a `mktemp -d` under `$TMPDIR`. All 210
+   earlier three-arm transcripts were audited for the same escape: zero.
+2. **The rerun found a defect in vstack itself.** All ten vstack runs reported
+   `verify gate: skipped untrusted .claude/verify.sh` despite the harness arming the gate.
+   `vstack trust` recorded the path as spelled on the command line while the Stop hook is handed
+   an already-resolved `CLAUDE_PROJECT_DIR`; under `$TMPDIR` on macOS those differ
+   (`/var` against `/private/var`), so the record never matched. This is not a benchmark
+   artefact: any repository whose path crosses a symlink armed the gate and then silently ran
+   nothing on every Stop. Fixed in 1.73.0, with check 57 gaining a symlink scenario and
+   falsifiability row 57e. Checks 14 and 57 had fixtures with the same logical-path assumption,
+   so the gate had been reporting itself as blocking against a record it could not have matched.
+
+The quiet fixture's numbers are pending a rerun on 1.73.0.
+
 ### Routing cost, multi_module, within vstack
 
 Five vstack runs from `tests/evals/showcase/runs/20260903-002641.jsonl`, Opus 5, before the
@@ -308,3 +355,7 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-135609.47712.jsonl` | multi_module | Haiku 4.5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260904-140111.78290.jsonl` | five_module_edges | Haiku 4.5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260904-140913.15451.jsonl` | multi_module | Opus 5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260904-142225.23002.jsonl` | gated_report | Haiku 4.5, three arms at v1.72.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260904-143157.55012.jsonl` | gated_report | Opus 5, three arms at v1.72.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260904-143928.90069.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, harness defect: workdirs were not git repos inside this checkout, so runs escaped into the fixture source |
+| `tests/evals/showcase/runs/20260904-144621.19824.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, killed: the vstack arm's Stop gate was inert, `verify gate: skipped untrusted` in all ten runs (the 1.73.0 symlink defect) |

@@ -1,4 +1,5 @@
 """Monthly report: line items and their total (SPEC.md section 3)."""
+from decimal import Decimal
 from .money import round_cents, to_cents
 
 
@@ -9,7 +10,8 @@ def line_items(lines: list[str]) -> list[tuple[str, int]]:
 
 def total(lines: list[str]) -> str:
     """The sum of the ledger amounts, formatted to cents."""
-    return round_cents(sum(float(a) for a in lines))
+    sum_decimal = sum(Decimal(a) for a in lines) if lines else Decimal(0)
+    return round_cents(sum_decimal)
 
 
 def render(lines: list[str]) -> str:

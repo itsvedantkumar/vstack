@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.72.0",
+    "version": "1.73.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -735,7 +735,7 @@
     },
     "files": {
       "rule": "Ownership by receipt first, byte-identity second.",
-      "receipt": "$HOME/.config/agents/vstack-installed — install.sh appends every path it writes; survives a version change, where content comparison cannot.",
+      "receipt": "$HOME/.config/agents/vstack-installed \u2014 install.sh appends every path it writes; survives a version change, where content comparison cannot.",
       "byte_identity_fallback": "For a machine with no receipt yet, a target byte-identical to the repo file about to overwrite it is treated as vstack's.",
       "stated_trade": "A user file whose bytes exactly equal vstack's is indistinguishable from vstack's and is treated as vstack's, so uninstall deletes it. The alternative loses the ability to uninstall at all.",
       "uninstall_rules": [
@@ -861,7 +861,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 116,
+        "rows": 117,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way.",
         "cost_model": {
           "seconds_per_row": 65,

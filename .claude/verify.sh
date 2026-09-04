@@ -833,7 +833,10 @@ fi
 # path the block decision was never emitted and the gate enforced nothing while looking
 # installed. Drive it end to end against a seeded failing verify.sh, in both jq conditions.
 if command -v jq >/dev/null && command -v git >/dev/null; then
-  gd=$(mktemp -d)
+  # pwd -P: the gate resolves its project dir physically (`vstack trust` records it that way),
+  # and $TMPDIR is a symlink on macOS, so a logical fixture path armed a record the gate could
+  # not find and this check reported the gate as not blocking.
+  gd=$(cd "$(mktemp -d)" && pwd -P)
   # TMPDIR is redirected into the scratch dir because the gate keeps a per-session block
   # counter there and latches open at three. With a shared TMPDIR and a fixed session id this
   # check would pass twice and then fail forever on the same tree.
@@ -4265,7 +4268,9 @@ if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || comma
   printf '{}\n' > "$c57_d/repo/claude/settings.json"
   printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
   chmod 755 "$c57_d/repo/.claude/verify.sh"
-  c57_v="$(cd "$c57_d/repo/.claude" && pwd)/verify.sh"
+  # pwd -P here too: this sandbox lives under $TMPDIR, which is itself a symlink on macOS, so a
+  # logical spelling made the fixture disagree with the gate it is measuring.
+  c57_v="$(cd "$c57_d/repo/.claude" && pwd -P)/verify.sh"
   c57_ts="$c57_d/home/.config/agents/verify-trust"
   c57_hash(){
     if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
@@ -4329,7 +4334,7 @@ if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || comma
   # writes one file cannot see a disagreement about a second one.
   printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
   printf '#!/bin/sh\necho install\n' > "$c57_d/repo/install.sh"
-  c57_i="$(cd "$c57_d/repo" && pwd)/install.sh"
+  c57_i="$(cd "$c57_d/repo" && pwd -P)/install.sh"
   { printf '%s  %s\n' "$(c57_hash "$c57_v")" "$c57_v"
     printf '%s  %s\n' "$(c57_hash "$c57_i")" "$c57_i"; } > "$c57_ts"
   # positive control for this pair: a recorded, unmodified companion must not read as untrusted,
@@ -4337,12 +4342,33 @@ if command -v jq >/dev/null 2>&1 && { command -v shasum >/dev/null 2>&1 || comma
   c57_probe "companion recorded and unchanged" trusted
   printf '# changed\n' >> "$c57_d/repo/install.sh"
   c57_probe "companion changed since trusting" untrusted
+  # The repo reached through a symlink. `vstack trust` is typed by a human against whatever
+  # spelling their shell shows; the Stop hook is handed CLAUDE_PROJECT_DIR already resolved by
+  # the runtime. Keyed on the logical spelling, the two never met: on macOS every repo under
+  # $TMPDIR (/var -> /private/var) armed cleanly and then skipped as untrusted on every Stop,
+  # silently, forever. Measured 2026-09-04 on the showcase benchmark, where ten armed runs all
+  # reported "skipped untrusted". Writer and readers now normalise with pwd -P; this row arms
+  # through the symlink and probes through the physical path, so a reader that drops the
+  # normalisation goes red.
+  rm -f "$c57_d/repo/install.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$c57_d/repo/.claude/verify.sh"
+  ln -s "$c57_d/repo" "$c57_d/link" 2>/dev/null
+  if [ -L "$c57_d/link" ]; then
+    c57_lv="$(cd "$c57_d/link/.claude" && pwd)/verify.sh"     # logical: names the symlink
+    c57_pv="$(cd "$c57_d/link/.claude" && pwd -P)/verify.sh"  # physical: what the gate is handed
+    if [ "$c57_lv" = "$c57_pv" ]; then
+      c57_errs="$c57_errs\n  reached through a symlink: this platform resolves both spellings the same, so the row proves nothing"
+    else
+      printf '%s  %s\n' "$(c57_hash "$c57_pv")" "$c57_pv" > "$c57_ts"
+      c57_probe "armed through a symlink, probed physically" trusted
+    fi
+  fi
   rm -rf "$c57_d"
   if [ -n "$c57_errs" ]; then
     bad "every reader of the trust store answers the gate's question" \
       "$(printf 'bin/doctor and claude/statusline.sh report on a decision claude/hooks/verify-gate.sh makes:%b' "$c57_errs")"
   else
-    ok "every reader of the trust store answers the gate's question (2 reader(s) x 5 scenario(s); format.sh excluded, it shows no verdict)"
+    ok "every reader of the trust store answers the gate's question (2 reader(s) x 6 scenario(s); format.sh excluded, it shows no verdict)"
   fi
 else
   skip "every reader of the trust store answers the gate's question" \

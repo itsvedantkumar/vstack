@@ -702,8 +702,10 @@ VSTACK_VERSION=""
 TRUST_STATE="unknown"; TRUST_DETAIL="no vstack repo found"
 if [ -n "$R" ]; then
   if [ -f "$R/.claude/verify.sh" ]; then
-    _tvp="$(cd "$R/.claude" 2>/dev/null && pwd)/verify.sh"
-    _troot="$(cd "$R" 2>/dev/null && pwd)"
+    # pwd -P, matching bin/vstack's writer and the gate: a logical spelling reports untrusted
+    # on a store that the gate happily runs against, and vice versa.
+    _tvp="$(cd "$R/.claude" 2>/dev/null && pwd -P)/verify.sh"
+    _troot="$(cd "$R" 2>/dev/null && pwd -P)"
     if command -v shasum >/dev/null 2>&1; then _th=$(shasum -a 256 "$_tvp" 2>/dev/null | cut -d' ' -f1)
     elif command -v sha256sum >/dev/null 2>&1; then _th=$(sha256sum "$_tvp" 2>/dev/null | cut -d' ' -f1)
     else _th=""; fi

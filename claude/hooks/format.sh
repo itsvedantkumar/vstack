@@ -96,7 +96,7 @@ cfg_has_plugins() { # $1: winning static config path
 
 is_project_trusted() {
   proj="${CLAUDE_PROJECT_DIR:-$PWD}"
-  v=$(cd "$proj/.claude" 2>/dev/null && pwd)/verify.sh
+  v=$(cd "$proj/.claude" 2>/dev/null && pwd -P)/verify.sh
   [ -f "$v" ] || return 1
   ts="$HOME/.config/agents/verify-trust"
   [ -f "$ts" ] || return 1

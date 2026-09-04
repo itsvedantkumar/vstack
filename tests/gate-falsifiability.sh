@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -329,6 +329,7 @@ files_for(){ case "$1" in
   57b) printf 'claude/statusline.sh' ;;
   57c) printf 'bin/doctor' ;;
   57d) printf 'claude/statusline.sh' ;;
+  57e) printf 'claude/hooks/verify-gate.sh' ;;
   58)  printf '.github/workflows/release.yml' ;;
   58b) printf 'claude/inventory.json' ;;
   58c) printf 'claude/inventory.json' ;;
@@ -446,6 +447,7 @@ label_for(){ case "$1" in
   57b) printf "every reader of the trust store answers the gate's question" ;;
   57c) printf "every reader of the trust store answers the gate's question" ;;
   57d) printf "every reader of the trust store answers the gate's question" ;;
+  57e) printf "every reader of the trust store answers the gate's question" ;;
   58)  printf "the release gate's wait ceiling clears the job it waits for" ;;
   58b) printf "the release gate's wait ceiling clears the job it waits for" ;;
   58c) printf "the release gate's wait ceiling clears the job it waits for" ;;
@@ -722,6 +724,13 @@ exit 7
   57d) # The same omission in the statusline, where it renders every turn.
       sed -i.t 's|\[ -z "$_tm" \] && _tok=1|_tok=1|' \
         claude/statusline.sh && rm -f claude/statusline.sh.t ;;
+
+  57e) # The Stop hook back to the logical path. `vstack trust` records the physical one, so on
+      # any repo reached through a symlink (every repo under $TMPDIR on macOS) the gate skips as
+      # untrusted while doctor and the statusline both say trusted. Ten armed benchmark runs on
+      # 2026-09-04 were measured going through this hole before it was closed.
+      sed -i.t 's|^v=$(cd "$d/.claude" 2>/dev/null \&\& pwd -P)/verify.sh$|v=$(cd "$d/.claude" 2>/dev/null \&\& pwd)/verify.sh|' \
+        claude/hooks/verify-gate.sh && rm -f claude/hooks/verify-gate.sh.t ;;
 
   58) # Cut the wait ceiling under the floor check 58 derives from the tree. Matched on the key
       # and not on the current value: a row pinned to "3600" would stop mutating anything the

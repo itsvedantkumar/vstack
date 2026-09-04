@@ -4,6 +4,22 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.73.0 — 2026-09-04
+
+- **The Stop-hook gate never ran in any repository reached through a symlink.** `vstack trust`
+  recorded the path as the caller spelled it while the hook is handed an already-resolved
+  `CLAUDE_PROJECT_DIR`, so on macOS every repository under `$TMPDIR` (`/var` -> `/private/var`)
+  armed cleanly and then reported `skipped untrusted` on every Stop, silently, forever. Found by
+  measurement: ten armed benchmark runs on 2026-09-04 all went through the hole. The writer
+  (`bin/vstack`) and all four readers (`claude/hooks/verify-gate.sh`, `bin/doctor`,
+  `claude/statusline.sh`, `claude/hooks/format.sh`) now normalise with `pwd -P`. **If your
+  repository path crosses a symlink, re-run `vstack trust`**; the old record no longer matches
+  and the gate fails closed until you do.
+- Check 57 gains a sixth scenario that arms through a symlink and probes through the physical
+  path, plus falsifiability row 57e. Checks 14 and 57's own fixtures were keyed on the logical
+  path and were normalised the same way; check 14 had been reporting the gate as blocking on a
+  record it could not have matched.
+
 ## 1.72.0 — 2026-09-04
 
 - **pstack is the third benchmark arm.** `tests/evals/showcase/run.sh` loads the Claude Code port of

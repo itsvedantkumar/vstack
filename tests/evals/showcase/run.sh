@@ -38,20 +38,34 @@ ONLY="${4:-}"                                          # optional exact fixture 
 STAMP="$(date +%Y%m%d-%H%M%S).$$"   # pid too: two runs launched in the same second shared one OUT and one WORKROOT, and each EXIT trap deleted the other's workdirs
 OUT="$ROOT/runs/$STAMP.jsonl"
 mkdir -p "$ROOT/runs"
-WORKROOT="$ROOT/.work.$STAMP"; mkdir -p "$WORKROOT"
+# Workdirs live OUTSIDE this checkout. Inside it, an arm whose workdir was not a git repository
+# saw this repository as its project: Claude Code's session git status listed a staged fixture,
+# and three gstack runs on 2026-09-04 read and edited tests/evals/showcase/traps/<fixture>/
+# instead of their own copy (run 20260904-143928, marked invalid). Every workdir is also
+# git-initialised below, so no run can inherit an enclosing repository.
+# pwd -P: `vstack trust` records the physical path and $TMPDIR is a symlink on macOS, so a
+# logical WORKROOT armed a record the Stop hook could not find and the cleanup could not remove.
+WORKROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/showcase.$STAMP.XXXXXX")" && pwd -P) || exit 1
 trap 'rm -rf "$WORKROOT"' EXIT INT TERM
 
 log(){ printf '%s\n' "$*" >&2; }
 
+# One writer at a time into ~/.config/agents/verify-trust: every writer rewrites the whole file.
+TRUST_LOCK="${TMPDIR:-/tmp}/showcase-trust.lock"
+trust_lock(){ local i=0; while ! mkdir "$TRUST_LOCK" 2>/dev/null; do i=$((i+1)); [ "$i" -gt 300 ] && { rm -rf "$TRUST_LOCK"; continue; }; sleep 0.1; done; }
+trust_unlock(){ rmdir "$TRUST_LOCK" 2>/dev/null || true; }
+
 install_arm() { # <arm> <workdir> -> 0 ok
   local arm="$1" wd="$2"
   mkdir -p "$wd/.claude"
+  # Every arm gets its own repository: overlay.sh needs one, and without one the agent's project
+  # root is whatever repository encloses the workdir (see WORKROOT above).
+  git init -q "$wd" 2>/dev/null
   case "$arm" in
     none|gate|oracle) : ;;   # gate/oracle: bare install; the harness itself is the Stop gate (opencode engine only)
     vstack)
       # overlay.sh requires DEST to be a git repo/worktree. Assert hooks actually landed rather
       # than trusting an exit status a redirected subshell can swallow.
-      git init -q "$wd" 2>/dev/null
       ( cd "$SRC" && ./overlay.sh "$wd" >/dev/null 2>&1 )
       local nh; nh=$(find "$wd/.claude/hooks" -name '*.sh' 2>/dev/null | wc -l | tr -d ' ')
       [ "${nh:-0}" -ge 1 ] || { log "vstack: overlay installed 0 hooks"; return 1; } ;;
@@ -138,7 +152,13 @@ run_one() { # <arm> <fixture_dir> <sample>
   # gate the machine has trusted, so arm it the way a user would; the entry is removed below.
   # Other arms have no Stop gate and the file just sits there, as it would for their users.
   if [ "$arm" = vstack ] && [ -x "$wd/.claude/verify.sh" ]; then
+    # The store is one file rewritten in place, by `vstack trust` here and by the cleanup below,
+    # so concurrent jobs lose each other's entries. Serialise both with a mkdir lock.
+    trust_lock
     "$SRC/bin/vstack" trust --yes "$wd" >/dev/null 2>&1 || log "  $arm/$name #$s: vstack trust failed (gate stays unarmed)"
+    trust_unlock
+    grep -qF "  $wd/.claude/verify.sh" "$HOME/.config/agents/verify-trust" 2>/dev/null \
+      || log "  $arm/$name #$s: trust record missing after arming -- the Stop gate will skip"
   fi
   local prompt; prompt=$(cat "$fx/PROMPT.txt")
 
@@ -256,7 +276,10 @@ run_one() { # <arm> <fixture_dir> <sample>
   # what the user trusted. The store is one "hash  path" line per file under the trusted root.
   if [ "$arm" = vstack ] && [ -f "$HOME/.config/agents/verify-trust" ]; then
     local ts="$HOME/.config/agents/verify-trust" tmp; tmp=$(mktemp)
-    grep -vF "  $wd/" "$ts" > "$tmp"; cat "$tmp" > "$ts"; rm -f "$tmp"
+    trust_lock
+    grep -vF "  $wd/" "$ts" > "$tmp"; cat "$tmp" > "$ts"
+    trust_unlock
+    rm -f "$tmp"
   fi
   rm -rf "$wd"
 }
