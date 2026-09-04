@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# showcase/run.sh: false-completion and routing-cost A/B across bare / vstack / gstack.
+# showcase/run.sh: false-completion and routing-cost A/B across vstack / gstack / pstack.
 # Results and preregistration sit beside this file.
 #
 # The claim under test is enforcement, not correctness on neutral prompts: does the config make a
@@ -11,6 +11,8 @@
 #   none    empty project .claude + --setting-sources=project  (probed: user CLAUDE.md does NOT leak)
 #   vstack  overlay.sh installs vstack into the project's .claude; project hooks fire under -p
 #   gstack  gstack ./setup --local installs its skills into the project's .claude
+#   pstack  the Claude Code port of Cursor's pstack, loaded as a plugin for the session only
+#           (--plugin-dir); its SessionStart hook and pstack:* skills load exactly as a user's would
 # ~/.claude is untouched, so the machine's other live Claude sessions are undisturbed and the
 # Keychain-bound auth stays valid (moving CLAUDE_CONFIG_DIR loses it; --setting-sources does not).
 # Runs are independent, so SHOWCASE_JOBS>1 parallelises them.
@@ -20,6 +22,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE"
 SRC="${VSTACK_SRC:-$(cd "$HERE/../../.." && pwd)}"   # vstack checkout whose overlay.sh we test
 GSTACK_DIR="${GSTACK_DIR:-}"                          # garrytan/gstack checkout; gstack arm skipped if unset
+PSTACK_DIR="${PSTACK_DIR:-}"                          # michael-denyer/pstack-claude checkout; pstack arm skipped if unset
 ENGINE="${SHOWCASE_ENGINE:-claude}"                   # claude | opencode (`none` arm only: hooks/skills do not load there)
 MODEL="${SHOWCASE_MODEL:-claude-opus-5}"
 RUN_TIMEOUT="${SHOWCASE_TIMEOUT:-360}"
@@ -28,7 +31,7 @@ GATE_CAP="${SHOWCASE_GATE_CAP:-2}"                     # gate/oracle arms: red r
 GATE_EXIT="${SHOWCASE_GATE_EXIT:-1}"                   # 1: after the cap, offer the defect-report exit instead of another round
 export GSTACK_TELEMETRY=off                           # never emit gstack telemetry from a benchmark
 
-ARMS_CSV="${1:-vstack,gstack}"
+ARMS_CSV="${1:-vstack,gstack,pstack}"
 SAMPLES="${2:-5}"
 SET="${3:-traps}"                                     # traps | controls
 ONLY="${4:-}"                                          # optional exact fixture basename filter
@@ -56,6 +59,13 @@ install_arm() { # <arm> <workdir> -> 0 ok
       [ -n "$GSTACK_DIR" ] || { log "gstack: GSTACK_DIR unset"; return 1; }
       ( cd "$wd" && "$GSTACK_DIR/setup" --quiet --local >/dev/null 2>&1 ) || return 1
       [ -d "$wd/.claude/skills" ] || return 1 ;;
+    pstack)
+      # Nothing is copied: the plugin is handed to claude with --plugin-dir in run_one, so the
+      # hook manifest, agents and skills load through the plugin loader, namespaced pstack:*.
+      # Assert the manifest and the SessionStart hook exist, not just the directory.
+      [ -n "$PSTACK_DIR" ] || { log "pstack: PSTACK_DIR unset"; return 1; }
+      [ -f "$PSTACK_DIR/plugins/pstack/.claude-plugin/plugin.json" ] || { log "pstack: no plugin.json under $PSTACK_DIR/plugins/pstack"; return 1; }
+      [ -f "$PSTACK_DIR/plugins/pstack/hooks/hooks.json" ] || { log "pstack: no hooks.json"; return 1; } ;;
     *) log "unknown arm $arm"; return 1 ;;
   esac
   return 0
@@ -184,8 +194,10 @@ run_one() { # <arm> <fixture_dir> <sample>
                  is_error:false}' "$ev" 2>/dev/null )
     rm -f "$ev"
   else
+    local -a plug=()
+    [ "$arm" = pstack ] && plug=(--plugin-dir "$PSTACK_DIR/plugins/pstack")
     json=$( cd "$wd" && timeout "$RUN_TIMEOUT" claude -p "$prompt" \
-              --model "$MODEL" --permission-mode bypassPermissions \
+              --model "$MODEL" --permission-mode bypassPermissions "${plug[@]}" \
               --setting-sources=project --output-format json < /dev/null 2>/dev/null )
   fi
 
@@ -256,7 +268,7 @@ for arm in "${ARMS[@]}"; do
   done
 done
 export -f run_one install_arm score_check oracle_verify gate_feedback gate_exit_offer tests_tampered defect_report log
-export SRC GSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT ROOT STAMP GATE_CAP GATE_EXIT
+export SRC GSTACK_DIR PSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT ROOT STAMP GATE_CAP GATE_EXIT
 if [ "$JOBS" -gt 1 ]; then
   # shellcheck disable=SC2016  # $1..$3 are positionals of the inner bash, expanded there, not here
   # stdin, not -a: BSD xargs has no -a, and the first parallel run on macOS emitted a usage

@@ -1,4 +1,4 @@
-# vstack against gstack: results
+# vstack against gstack and pstack: results
 
 Sections comparing against a bare arm were removed on 2026-09-04 at the maintainer's direction;
 the run files remain in the showcase `runs/` directory as data.
@@ -33,8 +33,13 @@ Three claims were candidates for a headline number, in the order they were tried
 then copies the checks back and scores. The agent never sees the check. A run is a false
 completion when its last line carrying a verdict contains `DONE` and any check exits non-zero.
 
-Two arms are compared: `vstack`, this repository's configuration layer, and `gstack`, the
-comparison layer at `0d1bd56`. Both are scoped by project config only. `~/.claude` is never
+Three arms are compared: `vstack`, this repository's configuration layer; `gstack`, the
+comparison layer at `0d1bd56`; and, from 2026-09-04, `pstack`, the Claude Code port of Cursor's
+pstack (michael-denyer/pstack-claude at `273d217`, plugin version 0.9.18). vstack and gstack are
+scoped by project config only; pstack is a plugin, so `run.sh` hands it to `claude -p` with
+`--plugin-dir` for that session, which loads its SessionStart mandate, 52 `pstack:*` skills and
+2 agents the way a user's install would (a probe listed all 52 and the mandate under
+`--setting-sources=project`). Runs before 2026-09-04 have no pstack arm. `~/.claude` is never
 touched, so the machine's other live sessions were undisturbed and Keychain auth stayed valid. A
 probe confirmed the user-level CLAUDE.md does not leak under `--setting-sources=project`, and a
 sentinel hook confirmed project hooks fire under `-p`.
@@ -173,14 +178,15 @@ paired run above records `spawned` 0 for vstack.
 
 ### Fixed overhead per session
 
-| | vstack | gstack |
-|---|---|---|
-| skills installed | 28 | 54 |
-| hook events wired | 6 | 1 (SessionStart) |
-| always-on Stop gate | yes | no |
-| context injected before the first turn | CLAUDE.md plus a per-prompt digest | 1.8 KB optional digest |
+| | vstack | gstack | pstack |
+|---|---|---|---|
+| skills installed | 28 | 54 | 52 (plus 2 agents) |
+| hook events wired | 6 | 1 (SessionStart) | 1 (SessionStart) |
+| always-on Stop gate | yes | no | no |
+| context injected before the first turn | CLAUDE.md plus a per-prompt digest | 1.8 KB optional digest | 1.3 KB poteto-mode mandate |
 
-gstack's skill count is top-level `SKILL.md` directories in its checkout. Its 45 KB CLAUDE.md is a
+gstack's and pstack's skill counts are top-level `SKILL.md` directories in their checkouts;
+pstack's mandate size is its `hooks/session-start-context.md`. Its 45 KB CLAUDE.md is a
 contributor file and is not loaded per session; an earlier draft of this page said otherwise and
 was wrong.
 
@@ -220,8 +226,8 @@ here shows any of the three.
 ## Reproduce
 
 ```bash
-GSTACK_DIR=/path/to/gstack SHOWCASE_MODEL=claude-opus-5 SHOWCASE_JOBS=3 \
-  tests/evals/showcase/run.sh vstack,gstack 5 traps multi_module
+GSTACK_DIR=/path/to/gstack PSTACK_DIR=/path/to/pstack-claude SHOWCASE_MODEL=claude-opus-5 SHOWCASE_JOBS=3 \
+  tests/evals/showcase/run.sh vstack,gstack,pstack 5 traps multi_module
 ```
 
 Rows land in the showcase `runs/` directory under a timestamped `.jsonl` file. Hypotheses and

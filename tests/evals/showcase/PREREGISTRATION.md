@@ -17,6 +17,25 @@ rather than reconstruct it.
   uncertain, leaning rejected. Delegation adds lead-model turns.
 - **H3, correctness parity.** Both arms reach a green check on all fixtures. Prediction: accepted.
 
+### pstack arm, added 2026-09-04 (written before any pstack run)
+
+The maintainer asked for a third arm: `pstack`, the Claude Code port of Cursor's pstack
+(michael-denyer/pstack-claude at `273d217`, plugin version 0.9.18), loaded per run with
+`--plugin-dir` so its SessionStart mandate and 52 `pstack:*` skills load as a user's would.
+Predictions, fixed before the runs:
+
+- **H4, correctness parity holds with pstack.** pstack reaches a green held-out check on every
+  fixture and says `DONE` on a red check in none. Prediction: accepted.
+- **H5, pstack costs more turns than gstack on Haiku.** pstack's session mandate tells the agent
+  to invoke `pstack:poteto-mode` before any non-trivial task; gstack's install injects nothing
+  that asks for a skill call. Prediction: pstack mean turns and cost above gstack's on
+  multi_module, Haiku 4.5. Lean: accepted, small.
+- **H6, vstack against pstack on cost.** Uncertain. vstack's per-prompt digest is smaller than
+  pstack's 1.3 KB mandate but vstack has a Stop hook that can add a verify turn. No lean.
+
+Decision rule: same as above. Parity on H4 means the README's three-column table carries the
+deterministic facts plus the measured cost and wall ratios, nothing else.
+
 ## Decision rule, fixed in advance
 
 If H1 and H2 are both rejected, the README carries the deterministic facts (skills shipped, hook

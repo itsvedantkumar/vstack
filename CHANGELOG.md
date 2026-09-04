@@ -6,6 +6,10 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.72.0 — 2026-09-04
 
+- **pstack is the third benchmark arm.** `tests/evals/showcase/run.sh` loads the Claude Code port of
+  Cursor's pstack (`PSTACK_DIR`, `--plugin-dir` per run) beside vstack and gstack; `summarize.sh`, the
+  hosted page and the README table carry three columns. Preregistered as H4 to H6 before any run.
+
 - The register mandate (banned openers) no longer blocks Stop on its own. A block cannot unsend
   the text it objects to; on Haiku 4.5 it bought one extra "Acknowledged" turn in 10 of 30
   benchmark runs, +1.5 to +4.5 turns and up to 1.54x wall per task, with identical code left
