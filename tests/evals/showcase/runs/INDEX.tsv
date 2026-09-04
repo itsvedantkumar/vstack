@@ -19,3 +19,6 @@ file	engine	model	status	note
 20260904-010328.38498.jsonl	claude	claude-haiku-4-5-20251001	valid	none vs vstack vs gstack at v1.71.0, paired
 20260904-011934.55418.jsonl	claude	claude-haiku-4-5-20251001	valid	none vs vstack vs gstack at v1.71.0, paired
 20260904-121312.60002.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack at v1.72.0, paired, register warns
+20260904-135609.47712.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.72.0, paired
+20260904-140111.78290.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.72.0, paired
+20260904-140913.15451.jsonl	claude	claude-opus-5	valid	vstack vs gstack vs pstack at v1.72.0, paired

@@ -134,6 +134,12 @@ run_one() { # <arm> <fixture_dir> <sample>
   install_arm "$arm" "$wd" || { log "  $arm/$name #$s INVALID (install failed)"; rm -rf "$wd"; return; }
   # workdir gets spec + code, NEVER the held-out checks
   cp -R "$fx"/. "$wd"/ && rm -rf "$wd/checks" "$wd/meta.json"
+  # A fixture may ship its own project gate (.claude/verify.sh). vstack's Stop hook runs only a
+  # gate the machine has trusted, so arm it the way a user would; the entry is removed below.
+  # Other arms have no Stop gate and the file just sits there, as it would for their users.
+  if [ "$arm" = vstack ] && [ -x "$wd/.claude/verify.sh" ]; then
+    "$SRC/bin/vstack" trust --yes "$wd" >/dev/null 2>&1 || log "  $arm/$name #$s: vstack trust failed (gate stays unarmed)"
+  fi
   local prompt; prompt=$(cat "$fx/PROMPT.txt")
 
   local json
@@ -245,6 +251,12 @@ run_one() { # <arm> <fixture_dir> <sample>
     local keep="$ROOT/runs/$STAMP-red/$arm-$name-$s"; mkdir -p "$keep"
     cp -R "$wd"/. "$keep"/ 2>/dev/null; rm -rf "$keep/.claude" "$keep/.git"
     printf '%s\n' "$json" | jq -r '.result//""' > "$keep/RESULT.txt" 2>/dev/null
+  fi
+  # Drop the trust entry this run added for its own workdir; the machine's store keeps only
+  # what the user trusted. The store is one "hash  path" line per file under the trusted root.
+  if [ "$arm" = vstack ] && [ -f "$HOME/.config/agents/verify-trust" ]; then
+    local ts="$HOME/.config/agents/verify-trust" tmp; tmp=$(mktemp)
+    grep -vF "  $wd/" "$ts" > "$tmp"; cat "$tmp" > "$ts"; rm -f "$tmp"
   fi
   rm -rf "$wd"
 }

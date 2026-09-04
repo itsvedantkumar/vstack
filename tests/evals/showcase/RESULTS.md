@@ -38,7 +38,7 @@ comparison layer at `0d1bd56`; and, from 2026-09-04, `pstack`, the Claude Code p
 pstack (michael-denyer/pstack-claude at `273d217`, plugin version 0.9.18). vstack and gstack are
 scoped by project config only; pstack is a plugin, so `run.sh` hands it to `claude -p` with
 `--plugin-dir` for that session, which loads its SessionStart mandate, 52 `pstack:*` skills and
-2 agents the way a user's install would (a probe listed all 52 and the mandate under
+two agents the way a user's install would (a probe listed all 52 and the mandate under
 `--setting-sources=project`). Runs before 2026-09-04 have no pstack arm. `~/.claude` is never
 touched, so the machine's other live sessions were undisturbed and Keychain auth stayed valid. A
 probe confirmed the user-level CLAUDE.md does not leak under `--setting-sources=project`, and a
@@ -157,6 +157,49 @@ vstack over gstack: cost 1.04x, wall 1.05x, turns +0.7. The 1.67x wall gap on th
 1.71.0 closed once the strike stopped blocking, which identifies the strike as the cause of that
 gap rather than anything else in the layer.
 
+### vstack, gstack and pstack at 1.72.0, paired, three arms
+
+Run files `tests/evals/showcase/runs/20260904-135609.47712.jsonl` (multi_module, Haiku 4.5),
+`tests/evals/showcase/runs/20260904-140111.78290.jsonl` (five_module_edges, Haiku 4.5) and
+`tests/evals/showcase/runs/20260904-140913.15451.jsonl` (multi_module, Opus 5), 10 per arm each,
+tree at v1.72.0, gstack at `0d1bd56`, pstack at `273d217`, JOBS=3, machine otherwise idle.
+Hypotheses H4 to H6 were written into `PREREGISTRATION.md` before the first run.
+
+| model | fixture | arm | n | held-out green | said DONE | false completions | spawned | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Haiku 4.5 | multi_module | vstack | 10 | 10 | 10 | 0 | 0 | $0.0463 | 25 s | 10.3 |
+| Haiku 4.5 | multi_module | gstack | 10 | 10 | 10 | 0 | 0 | $0.0437 | 20 s | 9.9 |
+| Haiku 4.5 | multi_module | pstack | 10 | 10 | 10 | 0 | 0 | $0.0431 | 20 s | 9.3 |
+| Haiku 4.5 | five_module_edges | vstack | 10 | 10 | 10 | 0 | 0 | $0.0792 | 49 s | 16.7 |
+| Haiku 4.5 | five_module_edges | gstack | 10 | 10 | 10 | 0 | 0 | $0.0585 | 36 s | 11.7 |
+| Haiku 4.5 | five_module_edges | pstack | 10 | 10 | 10 | 0 | 0 | $0.0686 | 42 s | 13.4 |
+| Opus 5 | multi_module | vstack | 10 | 10 | 10 | 0 | 0 | $0.2360 | 25 s | 4.4 |
+| Opus 5 | multi_module | gstack | 10 | 10 | 10 | 0 | 0 | $0.2327 | 30 s | 4.9 |
+| Opus 5 | multi_module | pstack | 10 | 10 | 10 | 0 | 0 | $0.3066 | 39 s | 5.5 |
+
+H4 accepted: 90 of 90 green, no false completion in any arm. H5 accepted on five_module_edges
+(pstack 1.17x gstack's cost, +1.7 turns) and rejected on multi_module (0.99x, fewer turns). H6
+resolved by model: on Opus 5 vstack is the cheapest and fastest arm against pstack (cost 0.77x,
+wall 0.64x, turns 4.4 against 5.5) and the fastest against gstack (wall 0.83x, turns 4.4 against
+4.9) at the same cost (1.01x). On Haiku 4.5 vstack is the most expensive arm on both fixtures:
+1.06x and 1.35x gstack's cost, 1.07x and 1.15x pstack's.
+
+**No arm fired a skill.** All 90 session transcripts were read back; none contains a `Skill`
+tool call. pstack's session mandate names `pstack:poteto-mode` as the required entry point for any
+non-trivial task and neither model invoked it; gstack's skills are slash-triggered and were not
+named; vstack's routing table matched nothing at this task size. Whatever separates the arms here
+is instructions and hooks, not skills.
+
+**Where vstack's Haiku cost goes.** Tool-use mix on five_module_edges, summed over ten runs:
+vstack 88 Read, 52 Edit, 16 Bash; gstack 50 Read, 50 Edit, 7 Bash; pstack 56 Read, 50 Edit,
+16 Bash. The same number of edits, so the same fix; the extra turns are the agent re-reading the
+modules and running its own test commands before saying DONE, which is what vstack's "verify
+before done" instruction asks for. No hook blocked a Stop in these runs (the fixture ships no
+`.claude/verify.sh`, so the gate is idle) and no register strike fired. Opus does this
+verification in fewer turns than it saves, Haiku in more. Work item, open: a fixture where the
+first-pass fix is incomplete often enough that the always-on gate, not the instruction, is what
+is measured; on the trap fixtures every arm gets there on the first pass.
+
 ### Routing cost, multi_module, within vstack
 
 Five vstack runs from `tests/evals/showcase/runs/20260903-002641.jsonl`, Opus 5, before the
@@ -180,13 +223,13 @@ paired run above records `spawned` 0 for vstack.
 
 | | vstack | gstack | pstack |
 |---|---|---|---|
-| skills installed | 28 | 54 | 52 (plus 2 agents) |
+| skills installed | 28 | 54 | 52 (plus two agents) |
 | hook events wired | 6 | 1 (SessionStart) | 1 (SessionStart) |
 | always-on Stop gate | yes | no | no |
 | context injected before the first turn | CLAUDE.md plus a per-prompt digest | 1.8 KB optional digest | 1.3 KB poteto-mode mandate |
 
 gstack's and pstack's skill counts are top-level `SKILL.md` directories in their checkouts;
-pstack's mandate size is its `hooks/session-start-context.md`. Its 45 KB CLAUDE.md is a
+pstack's mandate size is its session-start context file. Its 45 KB CLAUDE.md is a
 contributor file and is not loaded per session; an earlier draft of this page said otherwise and
 was wrong.
 
@@ -200,8 +243,12 @@ was wrong.
   cheap work to cheap models, but the coordination overhead on the lead model exceeds what the
   cheap models save until the delegated work is large enough to amortise it. Three files is not
   large enough. No run here was.
-- **Correctness is unchanged by either configuration.** Thirty paired Opus runs and sixty paired
-  Haiku runs, every one green, both arms.
+- **Correctness is unchanged by any configuration.** Sixty paired Opus runs and one hundred and
+  twenty paired Haiku runs, every one green, every arm, pstack included.
+- **On Opus 5 vstack is the fastest arm.** Wall 0.83x gstack and 0.64x pstack at the same cost as
+  gstack and 0.77x pstack's; the verification it asks for costs Opus less than it saves.
+- **On Haiku 4.5 the same verification costs more than it saves.** vstack's extra turns are
+  Reads and test runs, not hooks; the fixture that makes the gate itself pay is not built yet.
 - **A blocking style rule is the one measurable cost difference.** On a small model it added
   1.67x wall at 1.71.0 and nothing measurable once it warned instead of blocking at 1.72.0.
 
@@ -258,3 +305,6 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-010328.38498.jsonl` | multi_module | Haiku 4.5, vstack vs gstack at v1.71.0 | valid, 20 per arm, 10 vstack rows rescored |
 | `tests/evals/showcase/runs/20260904-011934.55418.jsonl` | five_module_edges | Haiku 4.5, vstack vs gstack at v1.71.0 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260904-121312.60002.jsonl` | multi_module | Haiku 4.5, vstack vs gstack at v1.72.0 | valid, 10 per arm, register warns |
+| `tests/evals/showcase/runs/20260904-135609.47712.jsonl` | multi_module | Haiku 4.5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260904-140111.78290.jsonl` | five_module_edges | Haiku 4.5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260904-140913.15451.jsonl` | multi_module | Opus 5, vstack vs gstack vs pstack at v1.72.0 | valid, 10 per arm |

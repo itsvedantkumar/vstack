@@ -1,23 +1,42 @@
 {
-  "generated": "2026-09-04T06:49:43Z",
-  "commit": "6f967ec",
+  "generated": "2026-09-04T08:46:20Z",
+  "commit": "bab3f93",
   "rows": [
     {
       "model": "claude-haiku-4-5-20251001",
       "engine": "claude",
       "fixture": "five_module_edges",
       "arm": "gstack",
+      "n": 20,
+      "green": 20,
+      "said_done": 20,
+      "false_completion": 0,
+      "spawned": 1,
+      "cost_mean": 0.0631,
+      "cost_total": 1.26,
+      "wall_s": 39,
+      "turns": 12.2,
+      "files": [
+        "20260904-011934.55418.jsonl",
+        "20260904-140111.78290.jsonl"
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "five_module_edges",
+      "arm": "pstack",
       "n": 10,
       "green": 10,
       "said_done": 10,
       "false_completion": 0,
-      "spawned": 1,
-      "cost_mean": 0.0677,
-      "cost_total": 0.68,
+      "spawned": 0,
+      "cost_mean": 0.0686,
+      "cost_total": 0.69,
       "wall_s": 42,
-      "turns": 12.6,
+      "turns": 13.4,
       "files": [
-        "20260904-011934.55418.jsonl"
+        "20260904-140111.78290.jsonl"
       ]
     },
     {
@@ -25,17 +44,18 @@
       "engine": "claude",
       "fixture": "five_module_edges",
       "arm": "vstack",
-      "n": 10,
-      "green": 10,
-      "said_done": 10,
+      "n": 20,
+      "green": 20,
+      "said_done": 20,
       "false_completion": 0,
       "spawned": 0,
-      "cost_mean": 0.0775,
-      "cost_total": 0.78,
-      "wall_s": 53,
-      "turns": 17.3,
+      "cost_mean": 0.0784,
+      "cost_total": 1.57,
+      "wall_s": 51,
+      "turns": 17,
       "files": [
-        "20260904-011934.55418.jsonl"
+        "20260904-011934.55418.jsonl",
+        "20260904-140111.78290.jsonl"
       ]
     },
     {
@@ -61,18 +81,37 @@
       "engine": "claude",
       "fixture": "multi_module",
       "arm": "gstack",
-      "n": 30,
-      "green": 30,
-      "said_done": 30,
+      "n": 40,
+      "green": 40,
+      "said_done": 40,
       "false_completion": 0,
       "spawned": 0,
-      "cost_mean": 0.0431,
-      "cost_total": 1.29,
-      "wall_s": 23,
+      "cost_mean": 0.0432,
+      "cost_total": 1.73,
+      "wall_s": 22,
       "turns": 9.7,
       "files": [
         "20260904-010328.38498.jsonl",
-        "20260904-121312.60002.jsonl"
+        "20260904-121312.60002.jsonl",
+        "20260904-135609.47712.jsonl"
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "pstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0431,
+      "cost_total": 0.43,
+      "wall_s": 20,
+      "turns": 9.3,
+      "files": [
+        "20260904-135609.47712.jsonl"
       ]
     },
     {
@@ -80,18 +119,19 @@
       "engine": "claude",
       "fixture": "multi_module",
       "arm": "vstack",
-      "n": 30,
-      "green": 30,
-      "said_done": 30,
+      "n": 40,
+      "green": 40,
+      "said_done": 40,
       "false_completion": 0,
       "spawned": 0,
-      "cost_mean": 0.0475,
-      "cost_total": 1.43,
-      "wall_s": 34,
-      "turns": 10.8,
+      "cost_mean": 0.0472,
+      "cost_total": 1.89,
+      "wall_s": 32,
+      "turns": 10.7,
       "files": [
         "20260904-010328.38498.jsonl",
-        "20260904-121312.60002.jsonl"
+        "20260904-121312.60002.jsonl",
+        "20260904-135609.47712.jsonl"
       ]
     },
     {
@@ -172,18 +212,37 @@
       "engine": "claude",
       "fixture": "multi_module",
       "arm": "gstack",
-      "n": 15,
-      "green": 15,
-      "said_done": 15,
+      "n": 25,
+      "green": 25,
+      "said_done": 25,
       "false_completion": 0,
       "spawned": 0,
-      "cost_mean": 0.2244,
-      "cost_total": 3.37,
+      "cost_mean": 0.2277,
+      "cost_total": 5.69,
       "wall_s": 32,
-      "turns": 4.5,
+      "turns": 4.6,
       "files": [
         "20260903-002641.jsonl",
-        "20260903-164557.97124.jsonl"
+        "20260903-164557.97124.jsonl",
+        "20260904-140913.15451.jsonl"
+      ]
+    },
+    {
+      "model": "claude-opus-5",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "pstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.3066,
+      "cost_total": 3.07,
+      "wall_s": 39,
+      "turns": 5.5,
+      "files": [
+        "20260904-140913.15451.jsonl"
       ]
     },
     {
@@ -191,19 +250,20 @@
       "engine": "claude",
       "fixture": "multi_module",
       "arm": "vstack",
-      "n": 25,
-      "green": 25,
-      "said_done": 25,
+      "n": 35,
+      "green": 35,
+      "said_done": 35,
       "false_completion": 0,
       "spawned": 4,
-      "cost_mean": 0.2783,
-      "cost_total": 6.96,
-      "wall_s": 40,
-      "turns": 5.3,
+      "cost_mean": 0.2662,
+      "cost_total": 9.32,
+      "wall_s": 36,
+      "turns": 5,
       "files": [
         "20260903-002641.jsonl",
         "20260903-022953.55428.jsonl",
-        "20260903-164557.97124.jsonl"
+        "20260903-164557.97124.jsonl",
+        "20260904-140913.15451.jsonl"
       ]
     }
   ],
@@ -407,6 +467,186 @@
       ],
       "file": "20260904-121312.60002.jsonl",
       "note": "vstack vs gstack at v1.72.0, paired, register warns"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "gstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0437,
+      "cost_total": 0.44,
+      "wall_s": 20,
+      "turns": 9.9,
+      "files": [
+        "20260904-135609.47712.jsonl"
+      ],
+      "file": "20260904-135609.47712.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "pstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0431,
+      "cost_total": 0.43,
+      "wall_s": 20,
+      "turns": 9.3,
+      "files": [
+        "20260904-135609.47712.jsonl"
+      ],
+      "file": "20260904-135609.47712.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "vstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0463,
+      "cost_total": 0.46,
+      "wall_s": 25,
+      "turns": 10.3,
+      "files": [
+        "20260904-135609.47712.jsonl"
+      ],
+      "file": "20260904-135609.47712.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "five_module_edges",
+      "arm": "gstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0585,
+      "cost_total": 0.58,
+      "wall_s": 36,
+      "turns": 11.7,
+      "files": [
+        "20260904-140111.78290.jsonl"
+      ],
+      "file": "20260904-140111.78290.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "five_module_edges",
+      "arm": "pstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0686,
+      "cost_total": 0.69,
+      "wall_s": 42,
+      "turns": 13.4,
+      "files": [
+        "20260904-140111.78290.jsonl"
+      ],
+      "file": "20260904-140111.78290.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "five_module_edges",
+      "arm": "vstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0792,
+      "cost_total": 0.79,
+      "wall_s": 49,
+      "turns": 16.7,
+      "files": [
+        "20260904-140111.78290.jsonl"
+      ],
+      "file": "20260904-140111.78290.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-opus-5",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "gstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.2327,
+      "cost_total": 2.33,
+      "wall_s": 30,
+      "turns": 4.9,
+      "files": [
+        "20260904-140913.15451.jsonl"
+      ],
+      "file": "20260904-140913.15451.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-opus-5",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "pstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.3066,
+      "cost_total": 3.07,
+      "wall_s": 39,
+      "turns": 5.5,
+      "files": [
+        "20260904-140913.15451.jsonl"
+      ],
+      "file": "20260904-140913.15451.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    {
+      "model": "claude-opus-5",
+      "engine": "claude",
+      "fixture": "multi_module",
+      "arm": "vstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.236,
+      "cost_total": 2.36,
+      "wall_s": 25,
+      "turns": 4.4,
+      "files": [
+        "20260904-140913.15451.jsonl"
+      ],
+      "file": "20260904-140913.15451.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
     }
   ],
   "files": {
@@ -549,6 +789,27 @@
       "model": "claude-haiku-4-5-20251001",
       "status": "valid",
       "note": "vstack vs gstack at v1.72.0, paired, register warns"
+    },
+    "20260904-135609.47712.jsonl": {
+      "file": "20260904-135609.47712.jsonl",
+      "engine": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "status": "valid",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    "20260904-140111.78290.jsonl": {
+      "file": "20260904-140111.78290.jsonl",
+      "engine": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "status": "valid",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
+    },
+    "20260904-140913.15451.jsonl": {
+      "file": "20260904-140913.15451.jsonl",
+      "engine": "claude",
+      "model": "claude-opus-5",
+      "status": "valid",
+      "note": "vstack vs gstack vs pstack at v1.72.0, paired"
     }
   }
 }
