@@ -935,6 +935,7 @@ turn_json=$(
 # ("^Reading...") in v1 -- their false-positive rate on imperative prose is unmeasured; widen
 # only from measured misses. Known accepted false positives, bounded by the 2-strike session
 # latch: quoted peer text and list items that start a line with a banned word.
+reg_unmet=""
 if [ "$eval_register" = 1 ]; then
   reg_texts=$(printf '%s' "$turn_json" | "$JQ" -r '.turn_texts // ""' 2>/dev/null)
   reg_pattern="^(Ah|I see|Got it|Right|Okay|Sure|Great|Perfect|Good catch|You('|’)re right|Let me|Now I('|’)ll|Now I('|’)m)[,! .]"
@@ -943,8 +944,7 @@ if [ "$eval_register" = 1 ]; then
     reg_match=$(printf '%s\n' "$reg_texts" | grep -oE "$reg_pattern" 2>/dev/null | head -1 | sed 's/[,! .]*$//')
   fi
   if [ -n "$reg_match" ]; then
-    unmet="$unmet
-  register -- banned opener \"$reg_match\" in this turn's text. Delete it; state the fact or make the tool call instead."
+    reg_unmet="  register -- banned opener \"$reg_match\" in this turn's text. Delete it; state the fact or make the tool call instead."
     hit_register=1
   fi
 fi
@@ -1006,8 +1006,9 @@ fi
 if [ "$hit_register" = 1 ]; then
   echo $((cnt_register + 1)) > "$cnt_file.register"
   date +%s > "$cnt_file.register-ts" 2>/dev/null
+  printf '%s' "$reg_match" > "$cnt_file.register-phrase" 2>/dev/null
 elif [ "$eval_register" = 1 ]; then
-  rm -f "$cnt_file.register" "$cnt_file.register-ts"
+  rm -f "$cnt_file.register" "$cnt_file.register-ts" "$cnt_file.register-phrase"
 fi
 if [ "$hit_naming" = 1 ]; then
   echo $((cnt_naming + 1)) > "$cnt_file.delegate-naming"
@@ -1028,6 +1029,23 @@ elif [ "$eval_serial" = 1 ]; then
   rm -f "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts"
 fi
 
+# The register mandate rides along with a block some other mandate earned, but never blocks on
+# its own. A Stop block cannot unsend the text it objects to; all it can buy is one more model
+# turn that says "Acknowledged" -- which is exactly what Haiku 4.5 did in 10 of 30 benchmark
+# runs on 2026-09-04 (tests/evals/showcase/RESULTS.md, "Three Claude arms on Haiku 4.5"),
+# at +1.5 to +4.5 turns and up to 1.54x wall per task, with no change in the code it left
+# behind. Opus absorbed the same strike without replying, so the cost only shows on the
+# small model. The strike still counts (2-strike latch above) and still reaches the model:
+# inject-session-context.sh reads the counter and the phrase on the next prompt, and the
+# systemMessage below shows the operator what fired. tests/mandate-cases.sh case 13 pins
+# this as WARN, not BLOCK; falsifiability row 27d proves the warning path is live.
+if [ -n "${reg_unmet:-}" ] && [ -n "$unmet" ]; then
+  unmet="$unmet
+$reg_unmet"
+elif [ -n "${reg_unmet:-}" ]; then
+  "$JQ" -cn --arg m "vstack register strike $((cnt_register + 1))/2: banned opener \"$reg_match\" -- the next prompt's digest repeats it; state the fact instead of acknowledging." '{systemMessage:$m}'
+  exit 0
+fi
 [ -n "$unmet" ] || exit 0
 
 reason="A vstack mandate went unmet. These fire every time, not when they seem relevant:

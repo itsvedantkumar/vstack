@@ -178,6 +178,16 @@ GRILL: run the grill-me skill when no more specific skill matches.'
       mandate="
 MANDATE skill=$_mcnt/2 delegate=$_mdcnt/2: dispatch + name a call sign now."
     fi
+    # The register strike no longer blocks Stop (skill-mandate.sh explains the measured cost);
+    # this line is where it reaches the model instead: the phrase the last reply opened with,
+    # on the next prompt, for as long as the counter stands.
+    _rcnt=$(cat "$_mcnt_file.register" 2>/dev/null || echo 0)
+    case "$_rcnt" in ''|*[!0-9]*) _rcnt=0 ;; esac
+    if [ "$_rcnt" -ge 1 ]; then
+      _rph=$(cut -c1-40 "$_mcnt_file.register-phrase" 2>/dev/null)
+      mandate="$mandate
+REGISTER $_rcnt/2: last reply opened with \"${_rph:-a banned opener}\". No acknowledgement tokens."
+    fi
   fi
   # The digest is now nothing but the two CONDITIONAL lines above. TOKENS, DELEGATE and FANOUT
   # were unconditional -- paid on every turn of every session -- and bought nothing anyone

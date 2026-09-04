@@ -4,6 +4,17 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.72.0 — 2026-09-04
+
+- The register mandate (banned openers) no longer blocks Stop on its own. A block cannot unsend
+  the text it objects to; on Haiku 4.5 it bought one extra "Acknowledged" turn in 10 of 30
+  benchmark runs, +1.5 to +4.5 turns and up to 1.54x wall per task, with identical code left
+  behind (`tests/evals/showcase/RESULTS.md`). The strike still counts toward the 2-strike latch,
+  surfaces as a `systemMessage` on that Stop, and reaches the model as a `REGISTER` line in the
+  next prompt's digest. It still rides along when another mandate blocks.
+- `tests/mandate-cases.sh` gains the `WARN:<substring>` verdict; case 13 moves from BLOCK to
+  WARN. Falsifiability row 27d proves the warning path is live.
+
 ## 1.71.0 — 2026-09-03
 
 - `claude/CLAUDE.md` 4332 B to 1635 B: USE THE STACK, MODEL ROUTING, DISPATCH PRE-AUTHORIZED

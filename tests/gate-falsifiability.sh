@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -375,6 +375,7 @@ files_for(){ case "$1" in
   26)  printf 'README.md' ;;
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   27c) printf 'claude/hooks/skill-mandate.sh' ;;
+  27d) printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
   29)  printf 'bin/cloudflare-mcp' ;;
   29b) printf 'ui-gate/rules/browser.sh' ;;
@@ -491,6 +492,7 @@ label_for(){ case "$1" in
   26)  printf 'documented platforms match CI' ;;
   27)  printf 'skill mandate decides correctly' ;;
   27c) printf 'skill mandate decides correctly' ;;
+  27d) printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
   29b) printf 'shellcheck clean' ;;
@@ -1143,6 +1145,11 @@ exit 0
       # dispatch is routed through the skill. A deleted block is conspicuous in review; a
       # threshold nobody can reach is not, and it is the likelier way this rule dies.
       sed -i.t 's/^if \[ "\$task_count" -ge 1 \] && \[ "\$eval_swarm" = 1 \]/if [ "$task_count" -ge 99999 ] \&\& [ "$eval_swarm" = 1 ]/' \
+        claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.t ;;
+  27d) # Kill the register warning path without touching the block path: a register-only Stop
+      # then falls through to the silent exit, and the mandate is gone with no diff a reviewer
+      # would read as a deletion. Case 13 expects WARN and must go red.
+      sed -i.t 's/^elif \[ -n "\${reg_unmet:-}" \]; then$/elif false; then/' \
         claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.t ;;
   26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
       # passages describing a Windows lane, with the Windows job red.

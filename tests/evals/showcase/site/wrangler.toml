@@ -1,4 +1,5 @@
-# Hosted proof for the showcase benchmark: https://bench.vedant.to
+# Hosted proof for the showcase benchmark: https://bench.vedant.to (custom domain attached by API,
+# see RESULTS.md; wrangler cannot sync routes with this token, so no routes line here)
 # The Worker holds no numbers. It fetches tests/evals/showcase/summary.json from the main
 # branch on GitHub at request time (cached 5 min) and renders it; summary.json is written by
 # summarize.sh from runs/*.jsonl and committed with them. Deploy: `wrangler deploy` in this dir.

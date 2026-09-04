@@ -120,7 +120,8 @@ existed take the model from the index.
 `site/worker.js` is a Cloudflare Worker that fetches `summary.json` from this repository's main
 branch at request time and renders it, with the mechanism table beside the outcome table and a
 link from every row to its run file. It is live at
-<https://vstack-bench.vk-work-official.workers.dev>. Regenerate and publish with:
+<https://bench.vedant.to> (also at
+<https://vstack-bench.vk-work-official.workers.dev>). Regenerate and publish with:
 
 ```bash
 tests/evals/showcase/summarize.sh --write   # rewrites summary.json from runs/
@@ -128,10 +129,10 @@ git add tests/evals/showcase/summary.json tests/evals/showcase/runs && git commi
 ```
 
 The page needs no redeploy for new numbers; `wrangler deploy` in `site/` only when the page
-itself changes. The custom domain `bench.vedant.to` is not attached: the API token wrangler
-runs under has no Workers Routes permission on the zone (error code 10000), so the Worker
-serves from its `workers.dev` name until that permission is added and the `routes` line in
-`site/wrangler.toml` restored.
+itself changes. The custom domain was attached with one API call (`PUT
+/accounts/<id>/workers/domains`), not through wrangler, whose route sync needs a Workers
+Routes permission the token lacks (error code 10000); `site/wrangler.toml` therefore keeps
+`workers_dev = true` and no `routes` line, and a redeploy leaves the domain in place.
 
 ### Three Claude arms on Haiku 4.5 at 1.71.0, paired
 

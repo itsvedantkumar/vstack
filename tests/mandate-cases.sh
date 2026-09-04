@@ -24,7 +24,7 @@
 #
 # --- the five functions every case answers ------------------------------------------------------
 #   mandate_case_lines <id>          fixture transcript, one JSONL record per line, to stdout
-#   mandate_case_expect <id>         "SILENT" or "BLOCK:<substring>" -- the substring must appear
+#   mandate_case_expect <id>         "SILENT", "BLOCK:<substring>" or "WARN:<substring>" -- the substring must appear
 #                                     literally (grep -F) somewhere in the hook's raw stdout
 #   mandate_case_flags <id>          space-separated flags this case needs (see below), or nothing
 #   mandate_case_judge <id> <out>    the ONLY place SILENT vs BLOCK:<substring> is decided; prints
@@ -100,7 +100,9 @@ _MC_DONE='{"type":"assistant","message":{"content":[{"type":"text","text":"The f
 _MC_12_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"piw2/fix.sh","content":""}}]}}'
 _MC_12_BASH='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bash piw2/fix.sh --selftest"}}]}}'
 # 13/14/15: the register mandate. 13 is the positive direction: a turn whose text opens with a
-# banned CLAUDE.md REGISTER phrase ("Let me ...") at line start. 14 and 15 are the two anchors
+# banned CLAUDE.md REGISTER phrase ("Let me ...") at line start; since 1.72.0 it must WARN (a
+# systemMessage, no block -- a block cannot unsend the text and only bought Haiku an extra
+# "Acknowledged" turn, see skill-mandate.sh). 14 and 15 are the two anchors
 # that keep the pattern honest: 14 starts a line with "Right" but follows it with "-" (not in
 # the [,! .] boundary class) -- "Right-sizing" is vocabulary, not an acknowledgement token; 15
 # carries "Great," mid-line only, which the ^ anchor must ignore. Neither may block.
@@ -167,7 +169,7 @@ mandate_case_expect() {
     10) printf '%s\n' 'SILENT' ;;
     11) printf '%s\n' 'BLOCK:prove-it-works' ;;
     12) printf '%s\n' 'SILENT' ;;
-    13) printf '%s\n' 'BLOCK:register -- banned opener' ;;
+    13) printf '%s\n' 'WARN:register strike 1/2: banned opener' ;;
     14) printf '%s\n' 'SILENT' ;;
     15) printf '%s\n' 'SILENT' ;;
     *) return 1 ;;
@@ -216,7 +218,7 @@ mandate_case_desc() {
   esac
 }
 
-# mandate_case_judge <id> <hook_stdout> -- the ONE place SILENT vs BLOCK:<substring> is decided.
+# mandate_case_judge <id> <hook_stdout> -- the ONE place SILENT vs BLOCK vs WARN:<substring> is decided.
 # Prints one human-readable line to stdout; returns 0 on match, 1 on mismatch. Substring matching
 # is fixed-string (grep -F): several expected substrings carry literal parentheses
 # ("2 subagent call(s)") that would otherwise be read as regex.
@@ -241,6 +243,20 @@ mandate_case_judge() {
         return 0
       fi
       printf '%s: expected block naming "%s", got: %s\n' "$_mcj_id" "$_mcj_sub" \
+        "$(printf '%s' "$_mcj_out" | tr '\n' ' ' | cut -c1-200)"
+      return 1
+      ;;
+    WARN:*)
+      # A strike that must NOT block and must still be visible: no "decision":"block" anywhere,
+      # a systemMessage carrying the substring. The register mandate is the one WARN today.
+      _mcj_sub=${_mcj_exp#WARN:}
+      if ! printf '%s' "$_mcj_out" | grep -qF '"decision":"block"' \
+         && printf '%s' "$_mcj_out" | grep -qF '"systemMessage"' \
+         && printf '%s' "$_mcj_out" | grep -qF -- "$_mcj_sub"; then
+        printf '%s: warned without blocking, naming "%s" as expected\n' "$_mcj_id" "$_mcj_sub"
+        return 0
+      fi
+      printf '%s: expected a non-blocking warning naming "%s", got: %s\n' "$_mcj_id" "$_mcj_sub" \
         "$(printf '%s' "$_mcj_out" | tr '\n' ' ' | cut -c1-200)"
       return 1
       ;;
