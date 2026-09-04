@@ -302,7 +302,8 @@ for arm in "${ARMS[@]}"; do
     for s in $(seq 1 "$SAMPLES"); do printf '%s\t%s\t%s\n' "$arm" "${fx%/}" "$s" >> "$JOBLIST"; done
   done
 done
-export -f run_one install_arm score_check oracle_verify gate_feedback gate_exit_offer tests_tampered defect_report log
+export -f run_one install_arm score_check oracle_verify gate_feedback gate_exit_offer tests_tampered defect_report log trust_lock trust_unlock
+export TRUST_LOCK
 export SRC GSTACK_DIR PSTACK_DIR ENGINE MODEL RUN_TIMEOUT OUT WORKROOT ROOT STAMP GATE_CAP GATE_EXIT
 if [ "$JOBS" -gt 1 ]; then
   # shellcheck disable=SC2016  # $1..$3 are positionals of the inner bash, expanded there, not here
