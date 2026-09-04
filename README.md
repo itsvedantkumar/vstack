@@ -139,7 +139,7 @@ Pin a release rather than tracking `main`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.73.1/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.73.0 bash bootstrap.sh     # installs that tag, not main
+VSTACK_REF=v1.73.1 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
