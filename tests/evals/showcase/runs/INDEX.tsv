@@ -27,3 +27,5 @@ file	engine	model	status	note
 20260904-143928.90069.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet; harness defect: gstack workdirs were not git repos and sat inside this checkout, so runs escaped into the staged fixture source; killed after 15 rows, superseded by the rerun
 20260904-144621.19824.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet; killed: vstack Stop gate inert (skipped untrusted, the 1.73.0 symlink path defect); superseded by a rerun on 1.73.0
 20260904-184059.28637.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet on 1.73.0; two vstack runs hit the 360s wrapper timeout and wrote no row, so the surviving 8 are the faster ones -- rerun at a higher timeout supersedes it
+20260905-025901.62077.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.73.1, paired, gated_report_quiet (gate armed, prompt does not name it)
+20260905-024931.28111.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet; killed mid-batch: the trust lock functions were not exported to the parallel workers, so the vstack arm ran with an unarmed Stop gate

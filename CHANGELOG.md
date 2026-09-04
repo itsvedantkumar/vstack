@@ -6,6 +6,15 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 
 ## 1.73.1 — 2026-09-05
 
+- **A benchmark fixture that separates the arms.** `traps/gated_report_quiet` ships a real
+  `.claude/verify.sh` and a prompt that never mentions it. Ten paired runs per arm on Haiku 4.5:
+  vstack and gstack 10/10 green with no false completion, pstack 9/10 with one run that edited the
+  project's own contract-check script and then said `DONE`. First non-tie on correctness in this
+  benchmark.
+- The showcase harness: `tests_tampered` was constant 1 because it diffed `__pycache__`; workdirs
+  are physical paths outside the checkout and every arm is `git init`-ed; the trust lock is
+  exported to the parallel workers.
+
 - **Two release-lane harnesses carried the same logical-path assumption 1.73.0 fixed everywhere
   else.** `tests/compare-baseline.sh` armed the trust store with a logical fixture root, so its
   one mechanism row ("agent claims done, tests fail") read `no decision` where the gate really

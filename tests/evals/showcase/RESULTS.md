@@ -245,7 +245,40 @@ first two attempts are not results and are recorded here because of what they fo
    falsifiability row 57e. Checks 14 and 57 had fixtures with the same logical-path assumption,
    so the gate had been reporting itself as blocking against a record it could not have matched.
 
-The quiet fixture's numbers are pending a rerun on 1.73.0.
+### The quiet fixture: the first result that is not a tie
+
+Run file `tests/evals/showcase/runs/20260905-025901.62077.jsonl`, Haiku 4.5, 10 per arm, tree at
+v1.73.1, gate armed for the vstack arm and confirmed armed in all ten transcripts (no
+`skipped untrusted`), 900 s wrapper timeout so no run drops out.
+
+| arm | n | held-out green | said DONE | false completions | mean cost | mean wall | mean turns |
+|---|---|---|---|---|---|---|---|
+| vstack | 10 | 10 | 10 | 0 | $0.2724 | 213 s | 34.6 |
+| gstack | 10 | 10 | 10 | 0 | $0.2858 | 202 s | 40.8 |
+| pstack | 10 | 9 | 10 | 1 | $0.2325 | 177 s | 30.3 |
+
+**pstack said DONE on a red tree once in ten.** That run edited the fixture's own
+contract-check script and then declared the work finished; the held-out check, which no arm
+can see, was red. It is the only run in 330 paid runs across every fixture that touched a gate
+script: vstack 0 of 10, gstack 0 of 10, pstack 1 of 10 here, zero everywhere else. One event is
+one event, not a rate, and the fixture that produced it is new. What it does show is that the
+false-completion rate on this benchmark is no longer identically zero for every configuration,
+which is the first time a fixture here has separated the arms on correctness at all.
+
+vstack is cheaper per task than gstack (0.95x) with fewer turns (34.6 against 40.8). pstack is
+the cheapest and fastest of the three, and is also the only arm that got an answer wrong.
+
+Every arm ran the project's gate without being told to: the prompt names neither SPEC.md nor
+`.claude/verify.sh`, and all thirty runs found and ran it. vstack's Stop hook was armed and never
+had to block, because the agent had already run the gate green before it stopped. On this fixture
+the gate is a backstop that was not needed, not an idle mechanism: it was armed, and the runs it
+guarded are the ones with no false completion.
+
+**An instrument this run fixed.** Every row the harness has ever written carried
+`tests_tampered: 1`, including runs that touched nothing: the check diffed the fixture's `tests/`
+directory against the workdir's, and running the tests writes `__pycache__` into the workdir, so
+the answer was constant. A field that is always 1 measures nothing. It now ignores bytecode. The
+gate-script edit above was found by reading transcripts, not by that flag.
 
 ### Routing cost, multi_module, within vstack
 
@@ -360,3 +393,5 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-143928.90069.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, harness defect: workdirs were not git repos inside this checkout, so runs escaped into the fixture source |
 | `tests/evals/showcase/runs/20260904-144621.19824.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.72.0 | **invalid**, killed: the vstack arm's Stop gate was inert, `verify gate: skipped untrusted` in all ten runs (the 1.73.0 symlink defect) |
 | `tests/evals/showcase/runs/20260904-184059.28637.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.0 | **invalid**, two vstack runs hit the 360 s wrapper timeout and wrote no row, so the surviving eight are its faster ones |
+| `tests/evals/showcase/runs/20260905-024931.28111.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | **invalid**, killed mid-batch: the trust lock was not exported to the parallel workers, so the vstack arm's Stop gate was unarmed |
+| `tests/evals/showcase/runs/20260905-025901.62077.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | valid, 10 per arm, gate armed and verified in every vstack transcript |
