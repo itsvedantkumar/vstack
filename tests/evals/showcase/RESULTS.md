@@ -269,16 +269,35 @@ vstack is cheaper per task than gstack (0.95x) with fewer turns (34.6 against 40
 the cheapest and fastest of the three, and is also the only arm that got an answer wrong.
 
 Every arm ran the project's gate without being told to: the prompt names neither SPEC.md nor
-`.claude/verify.sh`, and all thirty runs found and ran it. vstack's Stop hook was armed and never
-had to block, because the agent had already run the gate green before it stopped. On this fixture
-the gate is a backstop that was not needed, not an idle mechanism: it was armed, and the runs it
-guarded are the ones with no false completion.
+`.claude/verify.sh`, and all thirty runs found and ran it. vstack's Stop hook was armed in all ten
+runs and blocked in none of them, because the agent had already run the gate green before it
+stopped. On this fixture the gate is a backstop that was not needed.
 
-**An instrument this run fixed.** Every row the harness has ever written carried
+**How that last sentence is evidenced, since the run file could not say it.** Two artefacts, not
+the row:
+
+- *Armed.* The harness re-reads the trust store after arming each workdir and logs a line only
+  when the record is missing. The run's log carries no such line for any of the ten, and the
+  batch that did fail this way (`20260905-024931`, the unexported trust lock) is full of them.
+- *Never blocked.* `claude/hooks/verify-gate.sh` writes `$TMPDIR/verify-gate-block-<session id>`
+  inside its block branch and nowhere else. None of the ten session ids has that file. Probed in
+  both directions: a trusted `verify.sh` that exits 1, driven twice through the hook, produced
+  `{"decision":"block"}` both times and a counter file reading `2`.
+
+`gate_rounds` in the run file is **not** that number, on any row. It belongs to the opencode
+`gate` and `oracle` arms and is 0 by construction for vstack, gstack and pstack, which is exactly
+how a reader ends up quoting a field that never measured what its name suggests. Runs from
+`20260905-163932` onward carry `gate_armed` and `gate_blocks`, which do, and the smoke run that
+proved them is indexed invalid because one arm at n=1 is an instrument check, not a result.
+
+**An instrument this run exposed.** Every row the harness has ever written carried
 `tests_tampered: 1`, including runs that touched nothing: the check diffed the fixture's `tests/`
 directory against the workdir's, and running the tests writes `__pycache__` into the workdir, so
-the answer was constant. A field that is always 1 measures nothing. It now ignores bytecode. The
-gate-script edit above was found by reading transcripts, not by that flag.
+the answer was constant. A field that is always 1 measures nothing. It now ignores bytecode, but
+the fix landed after this batch finished, so all thirty rows above still read 1 and none of them
+means anything. `20260905-163932` is the first row in this harness's history to carry
+`tests_tampered: 0`. The gate-script edit above was found by reading transcripts, not by that
+flag.
 
 ### Routing cost, multi_module, within vstack
 
@@ -395,3 +414,4 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-184059.28637.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.0 | **invalid**, two vstack runs hit the 360 s wrapper timeout and wrote no row, so the surviving eight are its faster ones |
 | `tests/evals/showcase/runs/20260905-024931.28111.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | **invalid**, killed mid-batch: the trust lock was not exported to the parallel workers, so the vstack arm's Stop gate was unarmed |
 | `tests/evals/showcase/runs/20260905-025901.62077.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | valid, 10 per arm, gate armed and verified in every vstack transcript |
+| `tests/evals/showcase/runs/20260905-163932.41750.jsonl` | gated_report_quiet | Haiku 4.5, vstack only at v1.73.1 | **invalid**, n=1 smoke proving `gate_armed`/`gate_blocks` land end to end; one arm, no comparison |

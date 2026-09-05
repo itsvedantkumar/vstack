@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-04T22:05:28Z",
-  "commit": "6e89ff0",
+  "generated": "2026-09-05T11:13:19Z",
+  "commit": "c3fc09e",
   "rows": [
     {
       "model": "claude-haiku-4-5-20251001",
@@ -1201,6 +1201,13 @@
       "model": "claude-haiku-4-5-20251001",
       "status": "invalid",
       "note": "gated_report_quiet; killed mid-batch: the trust lock functions were not exported to the parallel workers, so the vstack arm ran with an unarmed Stop gate"
+    },
+    "20260905-163932.41750.jsonl": {
+      "file": "20260905-163932.41750.jsonl",
+      "engine": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "status": "invalid",
+      "note": "n=1 smoke proving the new gate_armed/gate_blocks columns land end to end; one arm, no comparison, excluded from every aggregate"
     }
   }
 }

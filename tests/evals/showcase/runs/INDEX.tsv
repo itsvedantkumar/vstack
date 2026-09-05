@@ -29,3 +29,4 @@ file	engine	model	status	note
 20260904-184059.28637.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet on 1.73.0; two vstack runs hit the 360s wrapper timeout and wrote no row, so the surviving 8 are the faster ones -- rerun at a higher timeout supersedes it
 20260905-025901.62077.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.73.1, paired, gated_report_quiet (gate armed, prompt does not name it)
 20260905-024931.28111.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet; killed mid-batch: the trust lock functions were not exported to the parallel workers, so the vstack arm ran with an unarmed Stop gate
+20260905-163932.41750.jsonl	claude	claude-haiku-4-5-20251001	invalid	n=1 smoke proving the new gate_armed/gate_blocks columns land end to end; one arm, no comparison, excluded from every aggregate

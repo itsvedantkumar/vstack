@@ -155,14 +155,24 @@ run_one() { # <arm> <fixture_dir> <sample>
   # A fixture may ship its own project gate (.claude/verify.sh). vstack's Stop hook runs only a
   # gate the machine has trusted, so arm it the way a user would; the entry is removed below.
   # Other arms have no Stop gate and the file just sits there, as it would for their users.
+  # gate_armed: -1 this arm/fixture has no Stop gate to arm, 1 armed and the record is readable
+  # back out of the store, 0 arming was attempted and the record is not there. It was 0 for ten
+  # runs on 2026-09-04 (the trust lock functions were not exported to the parallel workers) and
+  # the only trace was a log line nobody had to read. A row that says which is which cannot be
+  # missed the same way.
+  local garmed=-1
   if [ "$arm" = vstack ] && [ -x "$wd/.claude/verify.sh" ]; then
     # The store is one file rewritten in place, by `vstack trust` here and by the cleanup below,
     # so concurrent jobs lose each other's entries. Serialise both with a mkdir lock.
     trust_lock
     "$SRC/bin/vstack" trust --yes "$wd" >/dev/null 2>&1 || log "  $arm/$name #$s: vstack trust failed (gate stays unarmed)"
     trust_unlock
-    grep -qF "  $wd/.claude/verify.sh" "$HOME/.config/agents/verify-trust" 2>/dev/null \
-      || log "  $arm/$name #$s: trust record missing after arming -- the Stop gate will skip"
+    if grep -qF "  $wd/.claude/verify.sh" "$HOME/.config/agents/verify-trust" 2>/dev/null; then
+      garmed=1
+    else
+      garmed=0
+      log "  $arm/$name #$s: trust record missing after arming -- the Stop gate will skip"
+    fi
   fi
   local prompt; prompt=$(cat "$fx/PROMPT.txt")
 
@@ -226,14 +236,31 @@ run_one() { # <arm> <fixture_dir> <sample>
   else
     local -a plug=()
     [ "$arm" = pstack ] && plug=(--plugin-dir "$PSTACK_DIR/plugins/pstack")
+    # ${plug[@]+"${plug[@]}"}: expanding an EMPTY array as "${plug[@]}" is an unbound-variable
+    # error under `set -u` in bash 3.2, which is what /bin/bash is on macOS. The parallel path
+    # runs its workers under whatever `bash` xargs finds (5.x from Homebrew here) and never hit
+    # it, so the serial path -- the one a single smoke run takes -- was the only broken lane.
     json=$( cd "$wd" && timeout "$RUN_TIMEOUT" claude -p "$prompt" \
-              --model "$MODEL" --permission-mode bypassPermissions "${plug[@]}" \
+              --model "$MODEL" --permission-mode bypassPermissions ${plug[@]+"${plug[@]}"} \
               --setting-sources=project --output-format json < /dev/null 2>/dev/null )
   fi
 
   # A run the wrapper killed has no JSON. It still gets a row, flagged, so a timeout is a
   # measurement and not a vanished sample: the first GLM batch lost 15 of 40 this way, silently.
   [ -n "$json" ] || json='{"is_error":true,"result":"","subtype":"timeout"}'
+  # gate_blocks: how many times vstack's Stop hook actually refused to let the run stop.
+  # verify-gate.sh writes $TMPDIR/verify-gate-block-<session id> inside its block branch and
+  # nowhere else, so the file's absence is a real zero and its contents are a real count.
+  # gate_rounds below is NOT this number: it belongs to the opencode `gate` and `oracle` arms
+  # and is 0 by construction for vstack, gstack and pstack, which is exactly how a reader ends
+  # up quoting a field that never measured the thing its name suggests.
+  local gsid gblocks=-1
+  if [ "$arm" = vstack ]; then
+    gsid=$(printf '%s' "$json" | jq -r '.session_id // ""' 2>/dev/null)
+    gblocks=0
+    [ -n "$gsid" ] && gblocks=$(cat "${TMPDIR:-/tmp}/verify-gate-block-$gsid" 2>/dev/null || echo 0)
+    case "$gblocks" in ''|*[!0-9]*) gblocks=-1 ;; esac
+  fi
   mkdir -p "$wd/checks"; cp "$fx"/checks/*.py "$wd/checks/" 2>/dev/null
   local green; score_check "$wd"; case $? in 0) green=1;; 1) green=0;; *) green=-1;; esac
 
@@ -256,7 +283,8 @@ run_one() { # <arm> <fixture_dir> <sample>
   printf '%s' "$json" | jq -c \
     --arg arm "$arm" --arg fixture "$name" --argjson sample "$s" \
     --argjson said "$said" --argjson green "$green" --argjson fc "$fc" --argjson gr "$gr" \
-    --argjson gcap "$GATE_CAP" --argjson gx "${gx:-0}" --argjson tt "$tt" --argjson dr "$dr" --argjson esc "$esc" --arg model "$MODEL" '
+    --argjson gcap "$GATE_CAP" --argjson gx "${gx:-0}" --argjson tt "$tt" --argjson dr "$dr" --argjson esc "$esc" \
+    --argjson garmed "$garmed" --argjson gblocks "$gblocks" --arg model "$MODEL" '
     {arm:$arm, fixture:$fixture, sample:$sample,
      said:$said, tests_green:$green, false_completion:$fc,
      tokens_in:(.usage.input_tokens//0), tokens_out:(.usage.output_tokens//0),
@@ -266,9 +294,10 @@ run_one() { # <arm> <fixture_dir> <sample>
      turns:(.num_turns//0), spawned:(.subagent_stats.spawned//0),
      session_id:(.session_id//""), model:$model,
      gate_cap:$gcap, gate_rounds:$gr, gate_exit:$gx, tests_tampered:$tt, defect_report:$dr, escalated:$esc,
+     gate_armed:$garmed, gate_blocks:$gblocks,
      models:(.modelUsage|keys), model_cost:(.modelUsage|map_values(.costUSD)),
      is_error:(.is_error//false)}' 2>/dev/null >> "$OUT"
-  log "  $arm/$name #$s said=$said green=$green fc=$fc turns=$(printf '%s' "$json" | jq -r '.num_turns//0')"
+  log "  $arm/$name #$s said=$said green=$green fc=$fc turns=$(printf '%s' "$json" | jq -r '.num_turns//0') gate=$garmed/$gblocks"
   # SHOWCASE_KEEP_RED=1 keeps the tree of every red run for post-mortem: which file the agent
   # left broken is the finding, and the row alone cannot say.
   if [ "${SHOWCASE_KEEP_RED:-0}" = 1 ] && [ "$green" -ne 1 ]; then
