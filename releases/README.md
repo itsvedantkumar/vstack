@@ -4,6 +4,7 @@ One file per tag, written by `tests/release-lane.sh`. Rows are replaced on a rer
 
 | tag | commit | run | verdict | evidence |
 |---|---|---|---|---|
+| v1.74.0 | `06238ca` | 2026-09-05 | green | [`releases/v1.74.0.md`](v1.74.0.md) |
 | v1.73.1 | `fd805f7` | 2026-09-05 | green | [`releases/v1.73.1.md`](v1.73.1.md) |
 | v1.73.0 | `f3f1eb5` | 2026-09-04 | 2 red | [`releases/v1.73.0.md`](v1.73.0.md) |
 | v1.71.0 | `8340ecf` | 2026-09-04 | green | [`releases/v1.71.0.md`](v1.71.0.md) |
