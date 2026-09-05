@@ -28,6 +28,5 @@ regexes = [
   '''wJalrXUtnFEMIK7MDENGbPxRfiCY''',
   # appended to README.md by a falsifiability row that checks the secret scanner notices it
   '''AbCdEf0123456789AbCdEf0123456789''',
-  '''prj_A1b2C3d4E5f6G7h8''',
   '''eyJhbGciOiJIUzI1NiJ9\.PAYLOAD1234\.SIGNATURE''',
 ]
