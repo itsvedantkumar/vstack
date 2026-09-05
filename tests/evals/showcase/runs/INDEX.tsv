@@ -30,3 +30,5 @@ file	engine	model	status	note
 20260905-025901.62077.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.73.1, paired, gated_report_quiet (gate armed, prompt does not name it)
 20260905-024931.28111.jsonl	claude	claude-haiku-4-5-20251001	invalid	gated_report_quiet; killed mid-batch: the trust lock functions were not exported to the parallel workers, so the vstack arm ran with an unarmed Stop gate
 20260905-163932.41750.jsonl	claude	claude-haiku-4-5-20251001	invalid	n=1 smoke proving the new gate_armed/gate_blocks columns land end to end; one arm, no comparison, excluded from every aggregate
+20260905-165001.91263.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (10 per arm; first fixture whose reported symptom is one of two instances)
+20260905-175047.42839.jsonl	claude	claude-haiku-4-5-20251001	valid	vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (40 per arm requested; 116 of 120 rows -- 4 runs returned no JSON and the row writer dropped them, fixed after this batch)

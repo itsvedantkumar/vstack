@@ -299,6 +299,49 @@ means anything. `20260905-163932` is the first row in this harness's history to 
 `tests_tampered: 0`. The gate-script edit above was found by reading transcripts, not by that
 flag.
 
+### A fixture built so the gate has something to catch
+
+`traps/gate_bites`. ISSUE.md reports one symptom, the 1000-unit tier boundary, of a defect with
+two instances on two separate lines of the fixture's rate table. The visible unit tests never touch a
+boundary, so they stay green in every state: shipped, after the shallow fix the issue invites,
+after a special-case hack in the caller, and after the real fix. Only the project's own
+`.claude/verify.sh` separates those states. All four were proven by hand before the first paid
+run.
+
+Two batches, Haiku 4.5, tree at v1.73.1, run files
+`tests/evals/showcase/runs/20260905-165001.91263.jsonl` (10 per arm) and
+`20260905-175047.42839.jsonl` (40 per arm requested, 116 of 120 rows landed). Combined:
+
+| arm | n | green | false completions | Stop gate armed | Stop gate blocked | cost | wall | turns |
+|---|---|---|---|---|---|---|---|---|
+| vstack | 49 | 49 | **0** | 49 | 0 | $0.0737 | 53 s | 12.1 |
+| gstack | 47 | 44 | 3 | n/a | n/a | $0.0637 | 45 s | 11.0 |
+| pstack | 50 | 49 | 1 | n/a | n/a | $0.0742 | 47 s | 12.4 |
+
+vstack is the only arm with no false completion, and it is 0 against gstack's 3. **That is not
+significant**: Fisher's exact two-sided p = 0.113 against gstack and p = 1.000 against pstack. It
+is a lead, not a result, and saying otherwise would be the same sin as a green that measured
+nothing.
+
+**The mechanism that would explain it did not fire.** `gate_armed` is 1 on all 49 vstack rows and
+`gate_blocks` is 0 on all 49. Across this fixture and `gated_report_quiet`, vstack's Stop gate has
+now been armed in 59 measured runs and has blocked in none of them, because the agent ran the
+project's gate itself before it stopped, every time. Whatever produced the 0-against-3 split, the
+Stop hook blocking a red finish is not it. The honest statement about `verify-gate` after 59 runs
+is that it is a backstop this model does not need on tasks this size, and its ledger entry in
+`claude/inventory.json` stays `kind: none` rather than being promoted on a null.
+
+**Where vstack is worse, and why.** Cost 1.16x gstack, wall 1.19x, on 12.1 turns against 11.0.
+Same mechanism measured on 2026-09-04 and unchanged: the verify-before-done mandate buys extra
+Reads and test runs per task. On this fixture that spend bought the 3 completions gstack got
+wrong, but the causal chain is not proven, and 1.16x is a real cost.
+
+**Four rows are missing from the n=40 batch.** Runs that returned no JSON were meant to get a
+flagged row, and the writer dropped them instead: `.modelUsage|keys` aborts jq with "null has no
+keys" on the fallback object, and the writer's stderr goes to `/dev/null`. Fixed after the batch,
+proven by feeding the fallback object through the guarded writer. The same defect ate the two
+360-second timeouts on 2026-09-04 that were then diagnosed as a timeout problem alone.
+
 ### Routing cost, multi_module, within vstack
 
 Five vstack runs from `tests/evals/showcase/runs/20260903-002641.jsonl`, Opus 5, before the
@@ -414,4 +457,6 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260904-184059.28637.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.0 | **invalid**, two vstack runs hit the 360 s wrapper timeout and wrote no row, so the surviving eight are its faster ones |
 | `tests/evals/showcase/runs/20260905-024931.28111.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | **invalid**, killed mid-batch: the trust lock was not exported to the parallel workers, so the vstack arm's Stop gate was unarmed |
 | `tests/evals/showcase/runs/20260905-025901.62077.jsonl` | gated_report_quiet | Haiku 4.5, three arms at v1.73.1 | valid, 10 per arm, gate armed and verified in every vstack transcript |
+| `tests/evals/showcase/runs/20260905-165001.91263.jsonl` | gate_bites | Haiku 4.5, three arms at v1.73.1 | valid, 10 per arm |
+| `tests/evals/showcase/runs/20260905-175047.42839.jsonl` | gate_bites | Haiku 4.5, three arms at v1.73.1 | valid, 40 per arm requested, 116 of 120 rows; 4 runs returned no JSON and the writer dropped them |
 | `tests/evals/showcase/runs/20260905-163932.41750.jsonl` | gated_report_quiet | Haiku 4.5, vstack only at v1.73.1 | **invalid**, n=1 smoke proving `gate_armed`/`gate_blocks` land end to end; one arm, no comparison |

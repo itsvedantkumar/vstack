@@ -247,6 +247,10 @@ run_one() { # <arm> <fixture_dir> <sample>
 
   # A run the wrapper killed has no JSON. It still gets a row, flagged, so a timeout is a
   # measurement and not a vanished sample: the first GLM batch lost 15 of 40 this way, silently.
+  # The fallback object alone did not achieve that. `.modelUsage|keys` aborts jq with "null has
+  # no keys" (rc 5) on any object without that field, and the writer's stderr goes to /dev/null,
+  # so every killed or errored run was still dropped -- 4 of 120 in the gate_bites batch, and the
+  # 2 that a 360s timeout ate on 2026-09-04. Guarded with //{} so the row is written and counted.
   [ -n "$json" ] || json='{"is_error":true,"result":"","subtype":"timeout"}'
   # gate_blocks: how many times vstack's Stop hook actually refused to let the run stop.
   # verify-gate.sh writes $TMPDIR/verify-gate-block-<session id> inside its block branch and
@@ -295,7 +299,7 @@ run_one() { # <arm> <fixture_dir> <sample>
      session_id:(.session_id//""), model:$model,
      gate_cap:$gcap, gate_rounds:$gr, gate_exit:$gx, tests_tampered:$tt, defect_report:$dr, escalated:$esc,
      gate_armed:$garmed, gate_blocks:$gblocks,
-     models:(.modelUsage|keys), model_cost:(.modelUsage|map_values(.costUSD)),
+     models:((.modelUsage//{})|keys), model_cost:((.modelUsage//{})|map_values(.costUSD)),
      is_error:(.is_error//false)}' 2>/dev/null >> "$OUT"
   log "  $arm/$name #$s said=$said green=$green fc=$fc turns=$(printf '%s' "$json" | jq -r '.num_turns//0') gate=$garmed/$gblocks"
   # SHOWCASE_KEEP_RED=1 keeps the tree of every red run for post-mortem: which file the agent

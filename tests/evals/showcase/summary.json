@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-05T11:13:19Z",
-  "commit": "c3fc09e",
+  "generated": "2026-09-05T13:22:05Z",
+  "commit": "5d0cc25",
   "rows": [
     {
       "model": "claude-haiku-4-5-20251001",
@@ -56,6 +56,63 @@
       "files": [
         "20260904-011934.55418.jsonl",
         "20260904-140111.78290.jsonl"
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "gstack",
+      "n": 47,
+      "green": 44,
+      "said_done": 47,
+      "false_completion": 3,
+      "spawned": 0,
+      "cost_mean": 0.0637,
+      "cost_total": 2.99,
+      "wall_s": 45,
+      "turns": 11,
+      "files": [
+        "20260905-165001.91263.jsonl",
+        "20260905-175047.42839.jsonl"
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "pstack",
+      "n": 50,
+      "green": 49,
+      "said_done": 50,
+      "false_completion": 1,
+      "spawned": 0,
+      "cost_mean": 0.0742,
+      "cost_total": 3.71,
+      "wall_s": 47,
+      "turns": 12.4,
+      "files": [
+        "20260905-165001.91263.jsonl",
+        "20260905-175047.42839.jsonl"
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "vstack",
+      "n": 49,
+      "green": 49,
+      "said_done": 49,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0737,
+      "cost_total": 3.61,
+      "wall_s": 53,
+      "turns": 12.1,
+      "files": [
+        "20260905-165001.91263.jsonl",
+        "20260905-175047.42839.jsonl"
       ]
     },
     {
@@ -989,6 +1046,126 @@
       ],
       "file": "20260905-025901.62077.jsonl",
       "note": "vstack vs gstack vs pstack at v1.73.1, paired, gated_report_quiet (gate armed, prompt does not name it)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "gstack",
+      "n": 10,
+      "green": 9,
+      "said_done": 10,
+      "false_completion": 1,
+      "spawned": 0,
+      "cost_mean": 0.0624,
+      "cost_total": 0.62,
+      "wall_s": 39,
+      "turns": 10.5,
+      "files": [
+        "20260905-165001.91263.jsonl"
+      ],
+      "file": "20260905-165001.91263.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (10 per arm; first fixture whose reported symptom is one of two instances)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "pstack",
+      "n": 10,
+      "green": 9,
+      "said_done": 10,
+      "false_completion": 1,
+      "spawned": 0,
+      "cost_mean": 0.0742,
+      "cost_total": 0.74,
+      "wall_s": 44,
+      "turns": 12.5,
+      "files": [
+        "20260905-165001.91263.jsonl"
+      ],
+      "file": "20260905-165001.91263.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (10 per arm; first fixture whose reported symptom is one of two instances)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "vstack",
+      "n": 10,
+      "green": 10,
+      "said_done": 10,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0775,
+      "cost_total": 0.77,
+      "wall_s": 53,
+      "turns": 12.4,
+      "files": [
+        "20260905-165001.91263.jsonl"
+      ],
+      "file": "20260905-165001.91263.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (10 per arm; first fixture whose reported symptom is one of two instances)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "gstack",
+      "n": 37,
+      "green": 35,
+      "said_done": 37,
+      "false_completion": 2,
+      "spawned": 0,
+      "cost_mean": 0.064,
+      "cost_total": 2.37,
+      "wall_s": 46,
+      "turns": 11.1,
+      "files": [
+        "20260905-175047.42839.jsonl"
+      ],
+      "file": "20260905-175047.42839.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (40 per arm requested; 116 of 120 rows -- 4 runs returned no JSON and the row writer dropped them, fixed after this batch)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "pstack",
+      "n": 40,
+      "green": 40,
+      "said_done": 40,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0742,
+      "cost_total": 2.97,
+      "wall_s": 48,
+      "turns": 12.4,
+      "files": [
+        "20260905-175047.42839.jsonl"
+      ],
+      "file": "20260905-175047.42839.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (40 per arm requested; 116 of 120 rows -- 4 runs returned no JSON and the row writer dropped them, fixed after this batch)"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "engine": "claude",
+      "fixture": "gate_bites",
+      "arm": "vstack",
+      "n": 39,
+      "green": 39,
+      "said_done": 39,
+      "false_completion": 0,
+      "spawned": 0,
+      "cost_mean": 0.0728,
+      "cost_total": 2.84,
+      "wall_s": 53,
+      "turns": 12,
+      "files": [
+        "20260905-175047.42839.jsonl"
+      ],
+      "file": "20260905-175047.42839.jsonl",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (40 per arm requested; 116 of 120 rows -- 4 runs returned no JSON and the row writer dropped them, fixed after this batch)"
     }
   ],
   "files": {
@@ -1208,6 +1385,20 @@
       "model": "claude-haiku-4-5-20251001",
       "status": "invalid",
       "note": "n=1 smoke proving the new gate_armed/gate_blocks columns land end to end; one arm, no comparison, excluded from every aggregate"
+    },
+    "20260905-165001.91263.jsonl": {
+      "file": "20260905-165001.91263.jsonl",
+      "engine": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "status": "valid",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (10 per arm; first fixture whose reported symptom is one of two instances)"
+    },
+    "20260905-175047.42839.jsonl": {
+      "file": "20260905-175047.42839.jsonl",
+      "engine": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "status": "valid",
+      "note": "vstack vs gstack vs pstack at v1.73.1, paired, gate_bites (40 per arm requested; 116 of 120 rows -- 4 runs returned no JSON and the row writer dropped them, fixed after this batch)"
     }
   }
 }
