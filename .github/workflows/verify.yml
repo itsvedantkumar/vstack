@@ -45,6 +45,12 @@ env:
   # the slowest shard, well inside the ceiling check 58 derives.
   FALSIFY_SHARDS: "8"
 
+# Least privilege by default. Every job here reads the tree and reports; none writes to the
+# repository, so the token they get should not be able to. A job that needs more declares it
+# itself. zizmor flagged the absence as excessive-permissions on 2026-09-06.
+permissions:
+  contents: read
+
 jobs:
   # --- verify-core: everything the old monolithic `verify` job did, MINUS the falsifiability
   # sweep -- which is now sharded below (falsify-plan / falsify / falsify-reconcile) and joined
@@ -62,6 +68,7 @@ jobs:
       # the one machine that gates every push.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # The gate needs jq for the JSON checks and the install dry run. shellcheck backs check 29,
@@ -238,6 +245,8 @@ jobs:
       count: ${{ steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
@@ -321,6 +330,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install jq and shellcheck
@@ -362,12 +372,13 @@ jobs:
       - name: Falsify this shard's rows (VSTACK_FALSIFY_ROWS scoped)
         env:
           VSTACK_FALSIFY_ROWS: ${{ matrix.ids }}
+          SHARD: ${{ matrix.shard }}
         run: |
           [ -n "${VSTACK_FALSIFY_ROWS:-}" ] || {
-            echo "::error::shard ${{ matrix.shard }} was assigned no ids -- refusing to run gate-falsifiability.sh unscoped"
+            echo "::error::shard $SHARD was assigned no ids -- refusing to run gate-falsifiability.sh unscoped"
             exit 1
           }
-          echo "shard ${{ matrix.shard }}: $VSTACK_FALSIFY_ROWS"
+          echo "shard $SHARD: $VSTACK_FALSIFY_ROWS"
           # Redirected, not piped into tee: this workflow's default shell is `bash -e` with no
           # pipefail (see the "Run the verification gate" step on the macOS/Alpine jobs below
           # for the measured proof), so a pipe here would let a red gate-falsifiability.sh exit
@@ -378,11 +389,13 @@ jobs:
           exit "$rc"
 
       - name: No unexpected skips in this shard (only row 24's no-tags skip is approved)
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           bad=$(/usr/bin/grep -E '^(ok|FAIL|skip)[[:space:]]+check ' "$RUNNER_TEMP/falsify-shard.txt" \
                 | /usr/bin/grep '^skip' | /usr/bin/grep -v '^skip[[:space:]]*check 24 ' || true)
           if [ -n "$bad" ]; then
-            echo "::error::unexpected skip(s) in shard ${{ matrix.shard }} (row 19 needs the CLI installed above; nothing else is expected to skip):"
+            echo "::error::unexpected skip(s) in shard $SHARD (row 19 needs the CLI installed above; nothing else is expected to skip):"
             echo "$bad"
             exit 1
           fi
@@ -390,6 +403,7 @@ jobs:
       - name: Record + sanity-check the ids this shard actually ran
         env:
           VSTACK_FALSIFY_ROWS: ${{ matrix.ids }}
+          SHARD: ${{ matrix.shard }}
         run: |
           set -eu
           /usr/bin/grep -E '^(ok|FAIL|skip)[[:space:]]+check ' "$RUNNER_TEMP/falsify-shard.txt" \
@@ -398,10 +412,10 @@ jobs:
           want=$(printf '%s\n' $VSTACK_FALSIFY_ROWS | sort -u | wc -l | tr -d ' ')
           got=$(wc -l < "$RUNNER_TEMP/ran-ids.txt" | tr -d ' ')
           if [ "$got" != "$want" ]; then
-            echo "::error::shard ${{ matrix.shard }} was assigned $want id(s) but the gate's own output names $got of them -- a row landed nowhere the accounting footer would catch, or landed twice"
+            echo "::error::shard $SHARD was assigned $want id(s) but the gate's own output names $got of them -- a row landed nowhere the accounting footer would catch, or landed twice"
             exit 1
           fi
-          echo "ok  shard ${{ matrix.shard }}: $got id(s) confirmed in the gate's own output"
+          echo "ok  shard $SHARD: $got id(s) confirmed in the gate's own output"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -428,6 +442,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Every shard (and the plan that built them) succeeded
         run: |
@@ -532,6 +548,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install this exact commit inside three foreign container images
         env:
@@ -590,6 +608,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
@@ -726,6 +746,7 @@ jobs:
       # and was really just this job never asking for the tags it needed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Install matrix on macOS
@@ -775,7 +796,10 @@ jobs:
   # image. Nothing else in this workflow would catch a GNU-ism.
   install-alpine:
     runs-on: ubuntu-latest
-    container: alpine:latest
+    # Pinned by digest, not by tag. alpine:latest is a moving target and this job is the one
+    # place CI runs on busybox, so a silent base change here changes what the gate is tested
+    # against. Digest resolved 2026-09-06; bump it deliberately.
+    container: alpine:latest@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
     steps:
       # BusyBox on purpose. This lane's whole reason to exist is that Alpine ships BusyBox
       # applets rather than GNU coreutils, and `apk add coreutils grep sed findutils` -- which
@@ -817,6 +841,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # The container runs as root against a checkout owned by another uid, so git refuses to
