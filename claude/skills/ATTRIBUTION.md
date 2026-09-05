@@ -98,7 +98,12 @@ skills: this bundle targets Claude Code and nothing else.
 | `vercel-deploy` | The `vercel` CLI does the same work with fewer tokens. |
 | `spaceship`, `security-threat-model` | Not used. |
 
-## Original (2)
+## Original (3)
+
+`whitebox-pentest` — whitebox security engagement: threat model, then every scanner the machine
+has via `.claude/whitebox-audit.sh`, then triage by reachability, a working exploit per finding,
+and a root-cause fix. Original text. The engine drives third-party scanners (gitleaks, semgrep,
+trivy and the rest) as external binaries; it vendors none of them, so their licences stay theirs.
 
 `ui-iterate` — screenshot and critique cycle for UI files.
 

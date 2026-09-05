@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.73.1",
+    "version": "1.74.0",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -145,7 +145,7 @@
       "dir": "claude/skills",
       "pattern": "*/SKILL.md",
       "kind": "directory",
-      "count": 28,
+      "count": 29,
       "floor": 18,
       "floor_reason": "claude/skills/ATTRIBUTION.md states that eighteen of the shipped skills are ported from pstack. A total below eighteen makes that section arithmetically impossible, so 18 is the lowest number at which the shipped documentation is still self-consistent.",
       "lanes": [
@@ -181,6 +181,7 @@
         "typescript-best-practices",
         "ui-iterate",
         "unslop",
+        "whitebox-pentest",
         "writing-plans"
       ],
       "provenance": {
@@ -245,7 +246,8 @@
           "upstream": "this repository",
           "skills": [
             "component-registry",
-            "ui-iterate"
+            "ui-iterate",
+            "whitebox-pentest"
           ]
         }
       }
@@ -735,7 +737,7 @@
     },
     "files": {
       "rule": "Ownership by receipt first, byte-identity second.",
-      "receipt": "$HOME/.config/agents/vstack-installed — install.sh appends every path it writes; survives a version change, where content comparison cannot.",
+      "receipt": "$HOME/.config/agents/vstack-installed \u2014 install.sh appends every path it writes; survives a version change, where content comparison cannot.",
       "byte_identity_fallback": "For a machine with no receipt yet, a target byte-identical to the repo file about to overwrite it is treated as vstack's.",
       "stated_trade": "A user file whose bytes exactly equal vstack's is indistinguishable from vstack's and is treated as vstack's, so uninstall deletes it. The alternative loses the ability to uninstall at all.",
       "uninstall_rules": [
@@ -773,7 +775,7 @@
   "verification": {
     "gate": {
       "command": "./.claude/verify.sh",
-      "declared_checks": 66,
+      "declared_checks": 67,
       "check_ids": [
         "0",
         "1",
@@ -840,7 +842,8 @@
         "62",
         "63",
         "64",
-        "65"
+        "65",
+        "66"
       ],
       "accounting_rule": "ran + skipped must equal declared, or the gate fails. A check wrapped in a conditional with no else reports nothing and used to leave no trace.",
       "offline": true,
