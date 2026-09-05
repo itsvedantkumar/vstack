@@ -102,7 +102,7 @@ From `tests/description-collision.sh`. No model calls.
 
 | | corpus score | hard-fail pairs |
 |---|---|---|
-| unedited (28 skills) | 23 | none |
+| unedited (the 28-skill tree of that day) | 23 | none |
 | with the four rewrites | 13 | none |
 
 The 10-point drop is exactly the two overlaps the ordinal framing created:

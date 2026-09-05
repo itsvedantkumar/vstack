@@ -5,7 +5,7 @@ Two suites, with opposite constraints.
 `gate-falsifiability.sh` runs offline and CI runs it on every push. It proves
 `.claude/verify.sh` can actually fail. It is also the slowest thing in this repository: every row
 breaks one file, runs the WHOLE gate to see which check goes red, and restores, so the cost is
-O(rows x checks). At 117 falsifiability rows and a ~84s gate that is over two hours serially.
+O(rows x checks). At 120 falsifiability rows and a ~84s gate that is over two hours serially.
 Run `falsify-parallel.sh` instead, the same sweep across isolated clones: about 19 minutes on
 CI's seven runners, 48 minutes locally at 103 rows on an M-series Mac (measured 2026-09-01, seven
 shards contending for one machine's cores).
@@ -683,7 +683,7 @@ the restore path would delete the only backup after failing to use it.
 `dispatch-fleet.sh` measures the 54-fixture set in `~/vstack-dispatch/` — recall, precision,
 `AMBIGUOUS`/`CHAIN` splits and paraphrase delta, each scored separately. It is broader than
 `auto-trigger.sh` and answers a different question: not "does this one situation still route
-there" but "does a library of 28 skills compete with itself." Samples are non-retrying. Real
+there" but "does a library of this size compete with itself." Samples are non-retrying. Real
 calls sit behind a confirmation gate; the file header carries the sample definition and the
 exit-code contract.
 

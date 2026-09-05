@@ -5163,6 +5163,84 @@ else
   skip "$c65_lbl" "jq or git not installed"
 fi
 
+# --- 66. the deep security lane refuses to call a repository clean when nothing scanned it ------
+# claude/whitebox-audit.sh is the opposite trade from security-scan.sh: minutes instead of
+# seconds, every ecosystem instead of five tools, and -- the part this check exists for -- exit 2
+# instead of exit 0 when no scanner was installed. That inversion is the whole reason the file is
+# safe to ship. A deep audit that prints "CLEAN" on a machine with no scanners is a false
+# assurance with a timestamp on it, and it is the most dangerous artefact in this repository,
+# because a human reads the word and stops looking.
+#
+# Three lanes in a throwaway git repo, never in this one: the answer here depends on which
+# scanners this machine happens to have, so a run on the author's laptop and a run in CI would be
+# testing two different scripts.
+#   66a  PATH without any scanner  -> exit 2, output says NOT MEASURED
+#   66b  a stub scanner that finds -> exit 1, output says FINDINGS
+#   66c  a stub scanner that is clean -> exit 0, output says CLEAN
+# 66a alone passes for a script that can only ever refuse; 66c alone passes for one that can only
+# ever agree. Both directions, or neither proves anything.
+c66_lbl="the deep security lane refuses to report clean when nothing scanned"
+c66_sh="claude/whitebox-audit.sh"
+if [ ! -f "$c66_sh" ]; then
+  bad "$c66_lbl" "$c66_sh is missing, so overlay.sh writes a .claude/whitebox-audit.sh that does not exist here"
+elif ! command -v git >/dev/null 2>&1; then
+  skip "$c66_lbl" "git not installed"
+else
+  c66_errs=""
+  c66_mode=$(git ls-files -s "$c66_sh" 2>/dev/null | awk '{print $1}')
+  [ "$c66_mode" = "100755" ] \
+    || c66_errs="$c66_errs\n$c66_sh is ${c66_mode:-not tracked by git}, not mode 100755; a stranger's clone gets a file it cannot execute"
+
+  c66_d=$(cd "$(mktemp -d)" && pwd -P)
+  c66_bin="$c66_d/bin"
+  mkdir -p "$c66_d/repo" "$c66_bin"
+  ( cd "$c66_d/repo" && git init -q . \
+    && printf 'print("hello")\n' > ok.py \
+    && git add -A && git -c user.email=t@t -c user.name=t commit -qm seed ) >/dev/null 2>&1
+  cp "$c66_sh" "$c66_d/whitebox-audit.sh"; chmod 755 "$c66_d/whitebox-audit.sh"
+
+  # Lane 66a: nothing installed. /usr/bin:/bin still has git, date, mktemp -- what the script
+  # needs to run at all -- and no scanner whatsoever.
+  c66_a=$(cd "$c66_d/repo" && env PATH=/usr/bin:/bin bash "$c66_d/whitebox-audit.sh" --quiet --out "$c66_d/out-a" 2>&1); c66_ra=$?
+  [ "$c66_ra" -eq 2 ] \
+    || c66_errs="$c66_errs\nwith no scanner on PATH the deep lane exited $c66_ra, not 2 -- any other code is read as a verdict about the code, and 0 would be a fake green with a report attached"
+  grep -q "NOT MEASURED" <<<"$c66_a" \
+    || c66_errs="$c66_errs\nwith no scanner on PATH the output does not contain NOT MEASURED, so a reader is given a number of skips and left to infer the verdict"
+
+  # Lane 66b: a stub gitleaks that reports a finding. Exit 1 is gitleaks' finding code, which the
+  # script must map to FINDINGS rather than to an error.
+  printf '#!/bin/sh\necho "stub: leak found"\nexit 1\n' > "$c66_bin/gitleaks"
+  chmod 755 "$c66_bin/gitleaks"
+  c66_b=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --only gitleaks --out "$c66_d/out-b" 2>&1); c66_rb=$?
+  [ "$c66_rb" -eq 1 ] \
+    || c66_errs="$c66_errs\na scanner reporting a finding produced exit $c66_rb, not 1 -- the finding was not counted"
+  grep -q "FINDING gitleaks" <<<"$c66_b" \
+    || c66_errs="$c66_errs\na scanner reporting a finding did not produce a FINDING line naming it"
+  [ -s "$c66_d/out-b/findings.jsonl" ] \
+    || c66_errs="$c66_errs\nfindings.jsonl is empty after a finding, so the machine-readable half of this lane records nothing for triage"
+
+  # Lane 66c: the same stub, clean. This is the direction 66a cannot see.
+  printf '#!/bin/sh\nexit 0\n' > "$c66_bin/gitleaks"
+  chmod 755 "$c66_bin/gitleaks"
+  c66_c=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --only gitleaks --out "$c66_d/out-c" 2>&1); c66_rc=$?
+  [ "$c66_rc" -eq 0 ] \
+    || c66_errs="$c66_errs\na clean scanner produced exit $c66_rc, not 0 -- the lane cannot distinguish clean from broken"
+  grep -q "CLEAN" <<<"$c66_c" \
+    || c66_errs="$c66_errs\na clean scanner did not produce a CLEAN line"
+
+  # The active-attack tools must stay behind two flags. One flag is a typo away from a crime.
+  c66_dast=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --dast http://127.0.0.1:1 --out "$c66_d/out-d" 2>&1)
+  grep -q "refusing to send traffic" <<<"$c66_dast" \
+    || c66_errs="$c66_errs\n--dast without --i-own-this-target did not refuse; the attack tools are one typo from a target nobody authorised"
+
+  rm -rf "$c66_d"
+  if [ -z "$c66_errs" ]; then
+    ok "$c66_lbl (3 lanes: no scanner -> 2, finding -> 1, clean -> 0; dast refused without ownership)"
+  else
+    bad "$c66_lbl" "$(printf '%b' "$c66_errs")"
+  fi
+fi
+
 # Accounting. Every declared check must have reported either a result or a skip. A check
 # that throws a shell error mid-body, or is wrapped in a conditional with no else, silently
 # reports nothing — and used to leave no trace in the output at all. Now it fails the run.

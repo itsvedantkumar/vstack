@@ -80,6 +80,7 @@ if [ "$CHECK" -eq 1 ]; then
   check_unconditional ".claude/hooks/policy.md" "$SRC/claude/CLAUDE.md" "$DEST/.claude/hooks/policy.md"
   check_unconditional ".claude/statusline.sh" "$SRC/claude/statusline.sh" "$DEST/.claude/statusline.sh"
   check_unconditional ".claude/security-scan.sh" "$SRC/claude/security-scan.sh" "$DEST/.claude/security-scan.sh"
+  check_unconditional ".claude/whitebox-audit.sh" "$SRC/claude/whitebox-audit.sh" "$DEST/.claude/whitebox-audit.sh"
 
   # Skills carry references/ and scripts/ subtrees and overlay replaces each whole (rm -rf then
   # cp -R), so a single-file cmp is not enough — diff -rq walks the tree the same way the write
@@ -258,6 +259,10 @@ echo "wrote   .claude/statusline.sh"
 # that is what .gitleaks.toml and the workflow file are for.
 cp "$SRC/claude/security-scan.sh" "$DEST/.claude/security-scan.sh" && chmod 755 "$DEST/.claude/security-scan.sh"
 echo "wrote   .claude/security-scan.sh"
+# The deep lane, same reasoning. It is NOT wired into verify.sh: it takes minutes, and a gate that
+# takes minutes is a gate people disable. The whitebox-pentest skill drives it on demand.
+cp "$SRC/claude/whitebox-audit.sh" "$DEST/.claude/whitebox-audit.sh" && chmod 755 "$DEST/.claude/whitebox-audit.sh"
+echo "wrote   .claude/whitebox-audit.sh"
 if command -v jq >/dev/null; then
   tmp=$(mktemp)
   jq '.statusLine = {type:"command", command:"\"$CLAUDE_PROJECT_DIR/.claude/statusline.sh\"", padding:0, refreshInterval:3}' \

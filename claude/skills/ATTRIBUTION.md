@@ -1,6 +1,6 @@
 # Skill attribution
 
-vstack ships 28 skills from six sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 2 from Vercel Labs, 1 from Matt Pocock, and 2 original to this repo.
+vstack ships 29 skills from six sources: 18 from pstack, 4 from Superpowers, 1 from Impeccable, 2 from Vercel Labs, 1 from Matt Pocock, and 2 original to this repo.
 
 Every skill in this repo is active. Skills that became redundant were deleted, not disabled.
 

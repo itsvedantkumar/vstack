@@ -4,6 +4,37 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.74.0 — 2026-09-05
+
+- **A deep security lane, and a skill that drives it.** `claude/whitebox-audit.sh` runs every
+  scanner installed on the machine that applies to the repository: gitleaks and trufflehog and
+  detect-secrets for secrets (working tree and full git history, because a key deleted in the
+  commit that "removed" it is still valid), semgrep and CodeQL for taint, bandit and ruff and
+  pip-audit for Python, npm audit and eslint and retire for JS, gosec and govulncheck and
+  staticcheck for Go, cargo-audit and cargo-deny and clippy for Rust, brakeman and bundler-audit
+  for Ruby, phpstan and psalm for PHP, shellcheck for shell, hadolint and trivy and grype for
+  containers, checkov and terrascan and kics for IaC, zizmor and actionlint for Actions,
+  osv-scanner for dependencies, syft for an SBOM. Every missing tool is skipped by name with its
+  install command; nothing is silently absent.
+- **It exits 2 when nothing ran.** This is the inversion that makes it safe to ship.
+  `security-scan.sh` exits 0 with every scanner missing, deliberately, so the Stop-hook gate stays
+  green on a machine without scanners. A deep audit that does the same thing prints CLEAN over an
+  unexamined repository, which is a false assurance with a timestamp on it. Check 66 proves all
+  three directions in a throwaway repo: no scanner exits 2 and says NOT MEASURED, a stub scanner
+  with a finding exits 1, the same stub clean exits 0. Rows 66, 66b and 66c break each one.
+- **The active-attack tools need two flags.** nuclei, nikto and ZAP run only with `--dast URL`
+  *and* `--i-own-this-target`, and check 66 asserts the refusal.
+- **`whitebox-pentest` skill.** Threat model first, then the engine, then triage by reachability
+  rather than by whatever severity the rule author picked, then a working exploit per finding
+  before any fix, then fix the root cause and re-run. It names the classes no scanner finds
+  (per-object authorisation, auth edges, state races, SSRF, injection past the ORM, secret
+  lifetime, supply chain, DoS by design, agent and LLM boundaries), because that is where the
+  real findings are.
+- Two lanes were wired to exit codes their tools do not use: `detect-secrets scan` always exits 0
+  and needed its results read instead, and `shellcheck -S warning` cannot see SC2086 or SC2046,
+  the shell's own injection primitives, which are INFO severity. Both measured on a fixture that
+  was green before the fix.
+
 ## 1.73.1 — 2026-09-05
 
 - **A benchmark fixture that separates the arms.** `traps/gated_report_quiet` ships a real

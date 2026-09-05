@@ -76,7 +76,7 @@ the page.
 | cost per task, Opus 5 (paired n=10), vstack as baseline | 1.00x | within noise | 1.30x |
 | turns per task, Opus 5 (paired n=10) | 4.4 | 4.9 | 5.5 |
 | Stop hook that refuses a red tree | yes, always on | no | no |
-| skills installed | 28 | 54 | 52 |
+| skills installed | 29 | 54 | 52 |
 
 Read that honestly: on a task small enough to fit in one prompt, a frontier model does not need
 this configuration to get the answer right, and forcing it to delegate cost more than it saved,
@@ -143,8 +143,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.73.1/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.73.1 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.74.0/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.74.0 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -197,7 +197,7 @@ Two directory pairs differ only by a leading dot, and the difference is the whol
 | path | what it is |
 |---|---|
 | `claude/` | the **shipped payload** — skills, subagents, commands, hooks, installed to `~/.claude/` |
-| `.claude/verify.sh` | **this repository's own gate**, 66 checks; not shipped to anyone |
+| `.claude/verify.sh` | **this repository's own gate**, 67 checks; not shipped to anyone |
 | `conductor/` | payload copied to `~/.conductor/` |
 | `.conductor/` | this repository's own workspace config |
 | `tests/` | the suites: the falsifiability harness, the install matrix, trigger and baseline tests |
@@ -218,7 +218,7 @@ checks the right one; see [Day to day](#day-to-day).
 
 | Component | Count | Path |
 |---|---|---|
-| Skills | 28 | `~/.claude/skills/` |
+| Skills | 29 | `~/.claude/skills/` |
 | Subagents | 14 | `~/.claude/agents/` |
 | Commands | 15 | `~/.claude/commands/` |
 | Hooks | 9 | `~/.claude/hooks/` |
@@ -240,7 +240,7 @@ second time. `./uninstall.sh` removes them. The plugin lane touches neither file
 
 | Component | Count | Path |
 |---|---|---|
-| Skills | 28 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
+| Skills | 29 | `~/.claude/plugins/cache/vstack/vstack/<version>/skills/` |
 | Subagents | 14 | `~/.claude/plugins/cache/vstack/vstack/<version>/agents/` |
 | Commands | 15 | `~/.claude/plugins/cache/vstack/vstack/<version>/commands/` |
 | Hooks | 3 (2 routing, 1 gating) | `claude/hooks/hooks.json`, run from the plugin cache |
@@ -260,6 +260,7 @@ only lane a cloud sandbox without your home directory can reach):
 | Source | Lands at | Condition |
 |---|---|---|
 | `claude/security-scan.sh` | `.claude/security-scan.sh` | always overwritten |
+| `claude/whitebox-audit.sh` | `.claude/whitebox-audit.sh` | always overwritten |
 | `claude/security.yml.tmpl` | `.github/workflows/security.yml` | seeded if absent |
 | `claude/dependabot.yml.tmpl` | `.github/dependabot.yml` | seeded if absent |
 
@@ -288,7 +289,7 @@ reaches for `unslop`, reviewing TypeScript reaches for `typescript-best-practice
 
 ## Checks that can fail
 
-The gate is 66 checks (this number moves as checks are added; check 12 fails if this prose
+The gate is 67 checks (this number moves as checks are added; check 12 fails if this prose
 and the tree disagree, so it stays honest by construction rather than by discipline).
 `tests/gate-falsifiability.sh` breaks the repository once per check, at
 least once and more where a check can fail in more than one way, requires the gate to go red
@@ -297,13 +298,13 @@ naming that check, restores the tree byte for byte, and fails if anything was le
 can fail.
 
 ```bash
-./.claude/verify.sh                  # 66 checks
+./.claude/verify.sh                  # 67 checks
 VSTACK_FALSIFY_ROWS=27 ./tests/gate-falsifiability.sh          # one row
 git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiability.sh
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 117 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 120 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
 `./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
 CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.

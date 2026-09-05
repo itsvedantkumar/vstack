@@ -39,7 +39,11 @@ env:
   # is a join, so anything timing this workflow has to read the run, not that job. Check 58 of
   # .claude/verify.sh derives release.yml's REQUIRE_CHECKS_WAIT_SECONDS floor from this shard
   # count and the row count, so lowering FALSIFY_SHARDS without raising that ceiling goes red.
-  FALSIFY_SHARDS: "7"
+  # 8 since 1.74.0. The sweep reached 120 rows when check 66 landed, and at 7 shards the slowest
+  # shard (21 rows) needs a ceiling above the 3600s release.yml declares. Sharding one further
+  # keeps the wall clock down instead of buying the same result with a longer wait: 15 rows on
+  # the slowest shard, well inside the ceiling check 58 derives.
+  FALSIFY_SHARDS: "8"
 
 jobs:
   # --- verify-core: everything the old monolithic `verify` job did, MINUS the falsifiability
