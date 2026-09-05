@@ -30,6 +30,12 @@ for f in runs/*.jsonl; do jq -c --arg f "${f#runs/}" '. + {file:$f}' "$f"; done 
       cost_total: ((map(.cost_usd // 0) | add) * 100 | round / 100),
       wall_s: ((map(.duration_ms // 0) | add / length / 1000) | round),
       turns: ((map(.turns // 0) | add / length * 10 | round) / 10),
+      # Per-check resolution, for fixtures that plant more than one defect. vuln_hunt ships four
+      # vulnerabilities and four held-out checks, where green/red alone scores "fixed three of
+      # four" and "fixed none" identically. checks_total is a max, not a mean: it is a property of
+      # the fixture, and a mean would quietly hide a run whose checks did not all execute.
+      checks_failed_mean: ((map(.checks_failed // 0) | add / length * 100 | round) / 100),
+      checks_total: (map(.checks_total // 0) | max),
       files: (map(.file) | unique) };
   [ .[] | .file as $f
     | select($idx[$f].status == "valid")
@@ -56,3 +62,12 @@ case "$FMT" in
 esac
 printf '| engine | model | fixture | arm | n | held-out green | said DONE | false completions | spawned | mean cost | mean wall | mean turns |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n'
 jq -r '.rows[] | "| \(.engine) | \(.model) | \(.fixture) | \(.arm) | \(.n) | \(.green) | \(.said_done) | \(.false_completion) | \(.spawned) | $\(.cost_mean) | \(.wall_s) s | \(.turns) |"' /tmp/showcase-summary.json
+
+# Multi-defect fixtures get their own table. A fixture with one held-out check says nothing here
+# that the green column does not already say, so printing this for all of them would be padding.
+if jq -e '[.rows[] | select(.checks_total > 1)] | length > 0' /tmp/showcase-summary.json >/dev/null; then
+  echo
+  echo "| model | fixture | arm | n | mean defects still open | of |"
+  echo "|---|---|---|---|---|---|"
+  jq -r '.rows[] | select(.checks_total > 1) | "| \(.model) | \(.fixture) | \(.arm) | \(.n) | \(.checks_failed_mean) | \(.checks_total) |"' /tmp/showcase-summary.json
+fi
