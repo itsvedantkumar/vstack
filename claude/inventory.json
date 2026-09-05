@@ -11,8 +11,8 @@
     "repository": "https://github.com/itsvedantkumar/vstack"
   },
   "derived_at": {
-    "head": "197fe160ec7169ba340b0cea253deaa670f9f6e9",
-    "payload_digest": "80dd85e9cbc946dad4f988d15d782795c8f0a4d86e59654ec7678b26b450b065",
+    "head": "1e3b8116baa35a2086ff6bde6d0aae89588595f5",
+    "payload_digest": "35b4fdfcf8c8ff98869742106134877b13fb357f7c65e123af329aca20f1b816",
     "digest_recipe_source": "tests/inventory-contract.sh:payload_digest_compute()",
     "digest_recipe_note": "payload_digest hashes the working-tree BYTES of every payload file -- tracked and untracked-but-not-ignored -- together with its executable bit and path, then hashes that listing. Recompute it with `tests/inventory-contract.sh --print-digest` and nothing else: typing a recipe by hand into a shell is a second implementation. This field used to hold the recipe as an executable string that the validator eval'd, on the reasoning that the two could then never disagree. That made the artifact its own oracle -- editing the recipe and the digest together passed while measuring nothing -- and it also hashed index blob ids plus `git status --porcelain`, which names files and status letters but never their contents, so two different unstaged edits to the same path produced the same digest. Both were confirmed by running them.",
     "staleness_is_the_signal": "This file is a snapshot. When the payload digest no longer matches, the validator regenerates every derived field and diffs. A mismatch is the intended failure, not a maintenance chore: it means a component moved and at least one consumer has not been told.",
@@ -737,7 +737,7 @@
     },
     "files": {
       "rule": "Ownership by receipt first, byte-identity second.",
-      "receipt": "$HOME/.config/agents/vstack-installed \u2014 install.sh appends every path it writes; survives a version change, where content comparison cannot.",
+      "receipt": "$HOME/.config/agents/vstack-installed — install.sh appends every path it writes; survives a version change, where content comparison cannot.",
       "byte_identity_fallback": "For a machine with no receipt yet, a target byte-identical to the repo file about to overwrite it is treated as vstack's.",
       "stated_trade": "A user file whose bytes exactly equal vstack's is indistinguishable from vstack's and is treated as vstack's, so uninstall deletes it. The alternative loses the ability to uninstall at all.",
       "uninstall_rules": [
