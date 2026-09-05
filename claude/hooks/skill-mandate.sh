@@ -207,6 +207,7 @@ _read_wcnt "$cnt_file.unslop"       "$cnt_file.unslop-ts"       "$now_d" "$SKILL
 _read_wcnt "$cnt_file.typescript"   "$cnt_file.typescript-ts"   "$now_d" "$SKILL_RESET_SECS"; cnt_typescript=$_rc
 _read_wcnt "$cnt_file.proveitworks" "$cnt_file.proveitworks-ts" "$now_d" "$SKILL_RESET_SECS"; cnt_proveitworks=$_rc
 _read_wcnt "$cnt_file.register"     "$cnt_file.register-ts"     "$now_d" "$SKILL_RESET_SECS"; cnt_register=$_rc
+_read_wcnt "$cnt_file.whitebox"     "$cnt_file.whitebox-ts"     "$now_d" "$SKILL_RESET_SECS"; cnt_whitebox=$_rc
 _read_wcnt "$cnt_file.delegate-naming" "$cnt_file.delegate-naming-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_naming=$_rc
 _read_wcnt "$cnt_file.delegate-swarm" "$cnt_file.delegate-swarm-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_swarm=$_rc
 _read_wcnt "$cnt_file.delegate-serial" "$cnt_file.delegate-serial-ts" "$now_d" "$DELEGATE_RESET_SECS"; cnt_serial=$_rc
@@ -215,6 +216,7 @@ eval_unslop=1;       [ "$cnt_unslop" -ge 2 ]       && eval_unslop=0
 eval_typescript=1;   [ "$cnt_typescript" -ge 2 ]   && eval_typescript=0
 eval_proveitworks=1; [ "$cnt_proveitworks" -ge 2 ] && eval_proveitworks=0
 eval_register=1;     [ "$cnt_register" -ge 2 ]     && eval_register=0
+eval_whitebox=1;     [ "$cnt_whitebox" -ge 2 ]     && eval_whitebox=0
 eval_naming=1;       [ "$cnt_naming" -ge 2 ]       && eval_naming=0
 eval_swarm=1;        [ "$cnt_swarm" -ge 2 ]        && eval_swarm=0
 eval_serial=1;       [ "$cnt_serial" -ge 2 ]       && eval_serial=0
@@ -243,7 +245,7 @@ fi
 # turn_json/prove-it-works cost gate further down, never for deciding whether an individual
 # mandate contributes to $unmet -- each mandate's own eval_* flag alone decides that now.
 skill_eval=1
-[ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && [ "$eval_register" = 0 ] && skill_eval=0
+[ "$eval_unslop" = 0 ] && [ "$eval_typescript" = 0 ] && [ "$eval_proveitworks" = 0 ] && [ "$eval_register" = 0 ] && [ "$eval_whitebox" = 0 ] && skill_eval=0
 deleg_eval=1
 [ "$eval_naming" = 0 ] && [ "$eval_swarm" = 0 ] && [ "$eval_serial" = 0 ] && deleg_eval=0
 
@@ -278,6 +280,7 @@ fi
 # bookkeeping further down, unchanged in that one role.
 hit_unslop=0
 hit_typescript=0
+hit_whitebox=0
 hit_proveitworks=0
 hit_register=0
 hit_naming=0
@@ -550,6 +553,31 @@ if [ "$eval_typescript" = 1 ] && [ -n "$ts" ] && ! fired typescript-best-practic
   unmet="$unmet
   typescript-best-practices -- you wrote TypeScript and it never ran: $(printf '%s' "$ts" | tr '\n' ' ')"
   hit_typescript=1
+fi
+
+# Security-sensitive code. The situation is not "you touched code" -- it is "you changed a file
+# whose job is to decide who may do what, or to move money". Both are decidable from the path,
+# and neither is a matter of taste: an audit is the right answer to that write-set every time,
+# which is the bar this file sets for a mandate rather than a digest line.
+#
+# Measured before this existed. On tests/evals/showcase/traps/vuln_hunt -- four planted
+# vulnerabilities, a ticket that reports one -- fifteen vstack runs left 2.80 of 4 open, behind
+# both other harnesses, and ran the audit engine zero times. A routing line in the SessionStart
+# digest moved that to 2.20 without the skill ever firing. The digest asks; this is the half that
+# does not take silence for an answer.
+#
+# Satisfied by the skill OR by the engine: an agent that ran .claude/whitebox-audit.sh directly
+# did the work, and striking it for skipping the wrapper would teach it to invoke the skill and
+# then do nothing.
+sec=$(printf '%s\n' "$paths" \
+      | grep -iE '(auth|login|session|token|password|passwd|credential|permission|authoriz|/acl|role|payment|billing|invoice|charge|checkout|webhook)' \
+      | grep -viE '(node_modules|/(dist|build|vendor)/|\.(md|mdx|txt|lock)$|(^|/)(tests?|spec|__tests__)/)' | head -5)
+if [ "$eval_whitebox" = 1 ] && [ -n "$sec" ] \
+   && ! fired whitebox-pentest \
+   && ! printf '%s' "${bash_cmds:-}" | grep -q 'whitebox-audit'; then
+  unmet="$unmet
+  whitebox-pentest -- you changed code that decides access or moves money and neither the skill nor .claude/whitebox-audit.sh ran: $(printf '%s' "$sec" | tr '\n' ' ')"
+  hit_whitebox=1
 fi
 
 # Breadth of the write-set: distinct parent directories AND distinct file extensions. These two
@@ -997,6 +1025,12 @@ if [ "$hit_typescript" = 1 ]; then
 elif [ "$eval_typescript" = 1 ]; then
   rm -f "$cnt_file.typescript" "$cnt_file.typescript-ts"
 fi
+if [ "$hit_whitebox" = 1 ]; then
+  echo $((cnt_whitebox + 1)) > "$cnt_file.whitebox"
+  date +%s > "$cnt_file.whitebox-ts" 2>/dev/null
+elif [ "$eval_whitebox" = 1 ]; then
+  rm -f "$cnt_file.whitebox" "$cnt_file.whitebox-ts"
+fi
 if [ "$hit_proveitworks" = 1 ]; then
   echo $((cnt_proveitworks + 1)) > "$cnt_file.proveitworks"
   date +%s > "$cnt_file.proveitworks-ts" 2>/dev/null
@@ -1068,6 +1102,9 @@ if [ "$hit_typescript" = 1 ]; then
 fi
 if [ "$hit_proveitworks" = 1 ]; then
   reason="$reason$(_strike_line prove-it-works "$((cnt_proveitworks + 1))"     "this session -- after 2, prove-it-works alone stops being enforced for the rest of the session (self-police from here).")"
+fi
+if [ "$hit_whitebox" = 1 ]; then
+  reason="$reason$(_strike_line whitebox-pentest "$((cnt_whitebox + 1))"     "this session -- after 2, whitebox-pentest alone stops being enforced for the rest of the session (self-police from here).")"
 fi
 if [ "$hit_register" = 1 ]; then
   reason="$reason$(_strike_line register "$((cnt_register + 1))"     "this session -- after 2, register alone stops being enforced for the rest of the session (self-police from here).")"

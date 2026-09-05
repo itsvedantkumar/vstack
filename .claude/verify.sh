@@ -1265,7 +1265,14 @@ if command -v jq >/dev/null; then
   [ "$_wc_short" = "$_wc_long" ] \
     || errs="$errs\npath invariance: normalized byte count disagreed by checkout path length and remote default branch ($_wc_short B at a short prefix on origin/main vs $_wc_long B at a long one on a long default branch) -- the normalization above is not honest until these agree"
 
-  chk "skills profile"         "$(probe SessionStart skills 1)"  512 2560
+  # 2816 since 1.74.1, up from 2560. The raise bought exactly one routing line, for the security
+  # situation, and it is the only line in that table with an A/B behind it: on the vuln_hunt
+  # fixture, 15 runs per arm on Haiku, adding it moved vstack from 2.80 of 4 planted
+  # vulnerabilities left open to 2.20, with nothing else changed. The alternative was to trim
+  # other lines to fit, which would have paid for a measured gain with an unmeasured loss --
+  # every other line's reach is unmeasured, so shortening one is a silent bet. Raise the cap when
+  # a line earns it, never to make room for a line nobody has tested.
+  chk "skills profile"         "$(probe SessionStart skills 1)"  512 2816
   # The README publishes these byte counts as the cost column of its comparison table. A number
   # in prose that nothing re-derives is a number that goes stale, which is the failure this repo
   # keeps finding in its own docs — so the published figures are read back and compared.
@@ -2972,8 +2979,9 @@ if command -v jq >/dev/null; then
     # invocation of $sm below, piped or not.
     export VSTACK_DELEGATION_LOG="$c40_log"
 
-    # Trips ALL FOUR skill-family mandates on every Stop: a prose write with no unslop, a .tsx
-    # edit with no typescript-best-practices, a turn that closes claiming done with no
+    # Trips ALL FIVE skill-family mandates on every Stop: a prose write with no unslop, a .tsx
+    # edit with no typescript-best-practices, an edit to a file that decides access with no
+    # whitebox-pentest and no audit engine, a turn that closes claiming done with no
     # Bash/Read/Task/Agent call to back it (prove-it-works), and a closing text that opens with
     # a banned register phrase ("Perfect."). One mandate is no longer enough, and this fixture
     # must grow a new trigger every time the skill family grows a mandate -- otherwise the
@@ -2990,10 +2998,10 @@ if command -v jq >/dev/null; then
     # trips one mandate would quietly stop testing the latch at all while still passing its two
     # dense-row assertions.
     #
-    # Each mandate's counter is CLEARED when it is evaluated and not hit, so all three have to
-    # trip on the same Stop to accumulate together. Verified against the real hook: Stops 1 and 2
-    # block and log dense rows, Stop 3 is silent and logs latched:true with all four counts null.
-    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}},{"type":"text","text":"Perfect. All done, the feature is complete and working."}]}}' \
+    # Each mandate's counter is CLEARED when it is evaluated and not hit, so every one of them has
+    # to trip on the same Stop to accumulate together. Verified against the real hook: Stops 1 and
+    # 2 block and log dense rows, Stop 3 is silent and logs latched:true with all four counts null.
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/App.tsx"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/x/auth.py"}},{"type":"text","text":"Perfect. All done, the feature is complete and working."}]}}' \
       > "$c40_transcript"
 
     c40_hit(){

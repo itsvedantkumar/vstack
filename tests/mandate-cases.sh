@@ -57,7 +57,7 @@
 #   invoke the hook at all, but this file does not).
 
 # shellcheck disable=SC2034  # read by callers that source this file (verify.sh check 27, tests/container-matrix.sh), not used within it
-MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12 13 14 15"
+MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12 13 14 15 16 17 18"
 
 # --- fixture records (shared building blocks, same literal shapes check 27 already proved) -------
 _MC_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
@@ -67,6 +67,12 @@ _MC_P='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Writ
 _MC_TA='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"running"}]}}'
 _MC_TB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"qa (BETH J-42)"}]}}'
 _MC_SW='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"swarm"}}]}}'
+# Security mandate: a path whose job is to decide access, the skill that answers it, and the
+# engine invoked directly. The last one exists because striking an agent that ran the audit but
+# skipped the wrapper would teach it to call the skill and then do nothing.
+_MC_SEC='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/src/auth.py"}}]}}'
+_MC_WB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"whitebox-pentest"}}]}}'
+_MC_WBSH='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":".claude/whitebox-audit.sh --deep"}}]}}'
 _MC_TWO='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP and GLOOTIE"}]}}'
 _MC_ON1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP"}]}}'
 _MC_ON2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"GLOOTIE"}]}}'
@@ -139,6 +145,9 @@ mandate_case_lines() {
     13) printf '%s\n' "$_MC_13" ;;
     14) printf '%s\n' "$_MC_14" ;;
     15) printf '%s\n' "$_MC_15" ;;
+    16) printf '%s\n' "$_MC_SEC" ;;
+    17) printf '%s\n' "$_MC_SEC" "$_MC_WB" ;;
+    18) printf '%s\n' "$_MC_SEC" "$_MC_WBSH" ;;
     *) return 1 ;;
   esac
 }
@@ -172,6 +181,9 @@ mandate_case_expect() {
     13) printf '%s\n' 'WARN:register strike 1/2: banned opener' ;;
     14) printf '%s\n' 'SILENT' ;;
     15) printf '%s\n' 'SILENT' ;;
+    16) printf '%s\n' 'BLOCK:whitebox-pentest' ;;
+    17) printf '%s\n' 'SILENT' ;;
+    18) printf '%s\n' 'SILENT' ;;
     *) return 1 ;;
   esac
 }
@@ -214,6 +226,9 @@ mandate_case_desc() {
     13) printf '%s\n' 'a turn opening with "Let me" did not trip the register mandate' ;;
     14) printf '%s\n' 'a line starting "Right-" (no boundary char after the opener) tripped register anyway' ;;
     15) printf '%s\n' 'a mid-line "Great," tripped register anyway (the line anchor was lost)' ;;
+    16) printf '%s\n' 'edited a file that decides access, never audited it' ;;
+    17) printf '%s\n' 'edited a file that decides access, ran the whitebox-pentest skill' ;;
+    18) printf '%s\n' 'edited a file that decides access, ran the audit engine directly' ;;
     *) return 1 ;;
   esac
 }

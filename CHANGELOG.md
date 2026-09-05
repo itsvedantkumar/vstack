@@ -28,6 +28,16 @@ a fixture.
   engine ran in 0 of 15 vstack runs, and vstack left more vulnerabilities open than either other
   arm while spending more turns and more money. A capability nothing points at is not a
   capability; it is overhead.
+- **The Stop gate now enforces it.** A routing line asks; the mandate is the half that does not
+  take silence for an answer. Change a file whose path says it decides access or moves money, end
+  the turn without either the `whitebox-pentest` skill or `.claude/whitebox-audit.sh`, and the
+  hook strikes — twice, then it self-disarms like every other mandate. Satisfied by the engine as
+  well as the skill, because striking an agent that ran the audit for skipping the wrapper would
+  teach it to invoke the skill and then do nothing. Three new cases in `tests/mandate-cases.sh`
+  (30 total) prove it in both directions, and the latch fixture in check 40 grew a fifth trigger.
+- The `skills profile` cap rose from 2560 B to 2816 B to fit the routing line. Written down at the
+  cap: it is the only line in that table with an A/B behind it, and the alternative — trimming
+  other lines to fit — would have paid for a measured gain with an unmeasured loss.
 - The history lane now writes a JSON report like every other lane; it was the one scanner whose
   findings could only be read as text.
 - `.gitleaks.toml`: the redaction-test fixtures in `.claude/verify.sh` are allowlisted by value,
