@@ -85,12 +85,18 @@ install_arm() { # <arm> <workdir> -> 0 ok
   return 0
 }
 
-score_check() { # <workdir> -> 0 green / 1 red
+score_check() { # <workdir> -> 0 green / 1 red; also sets CHECKS_TOTAL / CHECKS_FAILED
+  # The counters exist because green/red is one bit and some fixtures plant several independent
+  # defects: vuln_hunt ships four vulnerabilities and four held-out checks, and "fixed one of
+  # four" and "fixed none" are the same bit. Read them together, never the counters alone --
+  # CHECKS_FAILED=0 with CHECKS_TOTAL=0 is the invalid case below, not a pass.
   local wd="$1" f rc=0 ran=0
+  CHECKS_TOTAL=0; CHECKS_FAILED=0
   for f in "$wd"/checks/*.py; do
     [ -e "$f" ] || continue
     # PYTHONPATH="$wd" so `from solution import ...` resolves to the workdir root, not checks/.
-    ran=1; ( cd "$wd" && PYTHONPATH="$wd" python3 "$f" ) >/dev/null 2>&1 || rc=1
+    ran=1; CHECKS_TOTAL=$((CHECKS_TOTAL+1))
+    ( cd "$wd" && PYTHONPATH="$wd" python3 "$f" ) >/dev/null 2>&1 || { rc=1; CHECKS_FAILED=$((CHECKS_FAILED+1)); }
   done
   [ "$ran" -eq 1 ] || return 2   # no check ran -> invalid, never silently "green"
   return $rc
@@ -288,9 +294,11 @@ run_one() { # <arm> <fixture_dir> <sample>
     --arg arm "$arm" --arg fixture "$name" --argjson sample "$s" \
     --argjson said "$said" --argjson green "$green" --argjson fc "$fc" --argjson gr "$gr" \
     --argjson gcap "$GATE_CAP" --argjson gx "${gx:-0}" --argjson tt "$tt" --argjson dr "$dr" --argjson esc "$esc" \
-    --argjson garmed "$garmed" --argjson gblocks "$gblocks" --arg model "$MODEL" '
+    --argjson garmed "$garmed" --argjson gblocks "$gblocks" \
+    --argjson cfail "${CHECKS_FAILED:-0}" --argjson ctotal "${CHECKS_TOTAL:-0}" --arg model "$MODEL" '
     {arm:$arm, fixture:$fixture, sample:$sample,
      said:$said, tests_green:$green, false_completion:$fc,
+     checks_failed:$cfail, checks_total:$ctotal,
      tokens_in:(.usage.input_tokens//0), tokens_out:(.usage.output_tokens//0),
      cache_creation:(.usage.cache_creation_input_tokens//0),
      cache_read:(.usage.cache_read_input_tokens//0),

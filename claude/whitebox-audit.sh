@@ -158,6 +158,17 @@ run() { # <name> <cmd...>
 # for "found something". Tools disagree wildly: semgrep --error uses 1, npm audit uses 1, trivy
 # needs --exit-code 1 to say anything at all, and shellcheck uses 1 for both a finding and a
 # usage error. Passing the finding codes in per call is the only honest way to read them.
+# aborted: did this tool fail to run, rather than run and find something? Several scanners exit
+# with their finding code when they could not start at all -- trivy answers a failed vulnerability-DB
+# download with exit 1, the same code it uses for "found a CVE" -- so reading the code alone files
+# an infrastructure failure as a security finding and, worse, leaves the errored count at zero. That
+# is coverage loss reported as work done. Signatures only, and narrow ones: each is a line a tool
+# prints when it is giving up, none of them is a finding format.
+aborted() { # <raw_output_file>
+  [ -f "$1" ] || return 1
+  /usr/bin/grep -qE '(^|[[:space:]])(FATAL|Fatal error)([[:space:]]|$)|failed to download|error getting credentials|could not (connect|resolve|open)|panic: runtime error|Traceback \(most recent call last\)|command not found|no such host' "$1"
+}
+
 verdict() { # <name> <finding_codes_csv>
   local name="$1" codes="$2"
   local f="$OUT/raw/$name.txt"
@@ -165,6 +176,8 @@ verdict() { # <name> <finding_codes_csv>
     err "$name" "timed out after ${TIMEOUT_S}s"
   elif [ "$rc" -eq 0 ]; then
     ok "$name"
+  elif aborted "$f"; then
+    err "$name" "exit $rc but the output says it could not run, see raw/$name.txt"
   elif in_csv "$rc" "$codes"; then
     find_ "$name" "$(tail -20 "$f" 2>/dev/null)"
     printf '{"tool":"%s","status":"finding","rc":%s,"raw":"%s"}\n' "$name" "$rc" "raw/$name.txt" >> "$FINDINGS"
@@ -426,7 +439,7 @@ if wanted syft-sbom; then
     # Not a finding source. An SBOM is the artefact that makes tomorrow's CVE answerable for
     # today's build, which is why it runs even on a clean repo.
     run syft-sbom syft dir:. -o cyclonedx-json="$OUT/sbom.cyclonedx.json" -q
-    [ "$rc" -eq 0 ] && ok "syft-sbom (wrote sbom.cyclonedx.json)" || err syft-sbom "exit $rc"
+    if [ "$rc" -eq 0 ]; then ok "syft-sbom (wrote sbom.cyclonedx.json)"; else err syft-sbom "exit $rc"; fi
   else skip syft-sbom "not installed (brew install syft)"; fi
 fi
 
@@ -481,20 +494,28 @@ fi
 # The whole point of this block. A security report that says "clean" because every scanner was
 # missing is worse than no report: it is a false assurance with a timestamp on it. Exit 2 and say
 # what was not measured.
+# ran counts every lane that reached a verdict; produced counts the lanes that reached a verdict
+# ABOUT THE CODE. An errored scanner measured nothing, so a run of twelve errors and no results is
+# not clean -- and with n_find at zero the old floor (ran -eq 0) let it print CLEAN.
 ran=$((n_ok + n_find + n_err))
+produced=$((n_ok + n_find))
 {
   printf 'whitebox-audit v%s\n' "$VERSION"
   printf 'repo: %s\n' "$root"
   printf 'when: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf 'ran: %s   findings: %s   errors: %s   skipped: %s\n' "$ran" "$n_find" "$n_err" "$n_skip"
+  printf 'ran: %s   produced a result: %s   findings: %s   errors: %s   skipped: %s\n' "$ran" "$produced" "$n_find" "$n_err" "$n_skip"
 } > "$OUT/summary.txt"
 
 say ""
 printf 'whitebox-audit: %d scanner(s) ran, %d with findings, %d errored, %d skipped -> %s\n' \
   "$ran" "$n_find" "$n_err" "$n_skip" "$OUT"
 
-if [ "$ran" -eq 0 ]; then
-  printf 'NOT MEASURED: no scanner ran, so this repository has not been audited. Install at least one (see --list) before believing any verdict here.\n'
+if [ "$produced" -eq 0 ]; then
+  if [ "$n_err" -gt 0 ]; then
+    printf 'NOT MEASURED: %d scanner(s) errored and none produced a result, so this repository has not been audited. Fix the errors above (raw output is under %s/raw) before believing any verdict here.\n' "$n_err" "$OUT"
+  else
+    printf 'NOT MEASURED: no scanner ran, so this repository has not been audited. Install at least one (see --list) before believing any verdict here.\n'
+  fi
   echo "NOT MEASURED" >> "$OUT/summary.txt"
   exit 2
 fi
@@ -503,6 +524,6 @@ if [ "$n_find" -gt 0 ]; then
   echo "FINDINGS" >> "$OUT/summary.txt"
   exit 1
 fi
-printf 'CLEAN: %d scanner(s) ran and none reported. That is a statement about these %d tools, not about this code.\n' "$ran" "$ran"
+printf 'CLEAN: %d scanner(s) produced a result and none reported (%d errored, %d skipped). That is a statement about these %d tools, not about this code.\n' "$produced" "$n_err" "$n_skip" "$produced"
 echo "CLEAN" >> "$OUT/summary.txt"
 exit 0

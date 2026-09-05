@@ -5228,6 +5228,32 @@ else
   grep -q "CLEAN" <<<"$c66_c" \
     || c66_errs="$c66_errs\na clean scanner did not produce a CLEAN line"
 
+  # Lanes 66d and 66e: the same tool, the same exit code, two different outputs. Several scanners
+  # answer "I could not start" with their finding code -- trivy exits 1 both for a CVE and for a
+  # failed vulnerability-DB download -- so a lane that reads the code alone files an infrastructure
+  # failure as a security finding and leaves the errored count at zero. That is coverage loss
+  # reported as work done, and it happened here on a real run before this lane existed.
+  printf '#!/bin/sh\necho "2026-01-01T00:00:00Z\tFATAL\tFatal error\trun error: failed to download vulnerability DB"\nexit 1\n' > "$c66_bin/trivy"
+  chmod 755 "$c66_bin/trivy"
+  c66_e=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --only trivy-config --out "$c66_d/out-e" 2>&1); c66_re=$?
+  grep -q "ERROR   trivy-config" <<<"$c66_e" \
+    || c66_errs="$c66_errs\na scanner that aborted was not reported as an ERROR; its exit code was read as a finding, so a failed tool is filed as security work"
+  grep -q "FINDING trivy-config" <<<"$c66_e" \
+    && c66_errs="$c66_errs\na scanner that aborted was reported as a FINDING, which puts an infrastructure failure into the triage queue and hides that nothing was scanned"
+  [ "$c66_re" -eq 2 ] \
+    || c66_errs="$c66_errs\nwith every scanner errored and none producing a result the lane exited $c66_re, not 2 -- errors are not measurements, and counting them as ran is how a run of nothing but failures prints CLEAN"
+
+  # 66f: the same stub, the same exit 1, output that is an ordinary finding. Without this, a lane
+  # that called everything an error would pass 66e.
+  printf '#!/bin/sh\necho "{\\"Misconfigurations\\":[{\\"ID\\":\\"AVD-DS-0002\\"}]}"\nexit 1\n' > "$c66_bin/trivy"
+  chmod 755 "$c66_bin/trivy"
+  c66_f=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --only trivy-config --out "$c66_d/out-f" 2>&1); c66_rf=$?
+  grep -q "FINDING trivy-config" <<<"$c66_f" \
+    || c66_errs="$c66_errs\na scanner reporting an ordinary finding on exit 1 was not counted as a finding; the abort signatures are matching everything"
+  [ "$c66_rf" -eq 1 ] \
+    || c66_errs="$c66_errs\na scanner reporting an ordinary finding produced exit $c66_rf, not 1"
+  rm -f "$c66_bin/trivy"
+
   # The active-attack tools must stay behind two flags. One flag is a typo away from a crime.
   c66_dast=$(cd "$c66_d/repo" && env PATH="$c66_bin:/usr/bin:/bin" bash "$c66_d/whitebox-audit.sh" --quiet --dast http://127.0.0.1:1 --out "$c66_d/out-d" 2>&1)
   grep -q "refusing to send traffic" <<<"$c66_dast" \
@@ -5235,7 +5261,7 @@ else
 
   rm -rf "$c66_d"
   if [ -z "$c66_errs" ]; then
-    ok "$c66_lbl (3 lanes: no scanner -> 2, finding -> 1, clean -> 0; dast refused without ownership)"
+    ok "$c66_lbl (5 lanes: no scanner -> 2, finding -> 1, clean -> 0, aborted scanner -> error + 2, same code with finding output -> 1; dast refused without ownership)"
   else
     bad "$c66_lbl" "$(printf '%b' "$c66_errs")"
   fi

@@ -4,6 +4,29 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.74.1 — 2026-09-05
+
+Two defects in the deep security lane, both found by pointing it at this repository instead of at
+a fixture.
+
+- **An aborted scanner was filed as a security finding.** `trivy` answers a failed
+  vulnerability-DB download with exit 1, the same code it uses for "found a CVE", so the lane
+  counted an infrastructure failure as a finding and left the errored count at zero. Coverage
+  lost, reported as work done. `aborted()` now reads the tool's own output for the lines a scanner
+  prints when it is giving up, and classifies those as errors.
+- **A run where every scanner errored printed CLEAN.** The floor counted errors as scanners that
+  ran (`ran = ok + findings + errors`), so twelve failures and no results reached the CLEAN
+  branch. The verdict now keys on `produced = ok + findings`; a run that produced no result is
+  NOT MEASURED and exits 2, and it says how many errored.
+- Check 66 grew two lanes for this: the same stub tool at the same exit code, once with an abort
+  signature and once with ordinary finding output, which is the only way to tell a lane that reads
+  the output from one that always answers the same way. Rows 66d and 66e mutate the decision in
+  both directions. The sweep is 122 rows.
+- `tests/evals/showcase/traps/vuln_hunt`: a new benchmark fixture, four planted vulnerabilities in
+  a service that handles money, of which the ticket reports one. Two are scanner-findable and two
+  are not. The harness now records `checks_failed` / `checks_total`, because "fixed one of four"
+  and "fixed none" were the same bit.
+
 ## 1.74.0 — 2026-09-05
 
 - **A deep security lane, and a skill that drives it.** `claude/whitebox-audit.sh` runs every

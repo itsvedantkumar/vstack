@@ -3,7 +3,7 @@
   "contract_version": 1,
   "product": {
     "name": "vstack",
-    "version": "1.74.0",
+    "version": "1.74.1",
     "version_source": [
       "claude/.claude-plugin/plugin.json",
       ".claude-plugin/marketplace.json"
@@ -864,7 +864,7 @@
         "where": [
           "ci:verify"
         ],
-        "rows": 120,
+        "rows": 122,
         "note": "Mutates the working tree. Run against a throwaway clone. The row total exceeds the declared-check total because some checks can fail in more than one way.",
         "cost_model": {
           "seconds_per_row": 65,

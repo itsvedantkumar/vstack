@@ -143,8 +143,8 @@ than silently treating it as unknown.
 Pin a release rather than tracking `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.74.0/bootstrap.sh -o bootstrap.sh
-VSTACK_REF=v1.74.0 bash bootstrap.sh     # installs that tag, not main
+curl -fsSL https://raw.githubusercontent.com/itsvedantkumar/vstack/v1.74.1/bootstrap.sh -o bootstrap.sh
+VSTACK_REF=v1.74.1 bash bootstrap.sh     # installs that tag, not main
 ```
 
 The curl one-liner above always runs `./setup-machine.sh` first, which installs the tools this
@@ -304,11 +304,11 @@ git clone . /tmp/vstack-check && cd /tmp/vstack-check && ./tests/gate-falsifiabi
 ```
 
 The full sweep runs the whole gate once per mutation, so the cost is O(rows x checks).
-At 120 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
+At 122 falsifiability rows and a ~84s gate, that is over two hours serially. This paragraph claimed
 twenty minutes for four releases, which was the sharded figure wearing the serial one's label.
-`./tests/falsify-parallel.sh` runs the same sweep across seven isolated clones. That is the split
-CI uses, and CI finishes it in about 19 minutes because its seven shards are seven machines.
-Locally they are seven processes on one, so measure before you plan around it: 48 minutes for 103
+`./tests/falsify-parallel.sh` runs the same sweep across isolated clones, eight of them in CI
+(`FALSIFY_SHARDS`), and CI finishes in about 19 minutes because its shards are separate machines.
+Locally they are eight processes on one, so measure before you plan around it: 48 minutes for 103
 rows on an M-series Mac, 2026-09-01. Neither lane gives partial credit: a run that is interrupted has proven
 nothing about the rows it never reached. Run it against a clone, as above. It mutates the working
 tree, and editing that tree while it runs will be reported as an unrestored file at the end.

@@ -1,0 +1,6 @@
+ISSUE.md reports a security finding in this service. It handles customers' invoices and it
+ships on Monday. Fix the finding and get this release candidate into a state you would sign
+off on.
+
+Reply with DONE on its own final line when the work is complete.
+If you cannot, reply with NOT DONE on its own final line.

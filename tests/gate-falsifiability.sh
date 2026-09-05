@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c 66d 66e"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -333,6 +333,8 @@ files_for(){ case "$1" in
   66)  printf 'claude/whitebox-audit.sh' ;;
   66b) printf 'claude/whitebox-audit.sh' ;;
   66c) printf 'claude/whitebox-audit.sh' ;;
+  66d) printf 'claude/whitebox-audit.sh' ;;
+  66e) printf 'claude/whitebox-audit.sh' ;;
   58)  printf '.github/workflows/release.yml' ;;
   58b) printf 'claude/inventory.json' ;;
   58c) printf 'claude/inventory.json' ;;
@@ -454,6 +456,8 @@ label_for(){ case "$1" in
   66)  printf "the deep security lane refuses to report clean when nothing scanned" ;;
   66b) printf "the deep security lane refuses to report clean when nothing scanned" ;;
   66c) printf "the deep security lane refuses to report clean when nothing scanned" ;;
+  66d) printf "the deep security lane refuses to report clean when nothing scanned" ;;
+  66e) printf "the deep security lane refuses to report clean when nothing scanned" ;;
   58)  printf "the release gate's wait ceiling clears the job it waits for" ;;
   58b) printf "the release gate's wait ceiling clears the job it waits for" ;;
   58c) printf "the release gate's wait ceiling clears the job it waits for" ;;
@@ -742,7 +746,7 @@ exit 7
       # security audit that exits 0 having run no scanner tells a reader the repository is clean
       # when nothing looked at it. If check 66 could not see this, the file would be free to
       # regress into the most reassuring possible lie.
-      sed -i.t 's|^if \[ "$ran" -eq 0 \]; then|if [ "$ran" -lt 0 ]; then|' \
+      sed -i.t 's|^if \[ "$produced" -eq 0 \]; then|if [ "$produced" -lt 0 ]; then|' \
         claude/whitebox-audit.sh && rm -f claude/whitebox-audit.sh.t ;;
 
   66b) # Stop counting findings. Every scanner still runs, every raw file is still written, and
@@ -753,6 +757,21 @@ exit 7
   66c) # Drop the ownership requirement on the active-attack tools, so --dast alone is enough to
       # start sending traffic. The one mutation here whose cost is legal rather than technical.
       sed -i.t 's|^  if \[ "$OWNED" != 1 \]; then|  if [ "$OWNED" = 9 ]; then|' \
+        claude/whitebox-audit.sh && rm -f claude/whitebox-audit.sh.t ;;
+
+  66d) # Make the abort detector answer "this tool ran fine" for everything. A scanner that died
+      # on a failed database download exits with the same code it uses for a CVE, so with this
+      # mutation its failure is filed as a security finding and the errored count stays at zero:
+      # coverage lost, reported as work done. Mutating the decision itself, not the signature
+      # list, because a row pinned to one signature stops mutating anything the day that list is
+      # rewritten -- and reports the check unfalsifiable while proving nothing.
+      sed -i.t 's|^aborted() { # <raw_output_file>|aborted() { return 1 # <raw_output_file>|' \
+        claude/whitebox-audit.sh && rm -f claude/whitebox-audit.sh.t ;;
+
+  66e) # The opposite direction: every non-zero exit becomes "could not run". A lane that calls
+      # everything an error passes 66d and reports nothing, ever. Without this row, the fix for
+      # 66d could be a function that always returns true.
+      sed -i.t 's|^aborted() { # <raw_output_file>|aborted() { return 0 # <raw_output_file>|' \
         claude/whitebox-audit.sh && rm -f claude/whitebox-audit.sh.t ;;
 
   58) # Cut the wait ceiling under the floor check 58 derives from the tree. Matched on the key

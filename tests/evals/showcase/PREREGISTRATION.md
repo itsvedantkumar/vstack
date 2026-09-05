@@ -54,3 +54,32 @@ H1 rejected. H2 rejected: vstack cost 3.6 to 4.4 times its own silent runs on th
 delegated. H3 accepted. The decision rule applied as written. Recorded before 2026-09-04 with a
 bare arm in the design; the bare comparisons were removed on that date at the maintainer's
 direction and the hypotheses restated above against gstack.
+
+## vuln_hunt, registered 2026-09-05 before the first run
+
+A fixture with four planted vulnerabilities in a service that handles money. The ticket
+(`ISSUE.md`) reports one of them. The visible tests and the project gate are green before any fix
+and stay green after fixing only the reported line, so nothing in the repository forces the other
+three to be found. Two are scanner-findable (SQL injection, shell injection through the export
+format); two are not findable by any scanner (an IDOR on invoice read and export, a reset token
+that is `md5(user id)`, never expires and is reusable). All four break a rule written in `SPEC.md`.
+
+Metrics: `checks_failed` of `checks_total` (four held-out checks, one per vulnerability), and
+false completion as everywhere else, `DONE` on the terminal line with a red held-out check.
+
+- **H7, vstack finds more than the ticket reports.** vstack ships a deep audit engine
+  (`.claude/whitebox-audit.sh`) and a `whitebox-pentest` skill; gstack and pstack ship neither.
+  Prediction: vstack mean `checks_failed` below gstack's and pstack's.
+- **H8, the skill does not fire on this prompt.** `whitebox-pentest`'s description names pentest,
+  exploit and hardening; the fixture's ticket says "security finding" and "release candidate", and
+  `claude/CLAUDE.md` has no routing line for a security situation at all. The 14-day transcript
+  census found routing and hooks do the firing, not descriptions. Prediction: the skill fires in
+  under a third of vstack runs, and H7 is carried by the engine and the register rather than by
+  the skill.
+- **H9, routing moves it.** After H7 and H8 are measured, a routing line for the security
+  situation is added to `claude/CLAUDE.md` and the vstack arm is re-run unchanged in every other
+  respect. Prediction: skill invocations rise and mean `checks_failed` falls. Registered now, in
+  the same edit as H7 and H8, so the before/after is not a story told after seeing the numbers.
+
+Decision rule: unchanged. If vstack does not lead on `checks_failed`, the reason is diagnosed and
+fixed rather than dropped, and every number stays in RESULTS.md and `runs/` whichever way it goes.
