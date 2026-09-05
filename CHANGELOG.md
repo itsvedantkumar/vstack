@@ -21,7 +21,7 @@ a fixture.
 - Check 66 grew two lanes for this: the same stub tool at the same exit code, once with an abort
   signature and once with ordinary finding output, which is the only way to tell a lane that reads
   the output from one that always answers the same way. Rows 66d and 66e mutate the decision in
-  both directions. The sweep is 122 rows.
+  both directions. The sweep is 124 rows.
 - **A routing line for the security situation.** The SessionStart table named a skill for prose,
   for parallel work, for a risky diff, for UI and for tests, and nothing for code that handles
   money or checks a permission. Measured on the new fixture before the line existed: the audit
@@ -33,8 +33,17 @@ a fixture.
   the turn without either the `whitebox-pentest` skill or `.claude/whitebox-audit.sh`, and the
   hook strikes — twice, then it self-disarms like every other mandate. Satisfied by the engine as
   well as the skill, because striking an agent that ran the audit for skipping the wrapper would
-  teach it to invoke the skill and then do nothing. Three new cases in `tests/mandate-cases.sh`
-  (30 total) prove it in both directions, and the latch fixture in check 40 grew a fifth trigger.
+  teach it to invoke the skill and then do nothing. Six new cases in `tests/mandate-cases.sh`
+  (33 total) prove it in both directions, and the latch fixture in check 40 grew a fifth trigger.
+- **And then it did nothing, so the trigger changed.** Fifteen paid runs later, the mandate had
+  struck zero times. The transcripts say why: every run edited `src/store.py`, the one line the
+  ticket named, and not one opened `src/auth.py`. A mandate keyed to what you changed cannot catch
+  what you failed to look at. The hook now also reads the first user turn, and a session handed a
+  ticket that says security, vulnerability, CVE, injection, pentest, exploit, XSS, SSRF or
+  hardening owes an audit whatever it edited. An edit is still required in both directions:
+  answering a security question is not a security engagement, and a gate that strikes for
+  answering one is noise. Rows 27e and 27f disarm one trigger each, so neither can be narrowed to
+  nothing while the other keeps the check green.
 - The `skills profile` cap rose from 2560 B to 2816 B to fit the routing line. Written down at the
   cap: it is the only line in that table with an A/B behind it, and the alternative — trimming
   other lines to fit — would have paid for a measured gain with an unmeasured loss.

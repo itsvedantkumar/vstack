@@ -334,6 +334,20 @@ skills=$(
   | sed 's/.*://' | sort -u
 )
 
+# What the session was ASKED to do, first user turn only, capped. Every other mandate here keys
+# off the write-set, and for security that is the wrong end of the telescope: the defect a review
+# misses lives in the file nobody opened, so a trigger made of edited paths is silent exactly when
+# it is needed. Measured: on the vuln_hunt fixture all 15 runs edited src/store.py and nothing
+# else, while three vulnerabilities sat unread in api.py and auth.py -- a write-set trigger could
+# not fire once. The ask is the honest trigger. Capped at 4000 characters because this runs on
+# every Stop and a pasted log should not turn it into a full-transcript scan.
+asked=$(
+  "$JQ" -r -s 'map(select(.type=="user")) | .[0] // empty
+               | (.message.content // "")
+               | if type=="array" then map(select(.type=="text").text // "") | join(" ") else tostring end' \
+    "$tr_" 2>/dev/null | head -c 4000
+)
+
 # Write/Edit/NotebookEdit tool_use blocks are not the only way a session changes a file. In
 # bypass-permissions mode the model is explicitly told to prefer Bash -- sed, heredocs, short
 # scripts -- over the dedicated Edit/Write tools, and every one of those edits was invisible to
@@ -572,11 +586,28 @@ fi
 sec=$(printf '%s\n' "$paths" \
       | grep -iE '(auth|login|session|token|password|passwd|credential|permission|authoriz|/acl|role|payment|billing|invoice|charge|checkout|webhook)' \
       | grep -viE '(node_modules|/(dist|build|vendor)/|\.(md|mdx|txt|lock)$|(^|/)(tests?|spec|__tests__)/)' | head -5)
-if [ "$eval_whitebox" = 1 ] && [ -n "$sec" ] \
+# The second trigger, and the one that catches the real shape: the session was HANDED security
+# work. A reported finding is one finding; the audit is the job. Anchored on vocabulary a ticket
+# uses, not on the skill's own name, because a ticket says "security finding" and "CVE" while the
+# skill's description says "pentest, exploit, hardening" -- that gap is why the skill fired in
+# none of 15 runs on a fixture that is nothing but security work.
+sec_ask=""
+case "$asked" in
+  *[Ss]ecurity*|*[Vv]ulnerab*|*CVE-*|*CWE-*|*[Ii]njection*|*[Pp]entest*|*[Ee]xploit*|*XSS*|*SSRF*|*[Hh]ardening*)
+    sec_ask=1 ;;
+esac
+# An edit is still required either way: a question about security is not a security engagement,
+# and striking a session that only read and answered would make the gate noise.
+if [ "$eval_whitebox" = 1 ] && { [ -n "$sec" ] || { [ -n "$sec_ask" ] && [ -n "$paths" ]; }; } \
    && ! fired whitebox-pentest \
    && ! printf '%s' "${bash_cmds:-}" | grep -q 'whitebox-audit'; then
-  unmet="$unmet
+  if [ -n "$sec" ]; then
+    unmet="$unmet
   whitebox-pentest -- you changed code that decides access or moves money and neither the skill nor .claude/whitebox-audit.sh ran: $(printf '%s' "$sec" | tr '\n' ' ')"
+  else
+    unmet="$unmet
+  whitebox-pentest -- you were handed security work and changed code, and neither the skill nor .claude/whitebox-audit.sh ran. A reported finding is one finding, not the audit."
+  fi
   hit_whitebox=1
 fi
 

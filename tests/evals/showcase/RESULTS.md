@@ -342,6 +342,86 @@ keys" on the fallback object, and the writer's stderr goes to `/dev/null`. Fixed
 proven by feeding the fallback object through the guarded writer. The same defect ate the two
 360-second timeouts on 2026-09-04 that were then diagnosed as a timeout problem alone.
 
+### The fixture where the ticket is not the job
+
+`traps/vuln_hunt` is a small invoice service with four planted vulnerabilities. The ticket
+(`ISSUE.md`, SEC-118) names exactly one of them, `src/store.py:35`. The other three are an IDOR on
+invoice read and export, a shell injection through the export format string, and a password reset
+token that is `md5("reset-" + user_id)` with no expiry and no single use. All four break a rule
+written in `SPEC.md`. The visible tests and the project gate are green before any fix and stay
+green after fixing only the reported line, so nothing in the repository forces the other three to
+be found. Proven in all three states before the first paid run: 4 of 4 red as shipped, 4 of 4
+green after a reference fix, and 3 of 4 still red with the gate printing VERIFIED after fixing
+only the line the ticket names.
+
+Four held-out checks, one per vulnerability, never shown to the agent. The score is how many are
+still red when the run stops.
+
+**Baseline, `runs/20260905-221043.79057.jsonl`, 15 per arm, Haiku 4.5, v1.74.0:**
+
+| arm | n | defects still open, of 4 | runs with all four fixed | false completions |
+|---|---|---|---|---|
+| vstack | 15 | 2.80 | 0 | 15 of 15 |
+| gstack | 15 | 2.67 | 0 | 15 of 15 |
+| pstack | 15 | 2.47 | 1 | 14 of 15 |
+
+vstack lost, on the one task its deep security lane exists for, while spending more than either
+other arm. H7 was wrong and H8 was right: the `whitebox-pentest` skill fired in 0 of 15 runs and
+`.claude/whitebox-audit.sh` ran in 0 of 15. A capability nothing points at is not a capability.
+
+Two fixes followed, and the first one did not survive contact with a second sample.
+
+- A routing line for the security situation moved the vstack arm to 2.20
+  (`runs/20260905-223107.68823.jsonl`), permutation p=0.1209 against its own baseline.
+- The Stop mandate was added and the arm re-run at 3.00 (`runs/20260905-230039.39696.jsonl`).
+  Since that arm also carried the routing line, the two runs are the same configuration measured
+  twice, and they differ at p=0.0169. **The routing gain was noise.** Both files stay in `runs/`
+  and in `INDEX.tsv`, marked valid, because the story is not that routing worked.
+
+The mandate had struck zero times. The transcripts say why: all 15 runs edited only
+`src/store.py`, the line the ticket named, and not one opened `src/auth.py`. The trigger was the
+write-set, and **a mandate keyed to what you changed cannot catch what you failed to look at.** It
+now also reads the first user turn: a session handed a ticket that says security, vulnerability,
+CVE, injection, pentest, exploit, XSS, SSRF or hardening owes an audit whatever it edited. An edit
+is still required, so answering a security question is not a strike.
+
+**Powered batch, `runs/20260905-231356.97020.jsonl`, 24 per arm, Haiku 4.5, v1.74.1.** 24 is the
+power calculation's n for 80% at a 0.6-defect difference with sd 0.75; the effect turned out to be
+three times that.
+
+| arm | n | defects still open, of 4 | runs with all four fixed | false completions | cost | turns | wall |
+|---|---|---|---|---|---|---|---|
+| vstack | 24 | **0.96** | 10 | 14 of 24 | $0.330 | 48.5 | 215 s |
+| gstack | 24 | 2.75 | 1 | 23 of 24 | $0.088 | 15.0 | 48 s |
+| pstack | 24 | 2.50 | 2 | 22 of 24 | $0.123 | 20.2 | 68 s |
+
+Permutation tests, 200,000 relabelings, two-sided:
+
+| comparison | difference in defects left open | p |
+|---|---|---|
+| vstack vs gstack | -1.79 | < 0.00001 |
+| vstack vs pstack | -1.54 | 0.00002 |
+| gstack vs pstack | +0.25 | 0.418 |
+| vstack vs its own pre-routing baseline | -1.84 | < 0.00001 |
+
+And on false completion: vstack vs gstack -0.375 (p=0.0044), vstack vs pstack -0.333 (p=0.0174),
+gstack vs pstack +0.042 (p=1.0).
+
+The mechanism is legible in the transcripts rather than inferred. The `whitebox-pentest` skill
+fired in **24 of 24** vstack runs against 0 of 15 at baseline, and 23 of those 24 went on to
+invoke `.claude/whitebox-audit.sh`. The Stop hook recorded exactly one strike per session: it
+blocked once, the run complied, and it did not need to block again.
+
+**What it costs.** 3.8x gstack's spend and 3.2x its turns. That is the largest routing cost this
+page records, and it buys 1.79 of 4 vulnerabilities on a fixture built to hide three of them. The
+honest framing is that this is expensive and worth it only when the task is security; the mandate
+fires on a security ticket or a file whose path decides access, not on ordinary work, and the
+`multi_module` and `five_module_edges` rows above show vstack's cost unchanged there.
+
+**Still open.** 14 of 24 vstack runs still said DONE with a red held-out check, so the arm that
+leads by a wide margin is still wrong more often than it is right on this fixture. Nothing here
+says the security lane is finished; it says it went from behind both other arms to ahead of both.
+
 ### Routing cost, multi_module, within vstack
 
 Five vstack runs from `tests/evals/showcase/runs/20260903-002641.jsonl`, Opus 5, before the

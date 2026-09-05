@@ -57,7 +57,7 @@
 #   invoke the hook at all, but this file does not).
 
 # shellcheck disable=SC2034  # read by callers that source this file (verify.sh check 27, tests/container-matrix.sh), not used within it
-MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12 13 14 15 16 17 18"
+MANDATE_CASE_IDS="a b c d e f g h i j k l m n o p q 9b 9c 9d 9e 10 11 12 13 14 15 16 17 18 19 20 21"
 
 # --- fixture records (shared building blocks, same literal shapes check 27 already proved) -------
 _MC_W='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/x/README.md"}}]}}'
@@ -73,6 +73,14 @@ _MC_SW='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Ski
 _MC_SEC='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/src/auth.py"}}]}}'
 _MC_WB='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"whitebox-pentest"}}]}}'
 _MC_WBSH='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":".claude/whitebox-audit.sh --deep"}}]}}'
+# The second security trigger: the TASK, not the write-set. Measured 2026-09-05 over 15 paid runs
+# on tests/evals/showcase/traps/vuln_hunt -- every run edited only src/store.py, the one line the
+# ticket named, and never opened src/auth.py. A mandate keyed to what you changed cannot catch what
+# you failed to look at, so the first user turn is read too. _MC_ASK is a ticket; _MC_ORD is the
+# control that proves an ordinary refactor of the same file stays silent.
+_MC_ASK='{"type":"user","message":{"content":"ISSUE.md reports a security vulnerability in this service. Fix it."}}'
+_MC_ORD='{"type":"user","message":{"content":"Rename getUser to fetchUser across the module."}}'
+_MC_STORE='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/x/src/store.py"}}]}}'
 _MC_TWO='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP and GLOOTIE"}]}}'
 _MC_ON1='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"ZEEP"}]}}'
 _MC_ON2='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"tool":"Skill"}},{"type":"text","text":"GLOOTIE"}]}}'
@@ -148,6 +156,9 @@ mandate_case_lines() {
     16) printf '%s\n' "$_MC_SEC" ;;
     17) printf '%s\n' "$_MC_SEC" "$_MC_WB" ;;
     18) printf '%s\n' "$_MC_SEC" "$_MC_WBSH" ;;
+    19) printf '%s\n' "$_MC_ASK" "$_MC_STORE" ;;
+    20) printf '%s\n' "$_MC_ASK" "$_MC_STORE" "$_MC_WB" ;;
+    21) printf '%s\n' "$_MC_ORD" "$_MC_STORE" ;;
     *) return 1 ;;
   esac
 }
@@ -184,6 +195,9 @@ mandate_case_expect() {
     16) printf '%s\n' 'BLOCK:whitebox-pentest' ;;
     17) printf '%s\n' 'SILENT' ;;
     18) printf '%s\n' 'SILENT' ;;
+    19) printf '%s\n' 'BLOCK:whitebox-pentest' ;;
+    20) printf '%s\n' 'SILENT' ;;
+    21) printf '%s\n' 'SILENT' ;;
     *) return 1 ;;
   esac
 }
@@ -229,6 +243,9 @@ mandate_case_desc() {
     16) printf '%s\n' 'edited a file that decides access, never audited it' ;;
     17) printf '%s\n' 'edited a file that decides access, ran the whitebox-pentest skill' ;;
     18) printf '%s\n' 'edited a file that decides access, ran the audit engine directly' ;;
+    19) printf '%s\n' 'handed a security ticket, changed code elsewhere, never audited it' ;;
+    20) printf '%s\n' 'handed a security ticket, changed code, ran the whitebox-pentest skill' ;;
+    21) printf '%s\n' 'ordinary refactor of the same file, no security in the ask' ;;
     *) return 1 ;;
   esac
 }

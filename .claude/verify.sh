@@ -2100,9 +2100,10 @@ if command -v jq >/dev/null; then
     # Anchored on both ends the way 76d2366 fixed the identical bug in
     # tests/test-breadth-mandate.sh. The character class covers every MANDATE_CASE_IDS first
     # character: the 17 single-letter ids a-q, plus "9b" and "10"/"11"/"12" (first chars 9 and
-    # 1) added when this check and tests/container-matrix.sh were unified onto one fixture set
-    # -- so this still cannot reach a file this check did not create.
-    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-q19]* 2>/dev/null
+    # 1) added when this check and tests/container-matrix.sh were unified onto one fixture set,
+    # plus "20"/"21" (first char 2) added with the task-shaped security trigger -- so this still
+    # cannot reach a file this check did not create. Widen the class with every new id.
+    rm -rf "$md"; rm -f "${TMPDIR:-/tmp}"/vstack-mandate-*vfy-[a-q129]* 2>/dev/null
     [ -z "$errs" ] \
       && ok "skill mandate decides correctly ($n_cases cases, shared with tests/container-matrix.sh via tests/mandate-cases.sh)" \
       || bad "skill mandate decides correctly" "$(printf '%b' "$errs")"

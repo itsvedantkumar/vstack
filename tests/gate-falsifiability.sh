@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c 66d 66e"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c 66d 66e 27e 27f"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -382,6 +382,8 @@ files_for(){ case "$1" in
   27)  printf 'claude/hooks/skill-mandate.sh' ;;
   27c) printf 'claude/hooks/skill-mandate.sh' ;;
   27d) printf 'claude/hooks/skill-mandate.sh' ;;
+  27e) printf 'claude/hooks/skill-mandate.sh' ;;
+  27f) printf 'claude/hooks/skill-mandate.sh' ;;
   28)  printf 'README.md' ;;
   29)  printf 'bin/cloudflare-mcp' ;;
   29b) printf 'ui-gate/rules/browser.sh' ;;
@@ -505,6 +507,8 @@ label_for(){ case "$1" in
   27)  printf 'skill mandate decides correctly' ;;
   27c) printf 'skill mandate decides correctly' ;;
   27d) printf 'skill mandate decides correctly' ;;
+  27e) printf 'skill mandate decides correctly' ;;
+  27f) printf 'skill mandate decides correctly' ;;
   28)  printf 'every doc is reachable' ;;
   29)  printf 'shellcheck clean' ;;
   29b) printf 'shellcheck clean' ;;
@@ -1202,6 +1206,20 @@ exit 0
       # would read as a deletion. Case 13 expects WARN and must go red.
       sed -i.t 's/^elif \[ -n "\${reg_unmet:-}" \]; then$/elif false; then/' \
         claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.t ;;
+  27e) # Disarm the TASK-shaped security trigger while leaving the path-shaped one intact. This is
+      # the failure the trigger was added for, so it needs its own row: with only the path
+      # trigger live, a session handed a security ticket that edits src/store.py -- the exact
+      # shape measured in all 15 paid runs on traps/vuln_hunt -- finishes in silence. Case 19
+      # must go red; cases 16/17/18 stay green, which is what makes this row distinguishable
+      # from 27f rather than a second spelling of it.
+      sed -i.t 's/^    sec_ask=1 ;;$/    sec_ask="" ;;/' claude/hooks/skill-mandate.sh \
+        && rm -f claude/hooks/skill-mandate.sh.t ;;
+  27f) # The mirror: disarm the PATH-shaped trigger and leave the task-shaped one. Case 16 (edit
+      # src/auth.py with no security wording anywhere in the ask) must go red. Without this row
+      # the path detector could be narrowed to nothing and 27e would still pass, because case 19
+      # never needed it.
+      sed -i.t 's/^sec=\$(printf/sec=""; _unused_sec=$(printf/' claude/hooks/skill-mandate.sh \
+        && rm -f claude/hooks/skill-mandate.sh.t ;;
   26) # Claim a platform nobody tests. This is the state the repo was actually in: three README
       # passages describing a Windows lane, with the Windows job red.
       perl -0pi -e 's/CI runs `ubuntu-latest`/CI runs `windows-latest`, `ubuntu-latest`/' README.md ;;

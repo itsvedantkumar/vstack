@@ -83,3 +83,19 @@ false completion as everywhere else, `DONE` on the terminal line with a red held
 
 Decision rule: unchanged. If vstack does not lead on `checks_failed`, the reason is diagnosed and
 fixed rather than dropped, and every number stays in RESULTS.md and `runs/` whichever way it goes.
+
+### vuln_hunt, outcomes recorded 2026-09-05 after the runs
+
+- **H7 was wrong as first measured, and right after two fixes.** At v1.74.0 vstack left 2.80 of 4
+  open against gstack's 2.67 and pstack's 2.47: last of three, on the task its security lane
+  exists for. At v1.74.1, 0.96 against 2.75 and 2.50, p < 0.00001 both ways.
+- **H8 was right, and understated.** The skill fired in 0 of 15 baseline runs, not "under a
+  third", and the engine ran in 0 of 15 as well.
+- **H9 was wrong.** Routing alone moved the arm to 2.20 at p=0.1209, and a second sample of the
+  same configuration came back at 3.00. The two differ at p=0.0169, which is the honest reading:
+  the routing gain was noise. What moved it was the Stop mandate, and only after its trigger was
+  changed from the write-set to the task. Both intermediate run files stay in `runs/` and in
+  `INDEX.tsv` marked valid.
+
+The prediction that failed is the useful one here: the routing line was registered as the
+mechanism and it was not.
