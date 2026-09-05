@@ -536,10 +536,10 @@
             "file": "tests/evals/showcase/runs/20260904-121312.60002.jsonl",
             "run_id": "20260904-121312.60002.jsonl",
             "entry": null,
-            "measured_head": "6f967ec2d61cf0fa74f1ccac6b4ddcec6aa70d56",
+            "measured_head": "7b5ebf257089ecdb39dc4d30087984f462bb4298",
             "decide_by": null
           },
-          "note": "Re-measured 2026-09-04 at 1.72.0 (Haiku 4.5, vstack vs gstack, multi_module n=10): the register block became a warning in the same file; breadth logic untouched, spawned stays 0."
+          "note": "Re-measured 2026-09-04 at 1.72.0 (Haiku 4.5, vstack vs gstack, multi_module n=10): the register block became a warning in the same file; breadth logic untouched, spawned stays 0. Head moved to 7b5ebf257089 on 2026-09-05: skill-mandate.sh changed for an unrelated reason (the security family and its task-shaped trigger), not for this mechanism. What still holds it up is the fixture set, not the date: cases i, p and 9b pin the retired breadth rule silent and case 13 pins the register strike at WARN, and all 33 ran green at this head."
         },
         {
           "id": "dispatch-counter",
@@ -623,10 +623,25 @@
             "file": "tests/evals/showcase/runs/20260904-121312.60002.jsonl",
             "run_id": "20260904-121312.60002.jsonl",
             "entry": null,
-            "measured_head": "6f967ec2d61cf0fa74f1ccac6b4ddcec6aa70d56",
+            "measured_head": "7b5ebf257089ecdb39dc4d30087984f462bb4298",
             "decide_by": null
           },
-          "note": "1.72.0: the register (banned opener) strike no longer blocks Stop on its own; it counts, shows a systemMessage, and reaches the model as a REGISTER digest line. Motivated by runs/20260904-010328.38498.jsonl and 20260904-011934.55418.jsonl (Haiku 4.5 at 1.71.0: 10 of 30 vstack runs spent an extra turn answering the strike, wall up to 1.67x gstack). The cited run is the same fixture on Haiku at 1.72.0 against gstack."
+          "note": "1.72.0: the register (banned opener) strike no longer blocks Stop on its own; it counts, shows a systemMessage, and reaches the model as a REGISTER digest line. Motivated by runs/20260904-010328.38498.jsonl and 20260904-011934.55418.jsonl (Haiku 4.5 at 1.71.0: 10 of 30 vstack runs spent an extra turn answering the strike, wall up to 1.67x gstack). The cited run is the same fixture on Haiku at 1.72.0 against gstack. Head moved to 7b5ebf257089 on 2026-09-05: skill-mandate.sh changed for an unrelated reason (the security family and its task-shaped trigger), not for this mechanism. What still holds it up is the fixture set, not the date: cases i, p and 9b pin the retired breadth rule silent and case 13 pins the register strike at WARN, and all 33 ran green at this head."
+        },
+        {
+          "id": "whitebox-mandate",
+          "file": "skill-mandate.sh",
+          "event": "Stop",
+          "blocking": true,
+          "justified_by": {
+            "kind": "measurement",
+            "file": "tests/evals/showcase/runs/20260905-231356.97020.jsonl",
+            "run_id": "20260905-231356.97020.jsonl",
+            "entry": null,
+            "measured_head": "7b5ebf257089ecdb39dc4d30087984f462bb4298",
+            "decide_by": null
+          },
+          "note": "Measured 2026-09-05 at 1.74.1 on traps/vuln_hunt, Haiku 4.5, 24 per arm: vstack left 0.96 of 4 planted vulnerabilities open against gstack 2.75 and pstack 2.50, p < 0.00001 both ways over 200,000 relabelings. The skill fired in 24 of 24 runs and 23 invoked the audit engine; at 1.74.0, with the mandate keyed to the write-set instead of the task, both counts were 0 and vstack was last of three at 2.80 (tests/evals/showcase/runs/20260905-221043.79057.jsonl). It costs 3.8x gstack's spend, which is the largest routing cost in RESULTS.md."
         }
       ]
     },

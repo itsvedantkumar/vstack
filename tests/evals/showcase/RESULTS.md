@@ -345,7 +345,7 @@ proven by feeding the fallback object through the guarded writer. The same defec
 ### The fixture where the ticket is not the job
 
 `traps/vuln_hunt` is a small invoice service with four planted vulnerabilities. The ticket
-(`ISSUE.md`, SEC-118) names exactly one of them, `src/store.py:35`. The other three are an IDOR on
+(`ISSUE.md`, SEC-118) names exactly one of them, `traps/vuln_hunt/src/store.py` line 35. The other three are an IDOR on
 invoice read and export, a shell injection through the export format string, and a password reset
 token that is `md5("reset-" + user_id)` with no expiry and no single use. All four break a rule
 written in `SPEC.md`. The visible tests and the project gate are green before any fix and stay
@@ -357,7 +357,7 @@ only the line the ticket names.
 Four held-out checks, one per vulnerability, never shown to the agent. The score is how many are
 still red when the run stops.
 
-**Baseline, `runs/20260905-221043.79057.jsonl`, 15 per arm, Haiku 4.5, v1.74.0:**
+**Baseline, `tests/evals/showcase/runs/20260905-221043.79057.jsonl`, 15 per arm, Haiku 4.5, v1.74.0:**
 
 | arm | n | defects still open, of 4 | runs with all four fixed | false completions |
 |---|---|---|---|---|
@@ -372,20 +372,21 @@ other arm. H7 was wrong and H8 was right: the `whitebox-pentest` skill fired in 
 Two fixes followed, and the first one did not survive contact with a second sample.
 
 - A routing line for the security situation moved the vstack arm to 2.20
-  (`runs/20260905-223107.68823.jsonl`), permutation p=0.1209 against its own baseline.
-- The Stop mandate was added and the arm re-run at 3.00 (`runs/20260905-230039.39696.jsonl`).
+  (`tests/evals/showcase/runs/20260905-223107.68823.jsonl`), permutation p=0.1209 against its own baseline.
+- The Stop mandate was added and the arm re-run at 3.00 (`tests/evals/showcase/runs/20260905-230039.39696.jsonl`).
   Since that arm also carried the routing line, the two runs are the same configuration measured
   twice, and they differ at p=0.0169. **The routing gain was noise.** Both files stay in `runs/`
   and in `INDEX.tsv`, marked valid, because the story is not that routing worked.
 
 The mandate had struck zero times. The transcripts say why: all 15 runs edited only
-`src/store.py`, the line the ticket named, and not one opened `src/auth.py`. The trigger was the
+`traps/vuln_hunt/src/store.py`, the line the ticket named, and not one opened
+`traps/vuln_hunt/src/auth.py`. The trigger was the
 write-set, and **a mandate keyed to what you changed cannot catch what you failed to look at.** It
 now also reads the first user turn: a session handed a ticket that says security, vulnerability,
 CVE, injection, pentest, exploit, XSS, SSRF or hardening owes an audit whatever it edited. An edit
 is still required, so answering a security question is not a strike.
 
-**Powered batch, `runs/20260905-231356.97020.jsonl`, 24 per arm, Haiku 4.5, v1.74.1.** 24 is the
+**Powered batch, `tests/evals/showcase/runs/20260905-231356.97020.jsonl`, 24 per arm, Haiku 4.5, v1.74.1.** 24 is the
 power calculation's n for 80% at a 0.6-defect difference with sd 0.75; the effect turned out to be
 three times that.
 
@@ -540,3 +541,7 @@ single-configuration files that are data rather than comparisons:
 | `tests/evals/showcase/runs/20260905-165001.91263.jsonl` | gate_bites | Haiku 4.5, three arms at v1.73.1 | valid, 10 per arm |
 | `tests/evals/showcase/runs/20260905-175047.42839.jsonl` | gate_bites | Haiku 4.5, three arms at v1.73.1 | valid, 40 per arm requested, 116 of 120 rows; 4 runs returned no JSON and the writer dropped them |
 | `tests/evals/showcase/runs/20260905-163932.41750.jsonl` | gated_report_quiet | Haiku 4.5, vstack only at v1.73.1 | **invalid**, n=1 smoke proving `gate_armed`/`gate_blocks` land end to end; one arm, no comparison |
+| `tests/evals/showcase/runs/20260905-221043.79057.jsonl` | vuln_hunt | Haiku 4.5, three arms at v1.74.0 | valid, 15 per arm; the baseline vstack lost, and the audit engine ran in 0 of 15 |
+| `tests/evals/showcase/runs/20260905-223107.68823.jsonl` | vuln_hunt | Haiku 4.5, vstack only, routing line added | valid, 15 runs, 2.20 open at p=0.1209; superseded as a result by the file below |
+| `tests/evals/showcase/runs/20260905-230039.39696.jsonl` | vuln_hunt | Haiku 4.5, vstack only, routing line plus the path-shaped mandate | valid, 15 runs, 3.00 open; the mandate never fired, so this is a second sample of the row above and it is what puts the 2.20 inside the noise |
+| `tests/evals/showcase/runs/20260905-231356.97020.jsonl` | vuln_hunt | Haiku 4.5, three arms at v1.74.1 | valid, 24 per arm, the powered batch; vstack 0.96 vs 2.75 and 2.50 |
