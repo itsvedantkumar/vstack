@@ -1,0 +1,33 @@
+# gitleaks configuration for this repository.
+#
+# Everything allowlisted here is a fixture: `.claude/verify.sh` feeds a list of fake credentials
+# through claude/security-scan.sh and claude/hooks/failure-diagnose.sh and asserts that each one
+# comes back redacted. The check needs the strings to be present and shaped like the real thing,
+# so a secret scanner reporting them is correct about the pattern and wrong about the risk.
+#
+# Allowlisted by VALUE, never by file:line fingerprint. A fingerprint suppression follows the line
+# number, so the day someone inserts a line above it the suppression silently covers a different
+# secret -- and a real key pasted onto one of these lines would be hidden. Matching the literal
+# fixture value cannot do that: any other secret on the same line still fires.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "placeholder-so-extend-is-valid"
+description = "unused; the allowlist below is what this file exists for"
+regex = '''zzz-vstack-never-matches-zzz'''
+
+[allowlist]
+description = "redaction-test fixtures, not credentials"
+regexes = [
+  '''sk-ant-FAKEVAL''',
+  '''ghp_FAKEVAL''',
+  '''abcd1234efgh5678''',
+  '''hunter2correcthorse''',
+  '''s3cr3tpw''',
+  '''wJalrXUtnFEMIK7MDENGbPxRfiCY''',
+  # appended to README.md by a falsifiability row that checks the secret scanner notices it
+  '''AbCdEf0123456789AbCdEf0123456789''',
+  '''prj_A1b2C3d4E5f6G7h8''',
+  '''eyJhbGciOiJIUzI1NiJ9\.PAYLOAD1234\.SIGNATURE''',
+]

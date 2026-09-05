@@ -22,6 +22,12 @@ a fixture.
   signature and once with ordinary finding output, which is the only way to tell a lane that reads
   the output from one that always answers the same way. Rows 66d and 66e mutate the decision in
   both directions. The sweep is 122 rows.
+- The history lane now writes a JSON report like every other lane; it was the one scanner whose
+  findings could only be read as text.
+- `.gitleaks.toml`: the redaction-test fixtures in `.claude/verify.sh` are allowlisted by value,
+  with the reasoning written down. Three findings on every scan of this repository train a reader
+  to skim gitleaks, which is how the fourth one gets missed. Value-anchored, not fingerprinted:
+  proven by scanning with a real random key added, which still fires.
 - `tests/evals/showcase/traps/vuln_hunt`: a new benchmark fixture, four planted vulnerabilities in
   a service that handles money, of which the ticket reports one. Two are scanner-findable and two
   are not. The harness now records `checks_failed` / `checks_total`, because "fixed one of four"

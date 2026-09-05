@@ -205,7 +205,14 @@ if wanted gitleaks-history; then
   else
     # The working tree is the smaller half of the question. A key deleted in the commit that
     # "removed" it is still in the history, still fetchable, and still valid until rotated.
-    run gitleaks-history gitleaks git --no-banner --redact --log-opts=--all .
+    #
+    # gitleaks reads a repo-local .gitleaks.toml with no flag from us, which is where a project's
+    # own suppressions belong. Allowlist a test fixture by its VALUE there, never by a file:line
+    # fingerprint: a fingerprint follows the line number, so inserting a line above it silently
+    # moves the suppression onto a different secret, and a real key pasted onto that line is
+    # hidden. This repository's own .gitleaks.toml is the worked example.
+    run gitleaks-history gitleaks git --no-banner --redact --log-opts=--all \
+      --report-format json --report-path "$OUT/raw/gitleaks-history.json" .
     verdict gitleaks-history 1
   fi
 fi
