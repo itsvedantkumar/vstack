@@ -22,6 +22,12 @@ a fixture.
   signature and once with ordinary finding output, which is the only way to tell a lane that reads
   the output from one that always answers the same way. Rows 66d and 66e mutate the decision in
   both directions. The sweep is 122 rows.
+- **A routing line for the security situation.** The SessionStart table named a skill for prose,
+  for parallel work, for a risky diff, for UI and for tests, and nothing for code that handles
+  money or checks a permission. Measured on the new fixture before the line existed: the audit
+  engine ran in 0 of 15 vstack runs, and vstack left more vulnerabilities open than either other
+  arm while spending more turns and more money. A capability nothing points at is not a
+  capability; it is overhead.
 - The history lane now writes a JSON report like every other lane; it was the one scanner whose
   findings could only be read as text.
 - `.gitleaks.toml`: the redaction-test fixtures in `.claude/verify.sh` are allowlisted by value,
