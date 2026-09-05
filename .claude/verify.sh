@@ -5268,9 +5268,26 @@ else
   grep -q "refusing to send traffic" <<<"$c66_dast" \
     || c66_errs="$c66_errs\n--dast without --i-own-this-target did not refuse; the attack tools are one typo from a target nobody authorised"
 
+  # Static, and the reason it is static: the four behavioural lanes above run with
+  # PATH="$c66_bin:/usr/bin:/bin" on a machine where /usr/bin/grep exists, so a hardcoded
+  # /usr/bin/<tool> inside the script passes every one of them here and fails on Alpine, where
+  # busybox grep lives at /bin/grep. That shipped in 1.74.1: aborted() exited 127 on every call
+  # there, read as false, and filed an aborted scanner as a finding -- the exact defect the lanes
+  # above exist to catch, invisible to them. tests/container-matrix.sh found it, and that runs
+  # only at release. This lane moves the class to every push. Bare tool names are fine; the rule
+  # is only that a path may not be hardcoded to one platform's layout.
+  # Command position only: `^`, or straight after a pipe, `;`, `&&`/`||`, or `$(`. Any /usr/bin
+  # mention would also flag the resolver loop directly above aborted(), which LISTS /usr/bin/grep
+  # as one candidate and probes it with -x -- correct code, and a check that reddens on its own fix
+  # teaches the next person to delete the check. The bug shipped as `  /usr/bin/grep -qE ...`,
+  # which is command position; `for _g in /usr/bin/grep /bin/grep` is not.
+  c66_abs=$(grep -nE '(^|[|;&]|\$\()[[:space:]]*/usr/bin/[a-z0-9_-]+' "$c66_sh" | grep -v '^[0-9]*:[[:space:]]*#' | head -5)
+  [ -z "$c66_abs" ] \
+    || c66_errs="$c66_errs\n$c66_sh hardcodes an absolute /usr/bin tool path, which does not exist on Alpine: $(printf '%s' "$c66_abs" | tr '\n' ' ') -- resolve the binary at runtime instead"
+
   rm -rf "$c66_d"
   if [ -z "$c66_errs" ]; then
-    ok "$c66_lbl (5 lanes: no scanner -> 2, finding -> 1, clean -> 0, aborted scanner -> error + 2, same code with finding output -> 1; dast refused without ownership)"
+    ok "$c66_lbl (6 lanes: no scanner -> 2, finding -> 1, clean -> 0, aborted scanner -> error + 2, same code with finding output -> 1, no hardcoded /usr/bin path; dast refused without ownership)"
   else
     bad "$c66_lbl" "$(printf '%b' "$c66_errs")"
   fi

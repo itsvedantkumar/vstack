@@ -164,9 +164,22 @@ run() { # <name> <cmd...>
 # an infrastructure failure as a security finding and, worse, leaves the errored count at zero. That
 # is coverage loss reported as work done. Signatures only, and narrow ones: each is a line a tool
 # prints when it is giving up, none of them is a finding format.
+# GREP is resolved once, to an absolute path that exists on THIS machine. Not the bare name: an
+# interactive shell can shim `grep` to a tool with a different regex dialect (Claude Code shims it
+# to ugrep), and an exported function follows a script in. Not a hardcoded /usr/bin/grep either --
+# that is what shipped in 1.74.1, and Alpine's grep is busybox at /bin/grep, so every aborted()
+# call exited 127, read as false, and filed an aborted scanner as a finding: the exact defect this
+# function exists to prevent, live on one of the three supported platforms. Caught by
+# tests/container-matrix.sh, which runs only at release; check 66 now also refuses the hardcoded
+# path statically, so the next one fails on push instead.
+for _g in /usr/bin/grep /bin/grep /usr/local/bin/grep /opt/homebrew/bin/grep; do
+  [ -x "$_g" ] && { GREP="$_g"; break; }
+done
+: "${GREP:=grep}"
+
 aborted() { # <raw_output_file>
   [ -f "$1" ] || return 1
-  /usr/bin/grep -qE '(^|[[:space:]])(FATAL|Fatal error)([[:space:]]|$)|failed to download|error getting credentials|could not (connect|resolve|open)|panic: runtime error|Traceback \(most recent call last\)|command not found|no such host' "$1"
+  "$GREP" -qE '(^|[[:space:]])(FATAL|Fatal error)([[:space:]]|$)|failed to download|error getting credentials|could not (connect|resolve|open)|panic: runtime error|Traceback \(most recent call last\)|command not found|no such host' "$1"
 }
 
 verdict() { # <name> <finding_codes_csv>

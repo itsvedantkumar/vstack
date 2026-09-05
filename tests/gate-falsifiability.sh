@@ -34,7 +34,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 . "$(pwd)/tests/lib-collision-guard.sh"
 
 # One id per `# --- N.` section in .claude/verify.sh. Check 16 parses this line.
-CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c 66d 66e 27e 27f"
+CHECKS="0 1 1b 2 2b 3 3b 4 5 6 7 8 9 9b 10 10b 11 12 13 13b 13c 14 14b 14c 15 16 17 18 18b 18c 18d 18e 19 20 20b 20c 21 22 23 24 25 26 27 28 29 29b 30 31 32 33 34 35 35b 35c 35d 35e 35f 35g 36 37 38 39 40 44 44b 44c 44d 44e 44f 44g 44h 44i 45 46 47 48 49 50 50b 50c 50d 51 51b 52 53 54 54b 55 55b 55c 56 56b 57 57b 57c 57d 57e 58 58b 58c 27c 27d 59 60 12b 20d 61 61b 62 62b 63 63b 64 64b 65 65b 65c 66 66b 66c 66d 66e 27e 27f 66f"
 CHECKS_ALL="$CHECKS"
 # Scoped runs: VSTACK_FALSIFY_ROWS="31 32 33" limits the mutation loop below to those ids, for
 # exercising a subset within a time budget instead of the full ~15 minute sweep. The CHECKS line
@@ -335,6 +335,7 @@ files_for(){ case "$1" in
   66c) printf 'claude/whitebox-audit.sh' ;;
   66d) printf 'claude/whitebox-audit.sh' ;;
   66e) printf 'claude/whitebox-audit.sh' ;;
+  66f) printf 'claude/whitebox-audit.sh' ;;
   58)  printf '.github/workflows/release.yml' ;;
   58b) printf 'claude/inventory.json' ;;
   58c) printf 'claude/inventory.json' ;;
@@ -460,6 +461,7 @@ label_for(){ case "$1" in
   66c) printf "the deep security lane refuses to report clean when nothing scanned" ;;
   66d) printf "the deep security lane refuses to report clean when nothing scanned" ;;
   66e) printf "the deep security lane refuses to report clean when nothing scanned" ;;
+  66f) printf "the deep security lane refuses to report clean when nothing scanned" ;;
   58)  printf "the release gate's wait ceiling clears the job it waits for" ;;
   58b) printf "the release gate's wait ceiling clears the job it waits for" ;;
   58c) printf "the release gate's wait ceiling clears the job it waits for" ;;
@@ -1206,6 +1208,12 @@ exit 0
       # would read as a deletion. Case 13 expects WARN and must go red.
       sed -i.t 's/^elif \[ -n "\${reg_unmet:-}" \]; then$/elif false; then/' \
         claude/hooks/skill-mandate.sh && rm -f claude/hooks/skill-mandate.sh.t ;;
+  66f) # Put back the exact line that shipped in 1.74.1: aborted() calling /usr/bin/grep. On this
+      # machine that path exists, so all four behavioural lanes stay green and only the static
+      # lane can see it -- which is the point of the static lane, and the reason this row mutates
+      # a path rather than a decision.
+      sed -i.t 's#^  "\$GREP" -qE#  /usr/bin/grep -qE#' claude/whitebox-audit.sh \
+        && rm -f claude/whitebox-audit.sh.t ;;
   27e) # Disarm the TASK-shaped security trigger while leaving the path-shaped one intact. This is
       # the failure the trigger was added for, so it needs its own row: with only the path
       # trigger live, a session handed a security ticket that edits src/store.py -- the exact

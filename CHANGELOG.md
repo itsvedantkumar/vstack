@@ -4,6 +4,27 @@ Versions follow [semver](https://semver.org). The version lives in two manifests
 `.claude-plugin/marketplace.json` and `claude/.claude-plugin/plugin.json`, and check 13 of
 `.claude/verify.sh` fails when they disagree.
 
+## 1.74.2 — 2026-09-06
+
+One defect, found by the release lane 1.74.1 could not pass.
+
+- **`aborted()` called `/usr/bin/grep`, which does not exist on Alpine.** busybox grep lives at
+  `/bin/grep`, so every call exited 127, read as false, and an aborted scanner was filed as a
+  security finding on one of the three supported platforms. That is precisely the defect 1.74.1
+  was cut to fix. The absolute path was chosen on macOS to dodge an interactive shell that shims
+  `grep` to `ugrep`; dodging one platform's shim by hardcoding that platform's layout is how it
+  got in. The binary is now resolved once against the machine it is running on.
+- **Check 66 grew a sixth lane, and it is static on purpose.** The four behavioural lanes run with
+  `PATH="$c66_bin:/usr/bin:/bin"` on a machine where `/usr/bin/grep` exists, so they were green
+  through the entire life of the bug; only `tests/container-matrix.sh` saw it, and that runs after
+  you tag. The new lane refuses a `/usr/bin/<tool>` path in command position, which moves the class
+  to every push. It matches command position rather than any mention, so the resolver loop that
+  lists `/usr/bin/grep` as a candidate and probes it with `-x` does not trip it — a check that
+  reddens on its own fix teaches the next person to delete the check. Row 66f puts the shipped line
+  back; the sweep is 125 rows.
+- `releases/v1.74.1.md` records that lane as red with the failing RESULT line. The tag stays where
+  it is and nothing was published under it.
+
 ## 1.74.1 — 2026-09-05
 
 Two defects in the deep security lane, both found by pointing it at this repository instead of at
